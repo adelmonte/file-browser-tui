@@ -1,0 +1,194 @@
+mod actions;
+mod app;
+mod config;
+mod dirstate;
+mod events;
+mod fs;
+mod handler;
+mod icons;
+mod places;
+mod thumbs;
+mod ui;
+
+use std::{io::Write, sync::mpsc, time::Duration};
+
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use ratatui::crossterm::{execute, terminal::supports_keyboard_enhancement};
+use ratatui_image::picker::{Picker, ProtocolType};
+
+use app::App;
+use config::Config;
+
+fn main() -> anyhow::Result<()> {
+    // Log to file (stdout is occupied by TUI)
+    let log_file = std::fs::File::create("/tmp/file-browser-tui.log")?;
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("file_browser_tui=debug")),
+        )
+        .init();
+
+    let config = Config::load().unwrap_or_default();
+
+    // Enter alternate screen FIRST (required before Picker::from_query_stdio)
+    let mut terminal = ratatui::init();
+
+    execute!(std::io::stdout(), EnableMouseCapture)?;
+
+    // Kitty keyboard protocol: distinguishes Shift+Backspace etc. and reports
+    // event kinds (we filter to Press/Repeat so keys don't double-fire).
+    let kbd_enhanced = matches!(supports_keyboard_enhancement(), Ok(true));
+    if kbd_enhanced {
+        let _ = execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        );
+    }
+
+    // Query terminal capabilities AFTER alternate screen, BEFORE any event::read()
+    let picker = Picker::from_query_stdio().unwrap_or_else(|e| {
+        tracing::warn!("Picker::from_query_stdio failed: {e}");
+        Picker::halfblocks()
+    });
+
+    tracing::info!(
+        "Protocol: {:?}, font_size: {:?}",
+        picker.protocol_type(),
+        picker.font_size()
+    );
+
+    // Background event channels
+    let (dir_tx, dir_rx) = mpsc::channel();
+    let (mount_tx, mount_rx) = mpsc::channel();
+
+    let mut app = App::new(picker, config, dir_rx, mount_rx)?;
+
+    // Start background watchers
+    fs::watcher::spawn_dir_watcher(app.cwd.clone(), dir_tx.clone());
+    fs::mounts::spawn_mount_watcher(mount_tx);
+
+    let result = run(&mut app, &mut terminal, dir_tx);
+
+    if kbd_enhanced {
+        let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+    }
+    execute!(std::io::stdout(), DisableMouseCapture)?;
+    ratatui::restore();
+
+    // Persist config and per-dir view state
+    let _ = build_config(&app).save();
+    app.dirstates.save();
+
+    result
+}
+
+fn run(
+    app: &mut App,
+    terminal: &mut ratatui::DefaultTerminal,
+    dir_tx: mpsc::Sender<fs::watcher::DirEvent>,
+) -> anyhow::Result<()> {
+    // Bootstrap layout before first render so queue_visible_icons has correct areas
+    let sz = terminal.size()?;
+    app.main_area = ratatui::layout::Rect {
+        x: app.sidebar_w,
+        y: app::TOPBAR_H,
+        width: sz.width.saturating_sub(app.sidebar_w),
+        height: sz.height.saturating_sub(app::TOPBAR_H),
+    };
+    app.grid_cols = (app.main_area.width / app.cell_w).max(1);
+    app.last_terminal_size = ratatui::layout::Size { width: sz.width, height: sz.height };
+    app.queue_visible_icons();
+
+    let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
+
+    loop {
+        // Drain background results (icons, thumbs, dir events, mount events)
+        app.drain_channels();
+
+        // Render frame
+        terminal.draw(|f| ui::render(f, app))?;
+
+        // Clean up Kitty placements for images that vanished or changed
+        // this frame (occluded by overlays, scrolled away, dir changed, ...)
+        let (deletions, delete_all) = app.kitty_frame_diff();
+        if is_kitty && (delete_all || !deletions.is_empty()) {
+            let mut out = std::io::stdout().lock();
+            if delete_all {
+                let _ = ui::kitty::delete_all(&mut out);
+            } else {
+                let _ = ui::kitty::delete_at(&mut out, &deletions);
+            }
+            let _ = out.flush();
+        }
+
+        // Queue icons for newly visible cells after render updated grid_cols/grid_area
+        app.queue_visible_icons();
+
+        // Poll for terminal events
+        if event::poll(Duration::from_millis(16))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Release {
+                        continue;
+                    }
+                    if handler::handle_key(app, key) {
+                        break;
+                    }
+                    maybe_restart_watcher(app, &dir_tx);
+                }
+                Event::Mouse(mouse) => {
+                    handler::handle_mouse(app, mouse);
+                    maybe_restart_watcher(app, &dir_tx);  // restart watcher if navigated
+                }
+                Event::Resize(w, h) => {
+                    let new_size = ratatui::layout::Size { width: w, height: h };
+                    if new_size != app.last_terminal_size {
+                        app.last_terminal_size = new_size;
+                        // Reflowed layout: re-place everything cleanly
+                        app.icon_cache.clear_protocols();
+                        app.thumb_cache.clear_protocols();
+                        app.kitty_delete_all = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Restart the dir watcher when cwd has changed from what we're currently watching.
+fn maybe_restart_watcher(app: &mut App, dir_tx: &mpsc::Sender<fs::watcher::DirEvent>) {
+    if app.watched_path != app.cwd {
+        app.watched_path = app.cwd.clone();
+        fs::watcher::spawn_dir_watcher(app.cwd.clone(), dir_tx.clone());
+    }
+}
+
+fn build_config(app: &App) -> Config {
+    let mut config = app.config.clone();
+    config.places = app.places.iter().map(|p| config::PlaceConfig {
+        name: p.name.clone(),
+        path: p.path.clone(),
+        icon: p.icon.clone(),
+    }).collect();
+    config.default_view = app.view_mode;
+    config.sort = config::SortConfig {
+        field: app.sort.field,
+        ascending: app.sort.ascending,
+    };
+    config.show_hidden = app.show_hidden;
+    config.folders_first = app.folders_first;
+    config.icon_size_idx = app.icon_size_idx;
+    config.sidebar_w = app.sidebar_w;
+    config
+}

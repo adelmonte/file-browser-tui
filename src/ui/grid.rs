@@ -1,0 +1,338 @@
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Text},
+    widgets::{Block, Clear, Paragraph},
+};
+use ratatui_image::StatefulImage;
+
+use crate::app::App;
+use crate::events::{ClipOp, DragState};
+
+// 50% blend of Nord9 (129,161,193) with Nord0 (46,52,64) — semi-transparent look
+pub const NORD_SEL: (u8, u8, u8) = (88, 107, 128);
+pub const NORD_GREEN: (u8, u8, u8) = (163, 190, 140);
+
+const fn rgb(c: (u8, u8, u8)) -> Color {
+    Color::Rgb(c.0, c.1, c.2)
+}
+
+pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
+    (area.width / cell_w).max(1)
+}
+
+pub fn cell_at_pos(
+    col: u16, row: u16,
+    grid_area: Rect, scroll_offset: usize,
+    cols: u16, entry_count: usize,
+    cell_w: u16, cell_h: u16,
+) -> Option<usize> {
+    if col < grid_area.x || row < grid_area.y { return None; }
+    if col >= grid_area.x + grid_area.width || row >= grid_area.y + grid_area.height { return None; }
+    let cell_col = (col - grid_area.x) / cell_w;
+    if cell_col >= cols { return None; }
+    let cell_row = (row - grid_area.y) / cell_h;
+    let idx = (scroll_offset + cell_row as usize) * cols as usize + cell_col as usize;
+    if idx < entry_count { Some(idx) } else { None }
+}
+
+pub fn details_row_at_pos(
+    row: u16, grid_area: Rect, scroll_offset: usize, entry_count: usize,
+) -> Option<usize> {
+    if row < grid_area.y + 1 { return None; }
+    if row >= grid_area.y + grid_area.height { return None; }
+    let idx = scroll_offset + (row - grid_area.y - 1) as usize;
+    if idx < entry_count { Some(idx) } else { None }
+}
+
+pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
+    let cell_w = app.cell_w;
+    let cell_h = app.cell_h;
+    let icon_rows = app.icon_rows;
+
+    let cols = grid_cols(area, cell_w);
+    app.grid_cols = cols;
+    app.grid_area = area;
+
+    f.render_widget(Block::default(), area);
+
+    let entries_len = app.listing.entries.len();
+    if entries_len == 0 {
+        f.render_widget(
+            Paragraph::new("  (empty directory)").style(Style::default().add_modifier(Modifier::DIM)),
+            Rect { x: area.x + 2, y: area.y + 1, width: area.width.saturating_sub(4), height: 1 },
+        );
+        return;
+    }
+
+    // Compute a square-ish icon rect width using font pixel dimensions.
+    // This centers icon images and prevents edge-to-edge stretching.
+    let font = app.picker.font_size();
+    let img_h_cells = icon_rows.saturating_sub(1); // rows available after top-padding
+    let img_w_cells: u16 = if font.width > 0 && font.height > 0 && img_h_cells > 0 {
+        // pixel height of icon area → how many cell-columns that maps to
+        let h_px = img_h_cells as u32 * font.height as u32;
+        let w_cells = h_px / font.width as u32;
+        (w_cells as u16).clamp(4, cell_w)
+    } else {
+        cell_w.saturating_sub(2).max(4)
+    };
+    let img_x_off = (cell_w.saturating_sub(img_w_cells)) / 2;
+
+    let rows_visible = (area.height / cell_h + 2) as usize;
+
+    for row_idx in 0..rows_visible {
+        let abs_row = app.scroll_offset + row_idx;
+        for col_idx in 0..cols as usize {
+            let entry_idx = abs_row * cols as usize + col_idx;
+            if entry_idx >= entries_len { break; }
+
+            let cell_x = area.x + col_idx as u16 * cell_w;
+            let cell_y = area.y + row_idx as u16 * cell_h;
+            if cell_y >= area.y + area.height { break; }
+
+            let cell_rect = Rect { x: cell_x, y: cell_y, width: cell_w, height: cell_h };
+
+            // Centered, square-ish image rect (1 row top-padding, padded horizontally)
+            let icon_rect = Rect {
+                x: cell_x + img_x_off,
+                y: cell_y + 1,
+                width: img_w_cells,
+                height: img_h_cells,
+            };
+
+            let label_rect = Rect {
+                x: cell_x,
+                y: cell_y + icon_rows,
+                width: cell_w,
+                height: cell_h.saturating_sub(icon_rows),
+            };
+
+            let is_selected = app.selection == Some(entry_idx)
+                || app.multi_selection.contains(&entry_idx);
+            let is_drag_src = matches!(&app.drag_state,
+                DragState::Armed { item_idx, .. } | DragState::Dragging { item_idx, .. }
+                if *item_idx == entry_idx
+            );
+            let is_drag_target = matches!(&app.drag_state,
+                DragState::Dragging { hover_target: Some(t), .. }
+                if *t == entry_idx
+            );
+            let is_cut = app.clipboard.as_ref()
+                .map(|c| c.op == ClipOp::Cut
+                    && c.paths.contains(&app.listing.entries[entry_idx].path))
+                .unwrap_or(false);
+
+            // The icon image is composited onto the same bg color, so the
+            // highlight runs behind the icon as one full-cell rectangle.
+            let cell_bg: Option<(u8, u8, u8)> = if is_selected {
+                Some(NORD_SEL)
+            } else if is_drag_target {
+                Some(NORD_GREEN)
+            } else {
+                None
+            };
+
+            if let Some(bg) = cell_bg {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(rgb(bg))),
+                    cell_rect,
+                );
+            } else if is_drag_src || is_cut {
+                f.render_widget(
+                    Block::default().style(Style::default().add_modifier(Modifier::DIM)),
+                    cell_rect,
+                );
+            }
+
+            // Render icon/thumbnail image (skipped + placement-deleted under overlays)
+            render_cell_image(f, app, entry_idx, icon_rect, cell_rect, cell_bg);
+
+            let entry = &app.listing.entries[entry_idx];
+            let label_rows = cell_h.saturating_sub(icon_rows) as usize;
+
+            // Inline rename
+            if let Some(ref rename) = app.rename_state {
+                if rename.item_idx == entry_idx {
+                    let lines = wrap_label(&rename.input, cell_w as usize, label_rows);
+                    f.render_widget(
+                        Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))
+                            .style(Style::default().bg(rgb(NORD_SEL)).fg(Color::White).add_modifier(Modifier::BOLD)),
+                        label_rect,
+                    );
+                    continue;
+                }
+            }
+
+            let label_fg = if is_selected {
+                Style::default().bg(rgb(NORD_SEL)).fg(Color::White).add_modifier(Modifier::BOLD)
+            } else if is_drag_target {
+                Style::default().bg(rgb(NORD_GREEN)).fg(Color::Black).add_modifier(Modifier::BOLD)
+            } else if entry.is_dir {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let label_lines = wrap_label(&entry.name, cell_w as usize, label_rows);
+            f.render_widget(
+                Paragraph::new(lines_to_text_styled_centered(&label_lines, label_fg, cell_w as usize)),
+                label_rect,
+            );
+        }
+    }
+}
+
+fn render_cell_image(
+    f: &mut Frame,
+    app: &mut App,
+    entry_idx: usize,
+    icon_rect: Rect,
+    cell_rect: Rect,
+    bg: Option<(u8, u8, u8)>,
+) {
+    if icon_rect.width == 0 || icon_rect.height == 0 { return; }
+
+    // Occlusion: use the full cell rect so menus touching the label row also
+    // suppress the icon image (Kitty images always render above terminal text).
+    if app.overlay_rects.iter().any(|r| r.intersects(cell_rect)) {
+        return;
+    }
+
+    let entry_path = app.listing.entries[entry_idx].path.clone();
+    let is_media = app.listing.entries[entry_idx].mime_type.as_deref()
+        .map(|m| m.starts_with("image/") || m.starts_with("video/"))
+        .unwrap_or(false);
+
+    let cell_w = app.cell_w;
+    let icon_rows = app.icon_rows;
+
+    let drew = {
+        let proto = if is_media {
+            app.thumb_cache.get_mut(&app.picker, &entry_path, cell_w, icon_rows, bg)
+        } else {
+            app.icon_cache.get_mut(&app.picker, &entry_path, cell_w, icon_rows, bg)
+        };
+        if let Some(proto) = proto {
+            f.render_widget(Clear, icon_rect);
+            f.render_stateful_widget(StatefulImage::new(), icon_rect, proto);
+            true
+        } else {
+            false
+        }
+    };
+
+    if drew {
+        app.frame_images.insert(entry_path, (icon_rect, bg));
+    } else {
+        // Placeholder nerd font icon, centered in the cell
+        let entry = &app.listing.entries[entry_idx];
+        let placeholder = if entry.is_dir {
+            "\u{f07b}"
+        } else {
+            file_placeholder_icon(entry.path.extension().and_then(|e| e.to_str()).unwrap_or(""))
+        };
+        // Center 2-wide glyph horizontally and vertically within icon_rect
+        let px = icon_rect.x + icon_rect.width.saturating_sub(2) / 2;
+        let py = icon_rect.y + icon_rect.height / 2;
+        if px + 2 <= icon_rect.x + icon_rect.width {
+            f.render_widget(
+                Paragraph::new(placeholder).style(Style::default().add_modifier(Modifier::DIM)),
+                Rect { x: px, y: py, width: 2, height: 1 },
+            );
+        }
+    }
+}
+
+/// Wrap a name into at most `max_lines` lines of `max_cols` display-columns each.
+/// Last line gets an ellipsis if the name is still too long.
+fn wrap_label(name: &str, max_cols: usize, max_lines: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    if max_cols == 0 || max_lines == 0 { return vec![]; }
+    if name.is_empty() { return vec![String::new()]; }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut line_w = 0usize;
+    let chars: Vec<char> = name.chars().collect();
+    let total = chars.len();
+    let mut i = 0;
+
+    while i < total && lines.len() < max_lines {
+        let ch = chars[i];
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(1);
+        let is_last_line = lines.len() == max_lines - 1;
+
+        if line_w + cw > max_cols {
+            if is_last_line && i < total {
+                // Truncate with ellipsis: replace last char with '…'
+                while line_w + 1 > max_cols.saturating_sub(1) && !line.is_empty() {
+                    if let Some(last) = line.pop() {
+                        line_w -= UnicodeWidthChar::width(last).unwrap_or(1);
+                    }
+                }
+                line.push('\u{2026}');
+                lines.push(line);
+                return lines;
+            }
+            lines.push(line.clone());
+            line.clear();
+            line_w = 0;
+        }
+
+        if line_w + cw <= max_cols {
+            line.push(ch);
+            line_w += cw;
+            i += 1;
+        }
+    }
+
+    if !line.is_empty() && lines.len() < max_lines {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Pad a string to be visually centered in `col_width` display columns.
+fn center_line(s: &str, col_width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let w = UnicodeWidthStr::width(s);
+    if w >= col_width { return s.to_string(); }
+    let pad = (col_width - w) / 2;
+    format!("{:pad$}{s}", "")
+}
+
+fn lines_to_text_centered<'a>(lines: &'a [String], col_width: usize) -> Text<'a> {
+    lines.iter()
+        .map(|l| Line::raw(center_line(l, col_width)))
+        .collect::<Vec<_>>().into()
+}
+
+fn lines_to_text_styled_centered<'a>(lines: &'a [String], style: Style, col_width: usize) -> Text<'a> {
+    lines.iter()
+        .map(|l| Line::styled(center_line(l, col_width), style))
+        .collect::<Vec<_>>().into()
+}
+
+pub fn file_placeholder_icon_pub(ext: &str) -> &'static str {
+    file_placeholder_icon(ext)
+}
+
+fn file_placeholder_icon(ext: &str) -> &'static str {
+    match ext.to_lowercase().as_str() {
+        "rs"                                           => "\u{e7a8}",
+        "py"                                           => "\u{e73c}",
+        "js" | "ts"                                    => "\u{e74e}",
+        "html" | "htm"                                 => "\u{e736}",
+        "css" | "scss"                                 => "\u{e749}",
+        "json" | "toml" | "yaml" | "yml"               => "\u{e60b}",
+        "md"                                           => "\u{f48a}",
+        "pdf"                                          => "\u{f1c1}",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "\u{f03e}",
+        "mp4" | "mkv" | "avi" | "mov" | "webm"        => "\u{f03d}",
+        "mp3" | "flac" | "ogg" | "wav" | "aac"        => "\u{f001}",
+        "zip" | "tar" | "gz" | "xz" | "bz2" | "zst"  => "\u{f1c6}",
+        _                                              => "\u{f15b}",
+    }
+}

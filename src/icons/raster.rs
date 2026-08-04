@@ -1,0 +1,56 @@
+use std::{path::{Path, PathBuf}, process::{Command, Stdio}};
+
+use image::DynamicImage;
+
+/// Load an icon image, rasterizing SVG via rsvg-convert if needed.
+/// Rasterized SVGs are cached persistently so each icon converts once per size.
+pub fn load_icon(path: &Path, is_svg: bool, target_px: u32) -> anyhow::Result<DynamicImage> {
+    if !is_svg {
+        let img = image::open(path)?;
+        return Ok(img.resize(target_px, target_px, image::imageops::FilterType::Lanczos3));
+    }
+
+    let cached = raster_cache_path(path, target_px);
+    if cached.exists() {
+        return Ok(image::open(&cached)?);
+    }
+    if let Some(parent) = cached.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp = cached.with_extension("tmp.png");
+    let status = Command::new("rsvg-convert")
+        .args([
+            "-w", &target_px.to_string(),
+            "-h", &target_px.to_string(),
+            "-o", tmp.to_string_lossy().as_ref(),
+            path.to_string_lossy().as_ref(),
+        ])
+        .stderr(Stdio::null())
+        .status()?;
+
+    if !status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::bail!("rsvg-convert failed for {:?}", path);
+    }
+
+    std::fs::rename(&tmp, &cached)?;
+    Ok(image::open(&cached)?)
+}
+
+fn raster_cache_path(svg_path: &Path, target_px: u32) -> PathBuf {
+    let stem = svg_path.file_stem().and_then(|s| s.to_str()).unwrap_or("icon");
+    let hash = hash_path(svg_path);
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("file-browser-tui/icons")
+        .join(format!("{stem}-{target_px}-{hash:016x}.png"))
+}
+
+fn hash_path(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let mut h = DefaultHasher::new();
+    path.hash(&mut h);
+    h.finish()
+}
