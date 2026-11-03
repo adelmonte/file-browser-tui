@@ -83,74 +83,25 @@ pub fn query_gio_info(path: &Path) -> (Vec<String>, Option<String>) {
     (icon_names, mime_type)
 }
 
-/// Resolve an icon name to a filesystem path by searching icon themes.
-/// Returns (path, is_svg).
+/// Resolve icon names to a file through the user's icon theme and the
+/// themes it inherits from (see `theme`). Returns (path, is_svg).
 pub fn resolve_icon_path(icon_names: &[String], is_dir: bool) -> Option<(PathBuf, bool)> {
-    let theme_dirs: &[(&str, &[&str])] = &[
-        ("/usr/share/icons/Tela-nord-dark", &["256x256", "scalable"]),
-        ("/home/user/.local/share/icons/Tela-nord-dark", &["256x256", "scalable"]),
-        ("/usr/share/icons/Papirus-Dark", &["64x64", "48x48"]),
-        ("/usr/share/icons/hicolor", &["scalable", "48x48"]),
-    ];
-
-    let contexts = &["places", "apps", "mimetypes", "devices", "filesystems"];
-
-    for name in icon_names {
-        for (theme_root, size_dirs) in theme_dirs {
-            for size_dir in *size_dirs {
-                let is_scalable = *size_dir == "scalable";
-                for ctx in contexts {
-                    let base = PathBuf::from(theme_root).join(size_dir).join(ctx);
-
-                    // Try PNG first (Tela-nord-dark 256x256 has PNGs)
-                    let png = base.join(format!("{name}.png"));
-                    if png.exists() {
-                        return Some((png, false));
-                    }
-
-                    // Try SVG
-                    if is_scalable || *size_dir != "256x256" {
-                        let svg = base.join(format!("{name}.svg"));
-                        if svg.exists() {
-                            return Some((svg, true));
-                        }
-                    }
-                    // For non-scalable dirs that might have SVGs (Papirus)
-                    let svg = base.join(format!("{name}.svg"));
-                    if svg.exists() {
-                        return Some((svg, true));
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback
-    fallback_icon(is_dir)
+    icon_names.iter()
+        .find_map(|n| super::theme::lookup(n))
+        .or_else(|| super::theme::lookup(if is_dir { "folder" } else { "text-x-generic" }))
 }
 
-fn fallback_icon(is_dir: bool) -> Option<(PathBuf, bool)> {
-    let fallback_name = if is_dir { "folder" } else { "text-x-generic" };
-    let theme_dirs = [
-        "/usr/share/icons/Tela-nord-dark",
-        "/usr/share/icons/Papirus-Dark",
-        "/usr/share/icons/hicolor",
-    ];
-    let size_dirs = ["256x256", "scalable", "64x64", "48x48"];
-    let contexts = ["places", "apps", "mimetypes"];
-
-    for theme in &theme_dirs {
-        for size in &size_dirs {
-            for ctx in &contexts {
-                let base = PathBuf::from(theme).join(size).join(ctx);
-                let png = base.join(format!("{fallback_name}.png"));
-                if png.exists() { return Some((png, false)); }
-                let svg = base.join(format!("{fallback_name}.svg"));
-                if svg.exists() { return Some((svg, true)); }
-            }
+/// A custom folder icon set in Dolphin (Icon= in the folder's .directory).
+pub fn directory_icon(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(".directory")).ok()?;
+    let mut in_entry = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_entry = line == "[Desktop Entry]";
+        } else if in_entry && let Some(v) = line.strip_prefix("Icon=") {
+            return Some(v.trim().to_string()).filter(|v| !v.is_empty());
         }
     }
     None
 }
-
 

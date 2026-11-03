@@ -1,4 +1,5 @@
 pub mod folder_preview;
+mod theme;
 pub mod raster;
 pub mod resolver;
 
@@ -77,6 +78,7 @@ impl IconCache {
     /// `folder_previews`: follow each folder icon with a version showing
     /// previews of its media (see `folder_preview`).
     pub fn new(folder_previews: bool) -> Self {
+        theme::prewarm();
         let (tx_work, rx_work) = mpsc::sync_channel::<IconRequest>(128);
         let (tx_image, rx_image) = mpsc::channel::<IconImageReady>();
 
@@ -86,6 +88,9 @@ impl IconCache {
                 rayon::spawn(move || {
                     let (mut icon_names, mime) = resolver::resolve_names_and_mime(&req.path, req.is_dir);
                     if let Some(name) = req.icon_override {
+                        icon_names.insert(0, name);
+                    }
+                    if req.is_dir && let Some(name) = resolver::directory_icon(&req.path) {
                         icon_names.insert(0, name);
                     }
                     let resolved = resolver::resolve_icon_path(&icon_names, req.is_dir);
