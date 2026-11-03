@@ -13,7 +13,7 @@ use crate::{
     icons::IconCache,
     places::PlaceEntry,
     thumbs::ThumbCache,
-    ui::menu::MenuState,
+    ui::menu::{MenuState, MenuTarget},
     ui::properties::PropertiesState,
 };
 
@@ -272,13 +272,67 @@ impl App {
     }
 
     pub fn reload_dir(&mut self) {
-        match crate::fs::read_dir(&self.cwd, self.show_hidden, self.folders_first, &self.sort) {
-            Ok(listing) => {
-                self.listing = listing;
-                self.selection = self.selection.filter(|&s| s < self.listing.entries.len());
-                self.multi_selection.retain(|&i| i < self.listing.entries.len());
+        let mut listing = match crate::fs::read_dir(&self.cwd, self.show_hidden, self.folders_first, &self.sort) {
+            Ok(listing) => listing,
+            Err(e) => { tracing::error!("reload_dir: {e}"); return; }
+        };
+
+        // Mime types are only resolved once per path; restore them so media
+        // entries keep showing thumbnails instead of generic icons.
+        for entry in &mut listing.entries {
+            if let Some(mime) = self.icon_cache.cached_mime(&entry.path) {
+                entry.mime_type = mime.clone();
             }
-            Err(e) => tracing::error!("reload_dir: {e}"),
+        }
+
+        let old = std::mem::replace(&mut self.listing, listing);
+        self.remap_indices(&old);
+    }
+
+    /// Re-point every index into the listing at the same path in the new
+    /// listing, so a reload never shifts state onto a different file.
+    fn remap_indices(&mut self, old: &DirListing) {
+        let new_idx: HashMap<&std::path::Path, usize> = self.listing.entries.iter()
+            .enumerate()
+            .map(|(i, e)| (e.path.as_path(), i))
+            .collect();
+        let remap = |i: usize| old.entries.get(i).and_then(|e| new_idx.get(e.path.as_path()).copied());
+
+        self.selection = self.selection.and_then(remap);
+        self.selection_anchor = self.selection_anchor.and_then(remap);
+        self.multi_selection = self.multi_selection.iter().filter_map(|&i| remap(i)).collect();
+        self.click_tracker.remap(remap);
+
+        if let Some(rename) = &mut self.rename_state {
+            match remap(rename.item_idx) {
+                Some(i) => rename.item_idx = i,
+                None => self.rename_state = None,
+            }
+        }
+
+        match &mut self.drag_state {
+            DragState::Idle => {}
+            DragState::Armed { item_idx, .. } => match remap(*item_idx) {
+                Some(i) => *item_idx = i,
+                None => self.drag_state = DragState::Idle,
+            },
+            DragState::Dragging { item_idx, hover_target, .. } => match remap(*item_idx) {
+                Some(i) => {
+                    *item_idx = i;
+                    *hover_target = hover_target.and_then(remap);
+                }
+                None => self.drag_state = DragState::Idle,
+            },
+        }
+
+        if let Some(MenuState { target: MenuTarget::Entry(idx), .. }) = &mut self.menu {
+            match remap(*idx) {
+                Some(i) => *idx = i,
+                None => {
+                    self.menu = None;
+                    self.kitty_delete_all = true;
+                }
+            }
         }
     }
 
@@ -331,9 +385,8 @@ impl App {
             state.sort_field,
             state.sort_ascending,
         );
-        if let Some(v) = view {
-            if v != self.view_mode { self.view_mode = v; }
-        }
+        if let Some(v) = view
+            && v != self.view_mode { self.view_mode = v; }
         if let Some(idx) = size {
             self.set_icon_size(idx.min(ICON_SIZES.len() - 1));
         }
@@ -376,7 +429,7 @@ impl App {
     pub fn icon_target_px(&self) -> u32 {
         let fs = self.picker.font_size();
         let px = fs.width as u32 * self.cell_w as u32;
-        px.max(32).min(256)
+        px.clamp(32, 256)
     }
 
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).
@@ -439,16 +492,16 @@ impl App {
     pub fn drain_channels(&mut self) {
         let mime_updates = self.icon_cache.drain_ready();
         for (path, mime) in mime_updates {
-            if let Some(entry) = self.listing.entries.iter_mut().find(|e| e.path == path) {
-                if entry.mime_type.is_none() {
+            if let Some(entry) = self.listing.entries.iter_mut().find(|e| e.path == path)
+                && entry.mime_type.is_none() {
                     entry.mime_type = mime;
                 }
-            }
         }
 
         self.thumb_cache.drain_ready();
 
-        if self.dir_event_rx.try_recv().is_ok() {
+        // Coalesce bursts of events into a single reload
+        if self.dir_event_rx.try_iter().count() > 0 {
             self.reload_dir();
         }
 
@@ -499,18 +552,17 @@ impl App {
     }
 
     pub fn open_selected(&self) {
-        if let Some(idx) = self.selection {
-            if let Some(entry) = self.listing.entries.get(idx) {
+        if let Some(idx) = self.selection
+            && let Some(entry) = self.listing.entries.get(idx) {
                 if entry.is_dir { return; }
                 let _ = std::process::Command::new("xdg-open").arg(&entry.path)
                     .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
             }
-        }
     }
 
     pub fn enter_selected(&mut self) {
-        if let Some(idx) = self.selection {
-            if let Some(entry) = self.listing.entries.get(idx).cloned() {
+        if let Some(idx) = self.selection
+            && let Some(entry) = self.listing.entries.get(idx).cloned() {
                 if entry.is_dir {
                     self.navigate_to(entry.path);
                 } else {
@@ -518,7 +570,6 @@ impl App {
                     .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
                 }
             }
-        }
     }
 
     pub fn move_selection(&mut self, delta: i32) {
@@ -578,21 +629,47 @@ impl App {
         }
     }
 
+    /// Apply the inline rename. Invalid names, existing targets and failed
+    /// renames keep the editor open (flagged invalid) instead of committing.
     pub fn commit_rename(&mut self) {
-        if let Some(ref state) = self.rename_state.clone() {
-            if let Some(entry) = self.listing.entries.get(state.item_idx) {
-                let new_path = entry.path.parent()
-                    .map(|p| p.join(&state.input))
-                    .unwrap_or_else(|| PathBuf::from(&state.input));
-                if new_path != entry.path {
-                    if let Err(e) = std::fs::rename(&entry.path, &new_path) {
-                        tracing::error!("rename: {e}");
-                    }
-                }
+        let Some(state) = &mut self.rename_state else { return; };
+        let Some(entry) = self.listing.entries.get(state.item_idx) else {
+            self.rename_state = None;
+            return;
+        };
+
+        let name = state.input.as_str();
+        if name == entry.name {
+            self.rename_state = None;
+            return;
+        }
+        if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+            state.invalid = true;
+            return;
+        }
+
+        let new_path = entry.path.with_file_name(name);
+        if let Ok(target) = std::fs::symlink_metadata(&new_path) {
+            // Allow case-only renames on case-insensitive filesystems, where
+            // the "existing" target is the entry itself.
+            use std::os::unix::fs::MetadataExt;
+            let same_file = std::fs::symlink_metadata(&entry.path)
+                .is_ok_and(|m| m.dev() == target.dev() && m.ino() == target.ino());
+            if !same_file {
+                tracing::warn!("rename: {:?} already exists", new_path);
+                state.invalid = true;
+                return;
             }
+        }
+
+        if let Err(e) = std::fs::rename(&entry.path, &new_path) {
+            tracing::error!("rename: {e}");
+            state.invalid = true;
+            return;
         }
         self.rename_state = None;
         self.reload_dir();
+        self.selection = self.listing.entries.iter().position(|e| e.path == new_path);
     }
 
     /// Recompute path completions from the current `path_bar_input`.
@@ -651,14 +728,13 @@ impl App {
     pub fn execute_drop(&mut self, src_idx: usize, dst_idx: usize, copy: bool) {
         let src = self.listing.entries.get(src_idx).map(|e| e.path.clone());
         let dst = self.listing.entries.get(dst_idx).map(|e| e.path.clone());
-        if let (Some(src), Some(dst)) = (src, dst) {
-            if dst.is_dir() {
+        if let (Some(src), Some(dst)) = (src, dst)
+            && dst.is_dir() {
                 let op = if copy { "copy" } else { "move" };
                 let _ = std::process::Command::new("gio")
                     .args([op, src.to_str().unwrap_or(""), dst.to_str().unwrap_or("")])
                     .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
                     .spawn();
             }
-        }
     }
 }

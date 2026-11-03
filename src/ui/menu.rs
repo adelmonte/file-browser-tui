@@ -385,11 +385,10 @@ pub fn handle_menu_key(menu: &mut MenuState, code: KeyCode) -> MenuOutcome {
                 menu.submenu_selected = step_selection(&sub, menu.submenu_selected, 1);
             }
             KeyCode::Enter => {
-                if let Some(item) = sub.get(menu.submenu_selected) {
-                    if item.selectable() {
+                if let Some(item) = sub.get(menu.submenu_selected)
+                    && item.selectable() {
                         return MenuOutcome::Action(item.action.clone());
                     }
-                }
             }
             _ => {}
         }
@@ -481,17 +480,15 @@ pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcom
 pub fn handle_menu_hover(menu: &mut MenuState, col: u16, row: u16) {
     if menu.submenu_open {
         let sub = &menu.items[menu.selected].submenu;
-        if let Some(idx) = item_at(menu.submenu_rect, sub, col, row) {
-            if sub[idx].selectable() {
+        if let Some(idx) = item_at(menu.submenu_rect, sub, col, row)
+            && sub[idx].selectable() {
                 menu.submenu_selected = idx;
             }
-        }
         return;
     }
     let items = menu.items.clone();
-    if let Some(idx) = item_at(menu.rect, &items, col, row) {
-        if items[idx].selectable() {
+    if let Some(idx) = item_at(menu.rect, &items, col, row)
+        && items[idx].selectable() {
             menu.selected = idx;
         }
-    }
 }

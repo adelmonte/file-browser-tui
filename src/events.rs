@@ -97,6 +97,11 @@ impl ClickTracker {
         }
     }
 
+    /// Follow the last-clicked item to its new index after a listing reload.
+    pub fn remap(&mut self, f: impl Fn(usize) -> Option<usize>) {
+        self.last_item = self.last_item.and_then(f);
+    }
+
     pub fn reset(&mut self) {
         self.last_item = None;
         self.last_time = None;
@@ -112,6 +117,8 @@ pub struct RenameState {
     pub item_idx: usize,
     pub input: String,
     pub cursor_pos: usize,
+    /// Last commit was rejected (bad name or target exists); cleared on edit.
+    pub invalid: bool,
 }
 
 impl RenameState {
@@ -121,10 +128,12 @@ impl RenameState {
             item_idx,
             input: current_name.to_string(),
             cursor_pos: len,
+            invalid: false,
         }
     }
 
     pub fn insert_char(&mut self, c: char) {
+        self.invalid = false;
         self.input.insert(self.cursor_pos, c);
         self.cursor_pos += c.len_utf8();
     }
@@ -149,6 +158,7 @@ impl RenameState {
 
     pub fn delete_before_cursor(&mut self) {
         if self.cursor_pos > 0 {
+            self.invalid = false;
             // Find the previous char boundary
             let mut pos = self.cursor_pos;
             loop {

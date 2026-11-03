@@ -40,7 +40,10 @@ type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>);
 
 pub struct IconCache {
     /// Raw rasterized icons keyed by path; protocols are rebuilt from these.
-    images: LruCache<PathBuf, image::DynamicImage>,
+    /// `None` = resolved but no icon found (don't re-request).
+    images: LruCache<PathBuf, Option<image::DynamicImage>>,
+    /// Resolved mime types; independent of icon size, so survives `clear`.
+    mimes: LruCache<PathBuf, Option<String>>,
     protocols: LruCache<ProtoKey, StatefulProtocol>,
     tx_work: mpsc::SyncSender<IconRequest>,
     rx_image: mpsc::Receiver<IconImageReady>,
@@ -76,6 +79,7 @@ impl IconCache {
         Self {
             images: LruCache::new(NonZeroUsize::new(1000).unwrap()),
             protocols: LruCache::new(NonZeroUsize::new(500).unwrap()),
+            mimes: LruCache::new(NonZeroUsize::new(20_000).unwrap()),
             tx_work,
             rx_image,
             pending: HashSet::new(),
@@ -87,13 +91,16 @@ impl IconCache {
         if self.images.contains(path) || self.pending.contains(path) {
             return;
         }
-        self.pending.insert(path.to_path_buf());
-        let _ = self.tx_work.try_send(IconRequest {
-            path: path.to_path_buf(),
-            is_dir,
-            target_px,
-            icon_override,
-        });
+        let req = IconRequest { path: path.to_path_buf(), is_dir, target_px, icon_override };
+        // Only mark pending if queued; a full queue is retried next frame
+        if self.tx_work.try_send(req).is_ok() {
+            self.pending.insert(path.to_path_buf());
+        }
+    }
+
+    /// Mime type from a previous resolution of this path, if any.
+    pub fn cached_mime(&self, path: &Path) -> Option<&Option<String>> {
+        self.mimes.peek(path)
     }
 
     /// Drain completed icon loads; returns mime type updates for each path.
@@ -101,9 +108,8 @@ impl IconCache {
         let mut mime_updates = Vec::new();
         while let Ok(ready) = self.rx_image.try_recv() {
             self.pending.remove(&ready.path);
-            if let Some(img) = ready.image {
-                self.images.put(ready.path.clone(), img);
-            }
+            self.images.put(ready.path.clone(), ready.image);
+            self.mimes.put(ready.path.clone(), ready.mime_type.clone());
             mime_updates.push((ready.path, ready.mime_type));
         }
         mime_updates
@@ -120,7 +126,7 @@ impl IconCache {
     ) -> Option<&mut StatefulProtocol> {
         let key = (path.to_path_buf(), cell_w, cell_h, bg);
         if !self.protocols.contains(&key) {
-            let img = self.images.get(path)?;
+            let img = self.images.get(path)?.as_ref()?;
             let img = match bg {
                 Some(rgb) => flatten_onto(img, rgb),
                 None => img.clone(),

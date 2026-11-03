@@ -21,19 +21,27 @@ pub struct DirState {
 #[derive(Debug, Default)]
 pub struct DirStates {
     map: HashMap<String, DirState>,
+    /// Set when the on-disk file failed to parse, so we never overwrite it.
+    pub load_error: Option<String>,
 }
 
 impl DirStates {
     pub fn load() -> Self {
         let path = state_path();
-        let map = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| toml::from_str(&text).ok())
-            .unwrap_or_default();
-        Self { map }
+        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default(); };
+        match toml::from_str(&text) {
+            Ok(map) => Self { map, load_error: None },
+            Err(e) => {
+                tracing::error!("dirstate {}: {e}", path.display());
+                Self { map: HashMap::new(), load_error: Some(format!("{}: {e}", path.display())) }
+            }
+        }
     }
 
     pub fn save(&self) {
+        if self.load_error.is_some() {
+            return;
+        }
         let path = state_path();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);

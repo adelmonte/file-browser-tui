@@ -25,9 +25,8 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
                     app.enter_selected();
                 }
                 _ => {
-                    if let Some(path) = target_path(app, target) {
-                        if path.is_dir() { app.navigate_to(path); }
-                    }
+                    if let Some(path) = target_path(app, target)
+                        && path.is_dir() { app.navigate_to(path); }
                 }
             }
         }
@@ -192,11 +191,9 @@ fn copy_to_clipboard(text: &str) {
     if let Ok(mut child) = Command::new("wl-copy")
         .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
+        && let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
-    }
 }
 
 fn base64_encode(data: &[u8]) -> String {

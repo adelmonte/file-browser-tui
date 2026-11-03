@@ -33,7 +33,13 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config = Config::load().unwrap_or_default();
+    let (config, config_err) = match Config::load() {
+        Ok(c) => (c, None),
+        Err(e) => {
+            tracing::error!("config: {e:#}");
+            (Config::unwritable(), Some(e))
+        }
+    };
 
     // Enter alternate screen FIRST (required before Picker::from_query_stdio)
     let mut terminal = ratatui::init();
@@ -72,10 +78,13 @@ fn main() -> anyhow::Result<()> {
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
 
     // Start background watchers
-    fs::watcher::spawn_dir_watcher(app.cwd.clone(), dir_tx.clone());
+    let dir_watcher = fs::watcher::DirWatcher::spawn(dir_tx);
+    if let Some(w) = &dir_watcher {
+        w.watch(&app.cwd);
+    }
     fs::mounts::spawn_mount_watcher(mount_tx);
 
-    let result = run(&mut app, &mut terminal, dir_tx);
+    let result = run(&mut app, &mut terminal, dir_watcher.as_ref());
 
     if kbd_enhanced {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
@@ -87,13 +96,20 @@ fn main() -> anyhow::Result<()> {
     let _ = build_config(&app).save();
     app.dirstates.save();
 
+    if let Some(e) = config_err {
+        eprintln!("file-browser-tui: config not loaded or saved: {e:#}");
+    }
+    if let Some(e) = &app.dirstates.load_error {
+        eprintln!("file-browser-tui: dirstate not loaded or saved: {e}");
+    }
+
     result
 }
 
 fn run(
     app: &mut App,
     terminal: &mut ratatui::DefaultTerminal,
-    dir_tx: mpsc::Sender<fs::watcher::DirEvent>,
+    dir_watcher: Option<&fs::watcher::DirWatcher>,
 ) -> anyhow::Result<()> {
     // Bootstrap layout before first render so queue_visible_icons has correct areas
     let sz = terminal.size()?;
@@ -142,11 +158,11 @@ fn run(
                     if handler::handle_key(app, key) {
                         break;
                     }
-                    maybe_restart_watcher(app, &dir_tx);
+                    maybe_restart_watcher(app, dir_watcher);
                 }
                 Event::Mouse(mouse) => {
                     handler::handle_mouse(app, mouse);
-                    maybe_restart_watcher(app, &dir_tx);  // restart watcher if navigated
+                    maybe_restart_watcher(app, dir_watcher);  // restart watcher if navigated
                 }
                 Event::Resize(w, h) => {
                     let new_size = ratatui::layout::Size { width: w, height: h };
@@ -166,11 +182,13 @@ fn run(
     Ok(())
 }
 
-/// Restart the dir watcher when cwd has changed from what we're currently watching.
-fn maybe_restart_watcher(app: &mut App, dir_tx: &mpsc::Sender<fs::watcher::DirEvent>) {
+/// Re-point the dir watcher when cwd has changed from what we're currently watching.
+fn maybe_restart_watcher(app: &mut App, dir_watcher: Option<&fs::watcher::DirWatcher>) {
     if app.watched_path != app.cwd {
         app.watched_path = app.cwd.clone();
-        fs::watcher::spawn_dir_watcher(app.cwd.clone(), dir_tx.clone());
+        if let Some(w) = dir_watcher {
+            w.watch(&app.cwd);
+        }
     }
 }
 

@@ -75,8 +75,8 @@ impl PropertiesState {
 
         let free = nix::sys::statvfs::statvfs(path)
             .map(|vfs| {
-                let free = vfs.blocks_available() as u64 * vfs.fragment_size() as u64;
-                let total = vfs.blocks() as u64 * vfs.fragment_size() as u64;
+                let free = vfs.blocks_available() * vfs.fragment_size();
+                let total = vfs.blocks() * vfs.fragment_size();
                 format!("{} free of {}", human_size(free), human_size(total))
             })
             .unwrap_or_else(|_| "\u{2014}".into());
@@ -118,11 +118,10 @@ impl PropertiesState {
         while let Ok(v) = rx.try_recv() {
             latest = Some(v);
         }
-        if let Some((items, bytes)) = latest {
-            if let Some(row) = self.rows.iter_mut().find(|(k, _)| k == "Size") {
+        if let Some((items, bytes)) = latest
+            && let Some(row) = self.rows.iter_mut().find(|(k, _)| k == "Size") {
                 row.1 = format!("{} ({} items)", human_size(bytes), items);
             }
-        }
     }
 }
 
@@ -131,7 +130,7 @@ fn walk(dir: &Path, items: &mut u64, bytes: &mut u64, tx: &mpsc::Sender<(u64, u6
     for entry in rd.flatten() {
         let Ok(meta) = entry.metadata() else { continue; };
         *items += 1;
-        if *items % 2048 == 0 {
+        if (*items).is_multiple_of(2048) {
             let _ = tx.send((*items, *bytes));
         }
         if meta.is_dir() {

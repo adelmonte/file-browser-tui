@@ -62,11 +62,11 @@ impl ThumbCache {
         if self.images.contains(path) || self.pending.contains(path) {
             return;
         }
-        self.pending.insert(path.to_path_buf());
-        let _ = self.tx_work.try_send(ThumbRequest {
-            path: path.to_path_buf(),
-            mime_type: mime_type.to_string(),
-        });
+        let req = ThumbRequest { path: path.to_path_buf(), mime_type: mime_type.to_string() };
+        // Only mark pending if queued; a full queue is retried next frame
+        if self.tx_work.try_send(req).is_ok() {
+            self.pending.insert(path.to_path_buf());
+        }
     }
 
     pub fn drain_ready(&mut self) {

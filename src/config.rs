@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::app::{SortField, ViewMode};
@@ -30,6 +30,9 @@ pub struct Config {
     pub folder_icons: HashMap<String, String>,
     #[serde(default)]
     pub context_menu: ContextMenuConfig,
+    /// Set when the on-disk config failed to parse, so we never overwrite it.
+    #[serde(skip)]
+    read_only: bool,
 }
 
 fn default_icon_size() -> usize { 4 }
@@ -111,6 +114,7 @@ impl Default for Config {
             terminal_command: String::new(),
             folder_icons: HashMap::new(),
             context_menu: ContextMenuConfig::default(),
+            read_only: false,
         }
     }
 }
@@ -120,13 +124,21 @@ impl Config {
         let path = config_path();
         if path.exists() {
             let text = std::fs::read_to_string(&path)?;
-            Ok(toml::from_str(&text)?)
+            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
         } else {
             Ok(Config::default())
         }
     }
 
+    /// Defaults that will not be written back (used when loading failed).
+    pub fn unwritable() -> Self {
+        Self { read_only: true, ..Self::default() }
+    }
+
     pub fn save(&self) -> Result<()> {
+        if self.read_only {
+            return Ok(());
+        }
         let path = config_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

@@ -13,6 +13,7 @@ use crate::events::{ClipOp, DragState};
 // 50% blend of Nord9 (129,161,193) with Nord0 (46,52,64) — semi-transparent look
 pub const NORD_SEL: (u8, u8, u8) = (88, 107, 128);
 pub const NORD_GREEN: (u8, u8, u8) = (163, 190, 140);
+pub const NORD_RED: (u8, u8, u8) = (191, 97, 106);
 
 const fn rgb(c: (u8, u8, u8)) -> Color {
     Color::Rgb(c.0, c.1, c.2)
@@ -23,10 +24,10 @@ pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
 }
 
 pub fn cell_at_pos(
-    col: u16, row: u16,
+    (col, row): (u16, u16),
     grid_area: Rect, scroll_offset: usize,
     cols: u16, entry_count: usize,
-    cell_w: u16, cell_h: u16,
+    (cell_w, cell_h): (u16, u16),
 ) -> Option<usize> {
     if col < grid_area.x || row < grid_area.y { return None; }
     if col >= grid_area.x + grid_area.width || row >= grid_area.y + grid_area.height { return None; }
@@ -153,16 +154,16 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             let label_rows = cell_h.saturating_sub(icon_rows) as usize;
 
             // Inline rename
-            if let Some(ref rename) = app.rename_state {
-                if rename.item_idx == entry_idx {
+            if let Some(ref rename) = app.rename_state
+                && rename.item_idx == entry_idx {
                     let lines = wrap_label(&rename.input, cell_w as usize, label_rows);
+                    let bg = if rename.invalid { NORD_RED } else { NORD_SEL };
                     f.render_widget(
                         Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))
-                            .style(Style::default().bg(rgb(NORD_SEL)).fg(Color::White).add_modifier(Modifier::BOLD)),
+                            .style(Style::default().bg(rgb(bg)).fg(Color::White).add_modifier(Modifier::BOLD)),
                         label_rect,
                     );
                     continue;
-                }
             }
 
             let label_fg = if is_selected {

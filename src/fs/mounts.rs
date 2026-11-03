@@ -108,16 +108,14 @@ fn unescape_mountpoint(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            if let (Some(&a), Some(&b), Some(&c)) = (bytes.get(i + 1), bytes.get(i + 2), bytes.get(i + 3)) {
-                if a.is_ascii_digit() && b.is_ascii_digit() && c.is_ascii_digit() {
+        if bytes[i] == b'\\'
+            && let (Some(&a), Some(&b), Some(&c)) = (bytes.get(i + 1), bytes.get(i + 2), bytes.get(i + 3))
+                && a.is_ascii_digit() && b.is_ascii_digit() && c.is_ascii_digit() {
                     let val = (a - b'0') * 64 + (b - b'0') * 8 + (c - b'0');
                     out.push(val as char);
                     i += 4;
                     continue;
                 }
-            }
-        }
         out.push(bytes[i] as char);
         i += 1;
     }

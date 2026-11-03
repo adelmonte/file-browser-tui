@@ -30,11 +30,10 @@ fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     let count = app.listing.entries.len();
     match app.view_mode {
         ViewMode::Icons => {
-            cell_at_pos(col, row, app.grid_area, app.scroll_offset, app.grid_cols, count, app.cell_w, app.cell_h)
+            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (app.cell_w, app.cell_h))
         }
         ViewMode::Compact => {
-            let compact_cols = (app.grid_area.width / COMPACT_CELL_W).max(1);
-            cell_at_pos(col, row, app.grid_area, app.scroll_offset, compact_cols, count, COMPACT_CELL_W, COMPACT_CELL_H)
+            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
         }
         ViewMode::Details => {
             details_row_at_pos(row, app.grid_area, app.scroll_offset, count)
@@ -156,9 +155,8 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                     Some(std::path::PathBuf::from(app.path_bar_input.trim()))
                 };
                 app.cancel_path_edit();
-                if let Some(path) = target {
-                    if path.is_dir() { app.navigate_to(path); }
-                }
+                if let Some(path) = target
+                    && path.is_dir() { app.navigate_to(path); }
             }
             KeyCode::Tab => {
                 let sel = app.path_completion_sel.unwrap_or(0);
@@ -367,9 +365,8 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                     crate::events::SidebarTarget::Device(i) =>
                         app.devices.get(i).map(|d| std::path::PathBuf::from(&d.path)),
                 };
-                if let Some(path) = path {
-                    if path.exists() { app.navigate_to(path); }
-                }
+                if let Some(path) = path
+                    && path.exists() { app.navigate_to(path); }
                 return;
             }
             if sidebar::contains(app, col, row) { return; }
@@ -451,12 +448,11 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::Up(MouseButton::Left) => {
             app.sidebar_dragging = false;
-            if let DragState::Dragging { item_idx, hover_target, .. } = app.drag_state.clone() {
-                if let Some(dst_idx) = hover_target {
+            if let DragState::Dragging { item_idx, hover_target, .. } = app.drag_state.clone()
+                && let Some(dst_idx) = hover_target {
                     let copy = ev.modifiers.contains(KeyModifiers::CONTROL);
                     app.execute_drop(item_idx, dst_idx, copy);
                 }
-            }
             // Stale ghost placements are cleaned by the post-draw frame diff.
             app.drag_state = DragState::Idle;
         }

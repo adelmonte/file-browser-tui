@@ -60,7 +60,7 @@ pub fn read_dir(path: &PathBuf, show_hidden: bool, folders_first: bool, sort: &S
     Ok(DirListing { entries })
 }
 
-pub fn sort_entries(entries: &mut Vec<DirEntry>, folders_first: bool, sort: &SortState) {
+pub fn sort_entries(entries: &mut [DirEntry], folders_first: bool, sort: &SortState) {
     entries.sort_by(|a, b| {
         if folders_first {
             match (a.is_dir, b.is_dir) {
