@@ -22,7 +22,9 @@ pub const BAR_BG: Color = rgb(NORD1);
 pub const FIELD_BG: Color = rgb(NORD0);
 /// Borders, separators, de-emphasized text.
 pub const BORDER: Color = rgb(NORD3);
-pub const MUTED: Color = rgb(NORD3);
+/// Secondary text: dimmer than the body text but readable on dark and
+/// translucent terminal backgrounds (nord3 is too dark for text).
+pub const MUTED: Color = Color::Rgb(150, 160, 180);
 /// Section headers and column titles.
 pub const ACCENT: Color = rgb(NORD8);
 pub const SEL_BG: Color = rgb(SEL);

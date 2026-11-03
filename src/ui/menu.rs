@@ -267,6 +267,11 @@ fn push_user_actions(app: &App, items: &mut Vec<MenuItem>, mime: &str) {
     if top.is_empty() && subs.is_empty() {
         return;
     }
+    // A user action named like a built-in item replaces it (e.g. an
+    // imported "Open in Terminal" service menu)
+    let plain = |label: &str| label.split_once("  ").map_or(label, |(_, l)| l).trim().to_lowercase();
+    let user_labels: Vec<String> = top.iter().map(|i| plain(&i.label)).collect();
+    items.retain(|i| i.separator || !user_labels.contains(&plain(&i.label)));
     items.push(MenuItem::sep());
     items.extend(top);
     for (name, sub) in subs {
