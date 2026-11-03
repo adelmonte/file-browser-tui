@@ -117,53 +117,100 @@ impl ThumbCache {
     }
 }
 
-fn thumbnail_cache_path(abs_path: &Path) -> PathBuf {
-    // freedesktop spec: md5 of the file URI, no trailing newline
-    let uri = format!("file://{}", abs_path.to_string_lossy());
-    let hex = format!("{:x}", md5::compute(uri.as_bytes()));
+/// Freedesktop thumbnail dirs, in lookup order. New thumbnails go in `large`.
+const SIZE_DIRS: [&str; 4] = ["large", "x-large", "xx-large", "normal"];
 
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("thumbnails/large")
-        .join(format!("{hex}.png"))
+fn thumbnails_root() -> PathBuf {
+    dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("thumbnails")
 }
 
-fn is_thumb_valid(thumb_path: &Path, source_path: &Path) -> bool {
-    if !thumb_path.exists() {
-        return false;
+/// file:// URI as the thumbnail spec (and Dolphin/GLib) hash it: path bytes
+/// percent-encoded except unreserved and path-safe characters.
+fn file_uri(abs_path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for &b in abs_path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@/".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
     }
-    let mtime = |p: &Path| std::fs::metadata(p)
-        .and_then(|m| m.modified())
-        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
-        .unwrap_or(0);
-
-    // Valid if thumb is newer than source (simplified mtime check)
-    mtime(thumb_path) >= mtime(source_path)
+    uri
 }
 
-fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
+fn mtime_secs(path: &Path) -> Option<u64> {
+    let t = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs())
+}
+
+/// A cached thumbnail is valid if its Thumb::MTime matches the source, or,
+/// lacking that tag, if it is newer than the source.
+fn is_thumb_valid(thumb_path: &Path, source_mtime: Option<u64>) -> bool {
+    let Ok(file) = std::fs::File::open(thumb_path) else { return false; };
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let Ok(reader) = decoder.read_info() else { return false; };
+    let tagged = reader.info().uncompressed_latin1_text.iter()
+        .find(|t| t.keyword == "Thumb::MTime")
+        .and_then(|t| t.text.parse::<u64>().ok());
+    match (tagged, source_mtime) {
+        (Some(tag), Some(src)) => tag == src,
+        _ => mtime_secs(thumb_path) >= source_mtime,
+    }
+}
+
+/// Save as PNG with the spec's Thumb::URI / Thumb::MTime tags so other
+/// thumbnail consumers (Dolphin, Nautilus) accept and reuse it.
+fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u64>) -> anyhow::Result<()> {
+    let rgba = img.to_rgba8();
+    let file = std::io::BufWriter::new(std::fs::File::create(out)?);
+    let mut enc = png::Encoder::new(file, rgba.width(), rgba.height());
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.add_text_chunk("Thumb::URI".into(), uri.into())?;
+    if let Some(m) = mtime {
+        enc.add_text_chunk("Thumb::MTime".into(), m.to_string())?;
+    }
+    enc.add_text_chunk("Software".into(), "file-browser-tui".into())?;
+    enc.write_header()?.write_image_data(rgba.as_raw())?;
+    Ok(())
+}
+
+pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
     let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let thumb_path = thumbnail_cache_path(&abs);
+    let uri = file_uri(&abs);
+    let name = format!("{:x}.png", md5::compute(uri.as_bytes()));
+    let root = thumbnails_root();
+    let src_mtime = mtime_secs(&abs);
 
-    if is_thumb_valid(&thumb_path, &abs) {
-        return Ok(image::open(&thumb_path)?);
+    // Reuse any valid thumbnail another app (or we) already made, any size
+    for dir in SIZE_DIRS {
+        let candidate = root.join(dir).join(&name);
+        if is_thumb_valid(&candidate, src_mtime)
+            && let Ok(img) = image::open(&candidate)
+        {
+            return Ok(img);
+        }
     }
 
-    // Ensure cache dir exists
-    if let Some(parent) = thumb_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let large = root.join("large");
+    std::fs::create_dir_all(&large)?;
+    let thumb_path = large.join(&name);
+    // Unique per request so concurrent workers never share a temp file
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = large.join(format!("{name}.{}-{seq}.tmp.png", std::process::id()));
 
-    let tmp = thumb_path.with_extension("tmp.png");
-
-    if mime_type.starts_with("video/") {
-        generator::ffmpegthumbnailer(&abs, &tmp)?;
+    let img = if mime_type.starts_with("video/") {
+        generator::video_thumb(&abs, &tmp)?
     } else if mime_type.starts_with("image/") {
-        generator::image_thumb(&abs, &tmp)?;
+        generator::image_thumb(&abs)?
     } else {
         anyhow::bail!("no thumbnailer for {mime_type}");
-    }
+    };
 
+    save_thumb(&img, &tmp, &uri, src_mtime)?;
     std::fs::rename(&tmp, &thumb_path)?;
-    Ok(image::open(&thumb_path)?)
+    Ok(img)
 }
+

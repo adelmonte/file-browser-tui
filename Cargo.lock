@@ -679,6 +679,7 @@ dependencies = [
  "md5",
  "new_mime_guess",
  "nix 0.30.1",
+ "png",
  "ratatui",
  "ratatui-image",
  "rayon",

@@ -25,4 +25,5 @@ chrono           = { version = "0.4", default-features = false, features = ["std
 strum            = { version = "0.27", features = ["derive"] }
 new_mime_guess = "4.0.4"
 md5 = "0.8.0"
+png = "0.18"
 unicode-width = "0.2"
