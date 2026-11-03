@@ -457,6 +457,7 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 if let MenuTarget::Entry(idx) = target {
                     app.selection = Some(idx);
                 }
+                app.user_actions = crate::user_actions::load();
                 let items = menu::build_context_menu(app, target);
                 if !items.is_empty() {
                     app.menu = Some(MenuState::new(MenuKind::Context, target, items, (col, row)));

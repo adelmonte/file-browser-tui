@@ -43,6 +43,10 @@ pub enum MenuAction {
     ToggleFoldersFirst,
     ToggleShowHidden,
     Custom(usize),
+    /// (group, action) index into `App::user_actions`.
+    UserAction(usize, usize),
+    /// Index into `App::kdeconnect_devices`.
+    SendToDevice(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +171,17 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 MenuItem::new("zip", MenuAction::CompressZip),
             ]));
             push_custom_items(app, &mut items, if is_dir { "dir" } else { "file" });
+            let mime = if is_dir {
+                "inode/directory".to_string()
+            } else {
+                entry.mime_type.clone()
+                    .or_else(|| new_mime_guess::from_path(&entry.path).first_raw().map(String::from))
+                    .unwrap_or_else(|| "application/octet-stream".into())
+            };
+            push_user_actions(app, &mut items, &mime);
+            if !is_dir {
+                push_send_to_device(app, &mut items);
+            }
             items.push(MenuItem::sep());
             items.push(MenuItem::new("\u{f05a}  Properties", MenuAction::Properties));
         }
@@ -180,6 +195,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             items.push(MenuItem::new("\u{f0ea}  Paste", MenuAction::Paste).enabled_if(has_clip));
             items.push(MenuItem::new("\u{f120}  Open Terminal Here", MenuAction::OpenTerminal));
             push_custom_items(app, &mut items, "empty");
+            push_user_actions(app, &mut items, "inode/directory");
             items.push(MenuItem::sep());
             items.push(MenuItem::new("\u{f05a}  Properties", MenuAction::Properties));
         }
@@ -222,6 +238,66 @@ fn push_custom_items(app: &App, items: &mut Vec<MenuItem>, target_kind: &str) {
             }
             items.push(MenuItem::new(format!("\u{f085}  {}", entry.label), MenuAction::Custom(i)));
         }
+    }
+}
+
+/// Actions from ~/.config/file-browser-tui/actions matching `mime`: top-level
+/// ones inline, the rest grouped by submenu name (in file order).
+fn push_user_actions(app: &App, items: &mut Vec<MenuItem>, mime: &str) {
+    let mut top: Vec<MenuItem> = Vec::new();
+    let mut subs: Vec<(String, Vec<MenuItem>)> = Vec::new();
+    for (gi, group) in app.user_actions.iter().enumerate() {
+        if !group.applies_to(mime) {
+            continue;
+        }
+        let entries = group.actions.iter().enumerate().map(|(ai, a)| {
+            MenuItem::new(
+                format!("{}  {}", action_glyph(a.icon.as_deref()), a.label),
+                MenuAction::UserAction(gi, ai),
+            )
+        });
+        match &group.submenu {
+            None => top.extend(entries),
+            Some(name) => match subs.iter_mut().find(|(n, _)| n == name) {
+                Some((_, v)) => v.extend(entries),
+                None => subs.push((name.clone(), entries.collect())),
+            },
+        }
+    }
+    if top.is_empty() && subs.is_empty() {
+        return;
+    }
+    items.push(MenuItem::sep());
+    items.extend(top);
+    for (name, sub) in subs {
+        items.push(MenuItem::sub(format!("\u{f0ae}  {name}"), sub));
+    }
+}
+
+/// "Send to Device" submenu listing reachable KDE Connect devices.
+fn push_send_to_device(app: &App, items: &mut Vec<MenuItem>) {
+    if app.kdeconnect_devices.is_empty() {
+        return;
+    }
+    let devices = app.kdeconnect_devices.iter().enumerate()
+        .map(|(i, d)| MenuItem::new(format!("\u{f10b}  {}", d.name), MenuAction::SendToDevice(i)))
+        .collect();
+    items.push(MenuItem::sub("\u{f1d8}  Send to Device", devices));
+}
+
+/// Nerd-font glyph for a freedesktop icon name used by an action.
+fn action_glyph(icon: Option<&str>) -> &'static str {
+    let icon = icon.unwrap_or("");
+    match icon {
+        i if i.contains("rename") => "\u{f044}",
+        i if i.contains("terminal") || i.contains("konsole") => "\u{f120}",
+        i if i.contains("wallpaper") => "\u{f03e}",
+        i if i.starts_with("video") => "\u{f03d}",
+        i if i.starts_with("image") => "\u{f03e}",
+        i if i.starts_with("audio") => "\u{f001}",
+        i if i.contains("file-manager") || i.contains("folder") => "\u{f07c}",
+        i if i.contains("archive") || i.contains("compress") => "\u{f1c6}",
+        _ => "\u{f085}",
     }
 }
 

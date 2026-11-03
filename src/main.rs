@@ -9,6 +9,7 @@ mod icons;
 mod places;
 mod thumbs;
 mod ui;
+mod user_actions;
 
 use std::{io::Write, sync::mpsc, time::Duration};
 

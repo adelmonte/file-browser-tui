@@ -111,6 +111,16 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
         }
 
         MenuAction::Custom(idx) => run_custom(app, idx, target),
+
+        MenuAction::UserAction(gi, ai) => {
+            let Some(action) = app.user_actions.get(gi).and_then(|g| g.actions.get(ai)) else { return; };
+            crate::user_actions::run(action, &action_paths(app, target), &app.cwd);
+        }
+        MenuAction::SendToDevice(i) => {
+            if let Some(device) = app.kdeconnect_devices.get(i) {
+                crate::user_actions::kdeconnect_share(device, &action_paths(app, target));
+            }
+        }
     }
 }
 
@@ -125,6 +135,17 @@ fn target_path(app: &App, target: MenuTarget) -> Option<PathBuf> {
         MenuTarget::Place(idx) => app.places.get(idx).map(|p| PathBuf::from(&p.path)),
         MenuTarget::Device(idx) => app.devices.get(idx).map(|d| PathBuf::from(&d.path)),
     }
+}
+
+/// Files an action applies to: the whole selection when the right-clicked
+/// entry is part of it, else just the target.
+fn action_paths(app: &App, target: MenuTarget) -> Vec<PathBuf> {
+    if let MenuTarget::Entry(idx) = target
+        && app.multi_selection.contains(&idx)
+    {
+        return selected_paths(app);
+    }
+    target_path(app, target).into_iter().collect()
 }
 
 /// Directory the action operates in (the dir itself for dir entries, cwd otherwise).

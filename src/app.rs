@@ -15,6 +15,7 @@ use crate::{
     thumbs::ThumbCache,
     ui::menu::{MenuState, MenuTarget},
     ui::properties::PropertiesState,
+    user_actions::{ActionGroup, KdeConnectDevice},
 };
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,11 @@ pub struct App {
     // Background event channels
     pub dir_event_rx: mpsc::Receiver<DirEvent>,
     pub mount_event_rx: mpsc::Receiver<MountEvent>,
+    kdeconnect_rx: mpsc::Receiver<Vec<KdeConnectDevice>>,
+
+    // Context menu extensions (reloaded each time a context menu opens)
+    pub user_actions: Vec<ActionGroup>,
+    pub kdeconnect_devices: Vec<KdeConnectDevice>,
 
     // Sidebar
     pub places: Vec<PlaceEntry>,
@@ -205,6 +211,9 @@ impl App {
         let devices = crate::places::default_devices();
         let dirstates = DirStates::load();
 
+        let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
+        crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
+
         let terminal_size = Size { width: 220, height: 50 };
         let mut icon_size_idx = config.icon_size_idx.min(ICON_LEVELS.len() - 1);
         let mut view_mode = config.default_view;
@@ -242,6 +251,9 @@ impl App {
             thumb_cache: ThumbCache::new(),
             dir_event_rx,
             mount_event_rx,
+            kdeconnect_rx,
+            user_actions: Vec::new(),
+            kdeconnect_devices: Vec::new(),
             places,
             devices,
             menu: None,
@@ -509,6 +521,10 @@ impl App {
         // Coalesce bursts of events into a single reload
         if self.dir_event_rx.try_iter().count() > 0 {
             self.reload_dir();
+        }
+
+        if let Some(devices) = self.kdeconnect_rx.try_iter().last() {
+            self.kdeconnect_devices = devices;
         }
 
         if let Ok(ev) = self.mount_event_rx.try_recv() {
