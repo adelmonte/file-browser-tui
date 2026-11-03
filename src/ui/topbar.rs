@@ -3,16 +3,15 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
 use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
+use crate::ui::theme;
 
-/// nord1 — distinguishes the bar from the panels beneath it.
-const BAR_BG: Color = Color::Rgb(59, 66, 82);
-/// nord0 — recessed path field.
-const PATH_BG: Color = Color::Rgb(46, 52, 64);
+const BAR_BG: Color = theme::BAR_BG;
+const PATH_BG: Color = theme::FIELD_BG;
 
 pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Block::default().style(Style::default().bg(BAR_BG)), area);
@@ -74,18 +73,16 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     };
     f.render_widget(Paragraph::new(view_label).style(view_style), chunks[7]);
 
-    // Path bar — recessed field
-    let path_str = if app.path_bar_editing {
-        format!(" {}\u{2588}", app.path_bar_input)
+    // Path bar — recessed field; breadcrumbs when idle, raw text when editing
+    let path_line = if app.path_bar_editing {
+        Line::styled(
+            format!(" {}\u{2588}", app.path_bar_input),
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )
     } else {
-        format!(" {}", app.cwd.display())
+        breadcrumbs(&app.cwd, chunks[9].width as usize)
     };
-    let path_style = if app.path_bar_editing {
-        Style::default().bg(PATH_BG).fg(Color::White).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().bg(PATH_BG)
-    };
-    f.render_widget(Paragraph::new(path_str).style(path_style), chunks[9]);
+    f.render_widget(Paragraph::new(path_line).style(Style::default().bg(PATH_BG)), chunks[9]);
 
     // Sort button — icon only
     let sort_style = if menu_kind == Some(MenuKind::Sort) {
@@ -140,9 +137,51 @@ pub fn render_path_completions(f: &mut Frame, app: &mut App) {
     let mut state = ListState::default().with_selected(app.path_completion_sel);
     f.render_stateful_widget(
         List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Path "))
+            .style(Style::default().bg(PATH_BG))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER))
+                .title(" Path "))
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
         area,
         &mut state,
     );
+}
+
+/// " ~ › Documents › Project" with dim separators and the current folder in
+/// bold. Leading segments collapse to "…" so the end of the path stays visible.
+fn breadcrumbs(path: &std::path::Path, width: usize) -> Line<'static> {
+    let home = dirs::home_dir();
+    let (root, rest) = match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => ("~".to_string(), rest),
+        None => ("/".to_string(), path.strip_prefix("/").unwrap_or(path)),
+    };
+    let mut segs: Vec<String> = vec![root];
+    segs.extend(rest.iter().map(|s| s.to_string_lossy().into_owned()));
+
+    const SEP: &str = " \u{203a} ";
+    let len = |segs: &[String]| 1 + segs.iter().map(|s| s.chars().count()).sum::<usize>() + SEP.chars().count() * segs.len();
+    let mut skipped = false;
+    while segs.len() > 1 && len(&segs) > width {
+        segs.remove(0);
+        skipped = true;
+    }
+
+    let sep = Span::styled(SEP, Style::default().fg(theme::MUTED));
+    let mut spans = vec![Span::raw(" ")];
+    if skipped {
+        spans.push(Span::styled("\u{2026}", Style::default().fg(theme::MUTED)));
+        spans.push(sep.clone());
+    }
+    let last = segs.len() - 1;
+    for (i, seg) in segs.into_iter().enumerate() {
+        if i == last {
+            spans.push(Span::styled(seg, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+        } else {
+            spans.push(Span::raw(seg));
+            spans.push(sep.clone());
+        }
+    }
+    Line::from(spans)
 }

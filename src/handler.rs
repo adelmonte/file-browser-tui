@@ -6,6 +6,7 @@ use crate::{
     app::{App, TOPBAR_H, ViewMode},
     events::{ClickKind, ClipOp, ConfirmDeleteState, DragState, DRAG_THRESHOLD},
     ui::{
+        compact::{COMPACT_CELL_H, COMPACT_CELL_W},
         grid::{cell_at_pos, details_row_at_pos},
         menu::{self, MenuKind, MenuOutcome, MenuState, MenuTarget},
         sidebar,
@@ -18,8 +19,6 @@ fn close_menu(app: &mut App) {
     app.kitty_delete_all = true;
 }
 
-const COMPACT_CELL_W: u16 = 20;
-const COMPACT_CELL_H: u16 = 2;
 
 fn contains(rect: Rect, col: u16, row: u16) -> bool {
     rect.contains(Position { x: col, y: row })
@@ -58,9 +57,9 @@ fn path_completion_hit(app: &mut App, col: u16, row: u16) -> bool {
 
 fn visible_rows(app: &App) -> usize {
     match app.view_mode {
-        ViewMode::Details => app.main_area.height.saturating_sub(1) as usize,
-        ViewMode::Compact => (app.main_area.height / COMPACT_CELL_H).max(1) as usize,
-        ViewMode::Icons   => (app.main_area.height / app.cell_h).max(1) as usize,
+        ViewMode::Details => app.grid_area.height.saturating_sub(1) as usize,
+        ViewMode::Compact => (app.grid_area.height / COMPACT_CELL_H).max(1) as usize,
+        ViewMode::Icons   => (app.grid_area.height / app.cell_h).max(1) as usize,
     }
 }
 
@@ -68,11 +67,7 @@ fn total_scroll_rows(app: &App) -> usize {
     let n = app.listing.entries.len();
     match app.view_mode {
         ViewMode::Details => n,
-        ViewMode::Compact => {
-            let cols = (app.main_area.width / COMPACT_CELL_W).max(1) as usize;
-            n.div_ceil(cols)
-        }
-        ViewMode::Icons => {
+        ViewMode::Compact | ViewMode::Icons => {
             let cols = app.grid_cols.max(1) as usize;
             n.div_ceil(cols)
         }

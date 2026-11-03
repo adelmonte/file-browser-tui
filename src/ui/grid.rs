@@ -9,18 +9,27 @@ use ratatui_image::StatefulImage;
 
 use crate::app::App;
 use crate::events::{ClipOp, DragState};
+use crate::ui::theme::{self, rgb};
 
-// 50% blend of Nord9 (129,161,193) with Nord0 (46,52,64) — semi-transparent look
-pub const NORD_SEL: (u8, u8, u8) = (88, 107, 128);
-pub const NORD_GREEN: (u8, u8, u8) = (163, 190, 140);
-pub const NORD_RED: (u8, u8, u8) = (191, 97, 106);
-
-const fn rgb(c: (u8, u8, u8)) -> Color {
-    Color::Rgb(c.0, c.1, c.2)
-}
 
 pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
     (area.width / cell_w).max(1)
+}
+
+/// Inset a content pane for a grid of `cell_w`-wide cells: one padding row on
+/// top, at least one padding column per side, leftover width split evenly so
+/// the grid sits centered instead of piling the slack on the right.
+pub fn centered_grid_area(area: Rect, cell_w: u16) -> Rect {
+    let usable = area.width.saturating_sub(2);
+    let cols = (usable / cell_w).max(1);
+    let width = (cols * cell_w).min(area.width);
+    let top = u16::from(area.height > 2);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + top,
+        width,
+        height: area.height - top,
+    }
 }
 
 pub fn cell_at_pos(
@@ -52,17 +61,18 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let cell_h = app.cell_h;
     let icon_rows = app.icon_rows;
 
+    f.render_widget(Block::default(), area);
+
+    let area = centered_grid_area(area, cell_w);
     let cols = grid_cols(area, cell_w);
     app.grid_cols = cols;
     app.grid_area = area;
 
-    f.render_widget(Block::default(), area);
-
     let entries_len = app.listing.entries.len();
     if entries_len == 0 {
         f.render_widget(
-            Paragraph::new("  (empty directory)").style(Style::default().add_modifier(Modifier::DIM)),
-            Rect { x: area.x + 2, y: area.y + 1, width: area.width.saturating_sub(4), height: 1 },
+            Paragraph::new("Folder is empty").style(Style::default().fg(theme::MUTED)),
+            Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
         );
         return;
     }
@@ -82,6 +92,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let img_x_off = (cell_w.saturating_sub(img_w_cells)) / 2;
 
     let rows_visible = (area.height / cell_h + 2) as usize;
+    // One column of breathing room on each side so neighbouring labels never touch
+    let label_w = if cell_w >= 6 { cell_w as usize - 2 } else { cell_w as usize };
 
     for row_idx in 0..rows_visible {
         let abs_row = app.scroll_offset + row_idx;
@@ -128,9 +140,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             // The icon image is composited onto the same bg color, so the
             // highlight runs behind the icon as one full-cell rectangle.
             let cell_bg: Option<(u8, u8, u8)> = if is_selected {
-                Some(NORD_SEL)
+                Some(theme::SEL)
             } else if is_drag_target {
-                Some(NORD_GREEN)
+                Some(theme::NORD14)
             } else {
                 None
             };
@@ -156,27 +168,27 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             // Inline rename
             if let Some(ref rename) = app.rename_state
                 && rename.item_idx == entry_idx {
-                    let lines = wrap_label(&rename.input, cell_w as usize, label_rows);
-                    let bg = if rename.invalid { NORD_RED } else { NORD_SEL };
+                    let lines = wrap_label(&rename.input, label_w, label_rows);
+                    let bg = if rename.invalid { theme::NORD11 } else { theme::SEL };
                     f.render_widget(
                         Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))
                             .style(Style::default().bg(rgb(bg)).fg(Color::White).add_modifier(Modifier::BOLD)),
                         label_rect,
                     );
                     continue;
-            }
+                }
 
             let label_fg = if is_selected {
-                Style::default().bg(rgb(NORD_SEL)).fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
             } else if is_drag_target {
-                Style::default().bg(rgb(NORD_GREEN)).fg(Color::Black).add_modifier(Modifier::BOLD)
+                Style::default().bg(rgb(theme::NORD14)).fg(Color::Black).add_modifier(Modifier::BOLD)
             } else if entry.is_dir {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let label_lines = wrap_label(&entry.name, cell_w as usize, label_rows);
+            let label_lines = wrap_label(&entry.name, label_w, label_rows);
             f.render_widget(
                 Paragraph::new(lines_to_text_styled_centered(&label_lines, label_fg, cell_w as usize)),
                 label_rect,

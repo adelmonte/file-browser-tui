@@ -1,19 +1,20 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span},
+    layout::Rect,
+    style::{Color, Modifier, Style},
     widgets::{Block, Paragraph},
 };
 
 use crate::app::App;
+use crate::ui::{grid::centered_grid_area, theme};
 
-const COMPACT_CELL_W: u16 = 20;
-const COMPACT_CELL_H: u16 = 2;
+pub const COMPACT_CELL_W: u16 = 22;
+pub const COMPACT_CELL_H: u16 = 2;
 
 pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Block::default(), area);
 
+    let area = centered_grid_area(area, COMPACT_CELL_W);
     let cols = (area.width / COMPACT_CELL_W).max(1);
     app.grid_cols = cols;
     app.grid_area = area;
@@ -32,7 +33,8 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             if cell_y >= area.y + area.height { break; }
 
             let entry = &app.listing.entries[entry_idx];
-            let is_selected = app.selection == Some(entry_idx);
+            let is_selected = app.selection == Some(entry_idx)
+                || app.multi_selection.contains(&entry_idx);
 
             let icon = if entry.is_dir {
                 "\u{f07b}"
@@ -42,11 +44,13 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
                 )
             };
 
-            let name = truncate_name(&entry.name, COMPACT_CELL_W as usize - 3);
-            let text = format!("{} {}", icon, name);
+            // Cell = 1-col gutter + " icon name " highlighted as one block
+            let inner_w = COMPACT_CELL_W as usize - 1;
+            let name = truncate_name(&entry.name, inner_w - 4);
+            let text = format!(" {icon} {name}");
 
             let style = if is_selected {
-                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+                Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
             } else if entry.is_dir {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
@@ -54,9 +58,8 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             };
 
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(text, style)))
-                    .alignment(Alignment::Left),
-                Rect { x: cell_x + 1, y: cell_y, width: COMPACT_CELL_W.saturating_sub(1), height: 1 },
+                Paragraph::new(text).style(style),
+                Rect { x: cell_x + 1, y: cell_y, width: inner_w as u16, height: 1 },
             );
         }
     }

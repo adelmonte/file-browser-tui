@@ -3,8 +3,10 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
+
+use crate::ui::theme;
 
 const HELP_LINES: &[(&str, &str)] = &[
     ("Navigation", ""),
@@ -57,7 +59,7 @@ pub fn render_help(f: &mut Frame) {
             Line::raw("")
         } else if desc.is_empty() {
             // Section header
-            Line::from(Span::styled(*key, Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)))
+            Line::from(Span::styled(*key, Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)))
         } else {
             Line::from(vec![
                 Span::styled(format!("{:<20}", key), Style::default().add_modifier(Modifier::BOLD)),
@@ -68,7 +70,12 @@ pub fn render_help(f: &mut Frame) {
 
     f.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" Help (? to close) ")),
+            .style(Style::default().bg(theme::FIELD_BG))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER))
+                .title(" Help (? to close) ")),
         area,
     );
 }

@@ -11,11 +11,13 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
+use crate::ui::theme;
+
 const PROPS_W: u16 = 58;
-const PROPS_BG: Color = Color::Rgb(46, 52, 64); // nord0
+const PROPS_BG: Color = theme::FIELD_BG;
 
 pub struct PropertiesState {
     pub rows: Vec<(String, String)>,
@@ -193,8 +195,9 @@ pub fn render_properties(f: &mut Frame, state: &PropertiesState) {
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Properties (Esc to close) ")
-                .border_style(Style::default().fg(Color::DarkGray).bg(PROPS_BG))
+                .border_style(Style::default().fg(theme::BORDER).bg(PROPS_BG))
                 .style(Style::default().bg(PROPS_BG)),
         ),
         area,

@@ -2,9 +2,10 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
+use crate::ui::theme;
 use crate::{app::App, events::DragState};
 
 /// Geometry of the drag ghost (shared with the occlusion pre-pass).
@@ -31,9 +32,9 @@ pub fn render_drag_ghost(f: &mut Frame, app: &App) {
     let display = format!(" {} ", name);
 
     let (bg, fg) = if hover_target.is_some() {
-        (Color::Rgb(163, 190, 140), Color::Black)  // nord-green: valid drop target
+        (theme::rgb(theme::NORD14), Color::Black)  // valid drop target
     } else {
-        (Color::Rgb(67, 76, 94), Color::White)      // nord1: neutral ghost
+        (theme::rgb(theme::NORD2), Color::White)   // neutral ghost
     };
 
     f.render_widget(Clear, area);
@@ -41,6 +42,7 @@ pub fn render_drag_ghost(f: &mut Frame, app: &App) {
         Paragraph::new(display)
             .style(Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD))
             .block(Block::default().borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().bg(bg).fg(fg))),
         area,
     );

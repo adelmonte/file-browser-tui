@@ -96,6 +96,8 @@ pub struct App {
     pub listing: DirListing,
     pub selection: Option<usize>,
     pub scroll_offset: usize,
+    /// Bytes available on the cwd's filesystem, refreshed on reload.
+    pub free_space: Option<u64>,
 
     // View settings
     pub view_mode: ViewMode,
@@ -223,6 +225,7 @@ impl App {
             listing,
             selection: None,
             scroll_offset: 0,
+            free_space: free_space(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
             view_mode,
             sort,
             show_hidden: config.show_hidden,
@@ -287,6 +290,7 @@ impl App {
 
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);
+        self.free_space = free_space(&self.cwd);
     }
 
     /// Re-point every index into the listing at the same path in the new
@@ -458,7 +462,7 @@ impl App {
         }
         let target_px = self.icon_target_px();
         let cols = self.grid_cols.max(1) as usize;
-        let rows_visible = (self.main_area.height / self.cell_h + 2) as usize;
+        let rows_visible = (self.grid_area.height / self.cell_h + 2) as usize;
         let start = self.scroll_offset * cols;
         let end = ((self.scroll_offset + rows_visible) * cols).min(self.listing.entries.len());
         if start >= end { return; }
@@ -612,8 +616,9 @@ impl App {
 
     fn ensure_selection_visible(&mut self) {
         let rows_visible = match self.view_mode {
-            ViewMode::Details => self.main_area.height.saturating_sub(1) as usize,
-            _ => (self.main_area.height / self.cell_h).max(1) as usize,
+            ViewMode::Details => self.grid_area.height.saturating_sub(1) as usize,
+            ViewMode::Compact => (self.grid_area.height / crate::ui::compact::COMPACT_CELL_H).max(1) as usize,
+            ViewMode::Icons => (self.grid_area.height / self.cell_h).max(1) as usize,
         };
         let cols = self.grid_cols.max(1) as usize;
         if let Some(idx) = self.selection {
@@ -737,4 +742,9 @@ impl App {
                     .spawn();
             }
     }
+}
+
+fn free_space(path: &std::path::Path) -> Option<u64> {
+    let st = nix::sys::statvfs::statvfs(path).ok()?;
+    Some(st.blocks_available() as u64 * st.fragment_size() as u64)
 }

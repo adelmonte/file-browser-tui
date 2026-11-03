@@ -1,85 +1,101 @@
 use chrono::{DateTime, Local};
 use ratatui::{
     Frame,
-    layout::{Constraint, Rect},
-    style::{Modifier, Style},
-    widgets::{Block, Cell, Row, Table, TableState},
+    layout::{Alignment, Constraint, Rect},
+    style::{Color, Modifier, Style},
+    text::Line,
+    widgets::{Block, Cell, Row, Table},
 };
 
 use crate::app::App;
+use crate::ui::theme;
 
 pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
+    f.render_widget(Block::default(), area);
+
+    // One padding column on each side, matching the grid views
+    let area = Rect {
+        x: area.x + 1,
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: area.height,
+    };
     app.grid_cols = 1;
     app.grid_area = area;
 
-    let entries = &app.listing.entries;
-
+    let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
     let header = Row::new(vec![
-        Cell::from("Name").style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
-        Cell::from("Size").style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
-        Cell::from("Modified").style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
-        Cell::from("Type").style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
-    ]).height(1);
+        Cell::from(" Name"),
+        Cell::from(Line::from("Size").alignment(Alignment::Right)),
+        Cell::from("Modified"),
+        Cell::from("Type"),
+    ]).style(header_style).height(1);
 
-    let rows: Vec<Row> = entries.iter().enumerate().map(|(i, e)| {
-        let icon = if e.is_dir {
-            "\u{f07b}".to_string()
-        } else {
-            crate::ui::grid::file_placeholder_icon_pub(
-                e.path.extension().and_then(|ex| ex.to_str()).unwrap_or("")
-            ).to_string()
-        };
-        let name = format!("{} {}", icon, e.name);
-        let size = format_size(e.size, e.is_dir);
-        let modified = e.modified
-            .map(|t| { let dt: DateTime<Local> = t.into(); dt.format("%Y-%m-%d %H:%M").to_string() })
-            .unwrap_or_default();
-        let type_str = e.mime_type.as_deref()
-            .unwrap_or(if e.is_dir { "folder" } else { "file" })
-            .to_string();
+    // Rows start at scroll_offset so the table, scrolling and click mapping
+    // (details_row_at_pos) all agree on which entry is on which line.
+    let visible = area.height.saturating_sub(1) as usize;
+    let rows: Vec<Row> = app.listing.entries.iter().enumerate()
+        .skip(app.scroll_offset)
+        .take(visible)
+        .map(|(i, e)| {
+            let icon = if e.is_dir {
+                "\u{f07b}"
+            } else {
+                crate::ui::grid::file_placeholder_icon_pub(
+                    e.path.extension().and_then(|ex| ex.to_str()).unwrap_or("")
+                )
+            };
+            let name = format!(" {} {}", icon, e.name);
+            let size = format_size(e.size, e.is_dir);
+            let modified = e.modified
+                .map(|t| { let dt: DateTime<Local> = t.into(); dt.format("%Y-%m-%d %H:%M").to_string() })
+                .unwrap_or_default();
+            let type_str = if e.is_dir {
+                "folder".to_string()
+            } else {
+                e.mime_type.clone()
+                    .or_else(|| new_mime_guess::from_path(&e.path).first_raw().map(str::to_string))
+                    .unwrap_or_else(|| "file".to_string())
+            };
 
-        let is_selected = app.selection == Some(i);
-        let row_style = if is_selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
+            let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
+            let row_style = if is_selected {
+                Style::default().bg(theme::SEL_BG).fg(Color::White)
+            } else {
+                Style::default()
+            };
+            let name_style = if e.is_dir {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            let muted = if is_selected { Style::default() } else { Style::default().fg(theme::MUTED) };
 
-        let name_style = if e.is_dir {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        Row::new(vec![
-            Cell::from(name).style(name_style),
-            Cell::from(size),
-            Cell::from(modified),
-            Cell::from(type_str),
-        ])
-        .style(row_style)
-        .height(1)
-    }).collect();
-
-    let selected_row = app.selection.map(|s| s.saturating_sub(app.scroll_offset));
-    let mut table_state = TableState::default().with_selected(selected_row);
+            Row::new(vec![
+                Cell::from(name).style(name_style),
+                Cell::from(Line::from(size).alignment(Alignment::Right)),
+                Cell::from(modified).style(muted),
+                Cell::from(type_str).style(muted),
+            ])
+            .style(row_style)
+            .height(1)
+        }).collect();
 
     let widths = [
-        Constraint::Min(20),
+        Constraint::Fill(3),
         Constraint::Length(10),
-        Constraint::Length(18),
-        Constraint::Min(12),
+        Constraint::Length(16),
+        Constraint::Fill(1),
     ];
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(Block::default())
-        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .column_spacing(2);
 
-    f.render_stateful_widget(table, area, &mut table_state);
+    f.render_widget(table, area);
 }
 
-fn format_size(size: Option<u64>, is_dir: bool) -> String {
+pub fn format_size(size: Option<u64>, is_dir: bool) -> String {
     if is_dir { return "\u{2014}".to_string(); }
     match size {
         None => "\u{2014}".to_string(),

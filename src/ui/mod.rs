@@ -7,6 +7,8 @@ pub mod kitty;
 pub mod menu;
 pub mod properties;
 pub mod sidebar;
+pub mod statusbar;
+pub mod theme;
 pub mod topbar;
 
 use ratatui::{
@@ -14,7 +16,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::app::{App, TOPBAR_H, ViewMode};
@@ -24,12 +26,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(TOPBAR_H), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(TOPBAR_H),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     let topbar_area = vertical[0];
     // vertical[1] is a blank gap row between the topbar and the panels
     let content_area = vertical[2];
+    let status_area = vertical[3];
 
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
@@ -51,6 +59,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Render base layers
     topbar::render_topbar(f, app, topbar_area);
     sidebar::render_sidebar(f, app, sidebar_area);
+    statusbar::render_statusbar(f, app, status_area);
 
     match app.view_mode {
         ViewMode::Icons   => grid::render_grid(f, app, main_area),
@@ -124,8 +133,8 @@ fn render_confirm_delete(f: &mut Frame, app: &App) {
     let Some(ref cd) = app.confirm_delete else { return; };
     let area = confirm_delete_rect(f.area());
 
-    let name = if cd.display_name.len() > 28 {
-        format!("{}…", &cd.display_name[..27])
+    let name = if cd.display_name.chars().count() > 28 {
+        format!("{}…", cd.display_name.chars().take(27).collect::<String>())
     } else {
         cd.display_name.clone()
     };
@@ -134,6 +143,8 @@ fn render_confirm_delete(f: &mut Frame, app: &App) {
     f.render_widget(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::rgb(theme::NORD11)))
             .title(" Permanently Delete ")
             .style(Style::default().bg(Color::Rgb(59, 20, 20)).fg(Color::White)),
         area,

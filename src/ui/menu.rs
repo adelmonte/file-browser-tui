@@ -4,14 +4,15 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use strum::IntoEnumIterator;
 
 use crate::app::{App, SortField, ViewMode};
+use crate::ui::theme;
 
-const MENU_BG: Color = Color::Rgb(46, 52, 64);    // nord0
-const MENU_SEL: Color = Color::Rgb(129, 161, 193); // nord9
+const MENU_BG: Color = theme::FIELD_BG;
+const MENU_SEL: Color = theme::rgb(theme::NORD9);
 
 // ---------------------------------------------------------------------------
 // Menu data model
@@ -323,7 +324,7 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
         if item.separator {
             return Line::styled(
                 "\u{2500}".repeat(inner_w),
-                Style::default().fg(Color::DarkGray).bg(MENU_BG),
+                Style::default().fg(theme::BORDER).bg(MENU_BG),
             );
         }
         let arrow = if item.submenu.is_empty() { "" } else { " \u{f0da}" };
@@ -344,7 +345,8 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray).bg(MENU_BG))
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
                 .style(Style::default().bg(MENU_BG)),
         ),
         rect,

@@ -1,67 +1,61 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
 use crate::app::App;
 use crate::events::SidebarTarget;
+use crate::ui::theme;
 
 pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Style::default().fg(ratatui::style::Color::DarkGray));
+        .border_style(Style::default().fg(theme::BORDER));
     let inner = block.inner(area);
     f.render_widget(block, area);
     app.sidebar_area = inner;
 
     let cwd = app.cwd.to_string_lossy();
+    let width = inner.width as usize;
+    let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
+
     let mut lines: Vec<Line> = Vec::new();
     let mut rows: Vec<Option<SidebarTarget>> = Vec::new();
 
-    lines.push(Line::from(Span::styled(
-        " PLACES",
-        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
-    )));
+    // Rows are padded to the full sidebar width so the highlight is a clean bar
+    let item = |icon: &str, name: &str, current: bool| {
+        let text = format!(" {icon}  {name}");
+        let pad = width.saturating_sub(text.chars().count());
+        let style = if current {
+            Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        Line::from(Span::styled(format!("{text}{}", " ".repeat(pad)), style))
+    };
+
+    lines.push(Line::from(Span::styled(" Places", header_style)));
     rows.push(None);
 
     for (i, place) in app.places.iter().enumerate() {
-        let is_current = place.path == cwd.as_ref();
         let icon = place_icon_for_path(&place.path, place.icon.as_deref());
-        let style = if is_current {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(
-            format!(" {} {}", icon, place.name),
-            style,
-        )));
+        lines.push(item(icon, &place.name, place.path == cwd.as_ref()));
         rows.push(Some(SidebarTarget::Place(i)));
     }
 
-    lines.push(Line::raw(""));
-    rows.push(None);
-    lines.push(Line::from(Span::styled(
-        " DEVICES",
-        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
-    )));
-    rows.push(None);
+    if !app.devices.is_empty() {
+        lines.push(Line::raw(""));
+        rows.push(None);
+        lines.push(Line::from(Span::styled(" Devices", header_style)));
+        rows.push(None);
 
-    for (i, device) in app.devices.iter().enumerate() {
-        let is_current = device.path == cwd.as_ref();
-        let style = if is_current {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(
-            format!(" \u{f0a0} {}", device.name),
-            style,
-        )));
-        rows.push(Some(SidebarTarget::Device(i)));
+        for (i, device) in app.devices.iter().enumerate() {
+            lines.push(item("\u{f0a0}", &device.name, device.path == cwd.as_ref()));
+            rows.push(Some(SidebarTarget::Device(i)));
+        }
     }
 
     app.sidebar_rows = rows;
