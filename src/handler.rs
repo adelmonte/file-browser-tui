@@ -13,10 +13,8 @@ use crate::{
     },
 };
 
-/// Close the open menu and force a clean Kitty re-render on the next frame.
 fn close_menu(app: &mut App) {
     app.menu = None;
-    app.kitty_delete_all = true;
 }
 
 

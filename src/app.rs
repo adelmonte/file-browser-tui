@@ -175,8 +175,8 @@ pub struct App {
     pub dirstates: DirStates,
 
     // Kitty graphics bookkeeping
-    /// Overlay rects for the current frame (occlusion pre-pass).
-    pub overlay_rects: Vec<Rect>,
+    /// Image uploads lifted out of placeholder cells, written before the frame.
+    pub kitty_transmits: Vec<String>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -267,7 +267,7 @@ impl App {
             last_terminal_size: terminal_size,
             config,
             dirstates,
-            overlay_rects: Vec::new(),
+            kitty_transmits: Vec::new(),
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
@@ -332,10 +332,7 @@ impl App {
         if let Some(MenuState { target: MenuTarget::Entry(idx), .. }) = &mut self.menu {
             match remap(*idx) {
                 Some(i) => *idx = i,
-                None => {
-                    self.menu = None;
-                    self.kitty_delete_all = true;
-                }
+                None => self.menu = None,
             }
         }
     }

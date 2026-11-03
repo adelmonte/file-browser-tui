@@ -5,11 +5,11 @@ use ratatui::{
     text::{Line, Text},
     widgets::{Block, Clear, Paragraph},
 };
-use ratatui_image::StatefulImage;
+use ratatui_image::{StatefulImage, picker::ProtocolType};
 
 use crate::app::App;
 use crate::events::{ClipOp, DragState};
-use crate::ui::theme::{self, rgb};
+use crate::ui::{kitty, theme::{self, rgb}};
 
 
 pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
@@ -160,7 +160,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             }
 
             // Render icon/thumbnail image (skipped + placement-deleted under overlays)
-            render_cell_image(f, app, entry_idx, icon_rect, cell_rect, cell_bg);
+            render_cell_image(f, app, entry_idx, icon_rect, cell_bg);
 
             let entry = &app.listing.entries[entry_idx];
             let label_rows = cell_h.saturating_sub(icon_rows) as usize;
@@ -202,16 +202,9 @@ fn render_cell_image(
     app: &mut App,
     entry_idx: usize,
     icon_rect: Rect,
-    cell_rect: Rect,
     bg: Option<(u8, u8, u8)>,
 ) {
     if icon_rect.width == 0 || icon_rect.height == 0 { return; }
-
-    // Occlusion: use the full cell rect so menus touching the label row also
-    // suppress the icon image (Kitty images always render above terminal text).
-    if app.overlay_rects.iter().any(|r| r.intersects(cell_rect)) {
-        return;
-    }
 
     let entry_path = app.listing.entries[entry_idx].path.clone();
     let is_media = app.listing.entries[entry_idx].mime_type.as_deref()
@@ -230,6 +223,11 @@ fn render_cell_image(
         if let Some(proto) = proto {
             f.render_widget(Clear, icon_rect);
             f.render_stateful_widget(StatefulImage::new(), icon_rect, proto);
+            // Per-cell placeholders: overlays drawn later cover the image
+            // cell by cell instead of the image having to be hidden.
+            if app.picker.protocol_type() == ProtocolType::Kitty {
+                kitty::split_placeholder_rows(f.buffer_mut(), icon_rect, &mut app.kitty_transmits);
+            }
             true
         } else {
             false

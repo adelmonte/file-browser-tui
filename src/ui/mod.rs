@@ -19,6 +19,8 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
+use std::io::Write;
+
 use crate::app::{App, TOPBAR_H, ViewMode};
 
 pub fn render(f: &mut Frame, app: &mut App) {
@@ -52,10 +54,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     app.main_area = main_area;
 
-    // Occlusion pre-pass: the grid must know overlay geometry before it
-    // renders so it never draws Kitty images underneath an overlay.
-    app.overlay_rects = collect_overlay_rects(app, area);
-
     // Render base layers
     topbar::render_topbar(f, app, topbar_area);
     sidebar::render_sidebar(f, app, sidebar_area);
@@ -87,35 +85,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.confirm_delete.is_some() {
         render_confirm_delete(f, app);
     }
-}
 
-/// Rects of every overlay visible this frame.
-fn collect_overlay_rects(app: &App, term: Rect) -> Vec<Rect> {
-    let mut rects = Vec::new();
-
-    if let Some(ref m) = app.menu {
-        rects.push(menu::menu_rect(m, term));
-        if m.submenu_open {
-            rects.push(menu::submenu_rect(m, term));
+    // Image uploads lifted out of placeholder cells go out before this
+    // frame's cell updates, so the placeholders always have an image.
+    if !app.kitty_transmits.is_empty() {
+        let mut out = std::io::stdout().lock();
+        for t in app.kitty_transmits.drain(..) {
+            let _ = out.write_all(t.as_bytes());
         }
+        let _ = out.flush();
     }
-    if let Some(r) = drag_ghost::ghost_rect(app, term) {
-        rects.push(r);
-    }
-    if let Some(r) = topbar::completions_rect(app, term) {
-        rects.push(r);
-    }
-    if let Some(ref props) = app.properties {
-        rects.push(properties::properties_rect(props, term));
-    }
-    if app.show_help {
-        rects.push(help::help_rect(term));
-    }
-    if app.confirm_delete.is_some() {
-        rects.push(confirm_delete_rect(term));
-    }
-
-    rects
 }
 
 fn confirm_delete_rect(term: Rect) -> Rect {
