@@ -6,6 +6,7 @@ pub mod help;
 pub mod kitty;
 pub mod menu;
 pub mod properties;
+pub mod searchbar;
 pub mod sidebar;
 pub mod statusbar;
 pub mod theme;
@@ -30,14 +31,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(TOPBAR_H),
+            Constraint::Length(u16::from(app.search.is_some())),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
     let topbar_area = vertical[0];
-    let content_area = vertical[1];
-    let status_area = vertical[2];
+    let search_area = vertical[1];
+    let content_area = vertical[2];
+    let status_area = vertical[3];
 
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
@@ -56,6 +59,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     topbar::render_topbar(f, app, topbar_area);
     sidebar::render_sidebar(f, app, sidebar_area);
     statusbar::render_statusbar(f, app, status_area);
+    searchbar::render_searchbar(f, app, search_area);
 
     match app.view_mode {
         ViewMode::Icons   => grid::render_grid(f, app, main_area),

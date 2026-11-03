@@ -15,6 +15,7 @@ use crate::{
     thumbs::ThumbCache,
     ui::menu::{MenuState, MenuTarget},
     ui::properties::PropertiesState,
+    search::{SearchState, SearchUpdate},
     user_actions::{ActionGroup, KdeConnectDevice},
 };
 
@@ -123,6 +124,9 @@ pub struct App {
     pub dir_event_rx: mpsc::Receiver<DirEvent>,
     pub mount_event_rx: mpsc::Receiver<MountEvent>,
     kdeconnect_rx: mpsc::Receiver<Vec<KdeConnectDevice>>,
+
+    /// Active search (results replace the listing while it has a query).
+    pub search: Option<SearchState>,
 
     // Context menu extensions (reloaded each time a context menu opens)
     pub user_actions: Vec<ActionGroup>,
@@ -253,6 +257,7 @@ impl App {
             mount_event_rx,
             kdeconnect_rx,
             user_actions: Vec::new(),
+            search: None,
             kdeconnect_devices: Vec::new(),
             places,
             devices,
@@ -290,6 +295,14 @@ impl App {
     }
 
     pub fn reload_dir(&mut self) {
+        // While showing results, "reload" means re-running the search
+        // (sort/hidden toggles, renames, ...), never listing the folder.
+        if let Some(search) = &mut self.search
+            && search.has_query()
+        {
+            search.mark_dirty();
+            return;
+        }
         let mut listing = match crate::fs::read_dir(&self.cwd, self.show_hidden, self.folders_first, &self.sort) {
             Ok(listing) => listing,
             Err(e) => { tracing::error!("reload_dir: {e}"); return; }
@@ -383,6 +396,7 @@ impl App {
     }
 
     fn after_navigate(&mut self) {
+        self.search = None;
         self.scroll_offset = 0;
         self.selection = None;
         self.multi_selection.clear();
@@ -519,9 +533,13 @@ impl App {
         self.thumb_cache.drain_ready();
 
         // Coalesce bursts of events into a single reload
-        if self.dir_event_rx.try_iter().count() > 0 {
+        if self.dir_event_rx.try_iter().count() > 0
+            && !self.search.as_ref().is_some_and(|s| s.has_query())
+        {
             self.reload_dir();
         }
+
+        self.poll_search();
 
         if let Some(devices) = self.kdeconnect_rx.try_iter().last() {
             self.kdeconnect_devices = devices;
@@ -535,6 +553,69 @@ impl App {
         if let Some(ref mut props) = self.properties {
             props.poll();
         }
+    }
+
+    /// Open the search bar, or focus it if already open.
+    pub fn open_search(&mut self) {
+        match &mut self.search {
+            Some(s) => s.focused = true,
+            None => self.search = Some(SearchState::new(self.cwd.clone())),
+        }
+    }
+
+    pub fn close_search(&mut self) {
+        if self.search.take().is_some_and(|s| s.has_query()) {
+            self.scroll_offset = 0;
+            self.reload_dir();
+        }
+    }
+
+    /// Search query/options changed: re-run, or show the folder again if
+    /// the query was cleared.
+    pub fn search_changed(&mut self) {
+        let Some(search) = &mut self.search else { return; };
+        search.mark_dirty();
+        if !search.has_query() {
+            search.cancel();
+            // reload_dir lists the folder only while no query is active
+            let s = self.search.take();
+            self.reload_dir();
+            self.search = s;
+        }
+    }
+
+    fn poll_search(&mut self) {
+        let show_hidden = self.show_hidden;
+        let Some(search) = &mut self.search else { return; };
+        let update = search.poll(show_hidden);
+        // Cleared query: the folder listing is back; drop late results
+        if !search.has_query() {
+            return;
+        }
+        let entries = match update {
+            SearchUpdate::None => return,
+            SearchUpdate::Replace(entries) => {
+                self.scroll_offset = 0;
+                self.selection = None;
+                self.multi_selection.clear();
+                self.selection_anchor = None;
+                entries
+            }
+            SearchUpdate::Append(entries) => {
+                let mut all = self.listing.entries.clone();
+                all.extend(entries);
+                all
+            }
+        };
+        let mut listing = DirListing { entries };
+        for entry in &mut listing.entries {
+            if let Some(mime) = self.icon_cache.cached_mime(&entry.path) {
+                entry.mime_type = mime.clone();
+            }
+        }
+        crate::fs::sort_entries(&mut listing.entries, self.folders_first, &self.sort);
+        let old = std::mem::replace(&mut self.listing, listing);
+        self.remap_indices(&old);
     }
 
     /// Diff the images rendered this frame against the previous frame.

@@ -2,6 +2,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, Mo
 use ratatui::layout::{Position, Rect};
 
 use crate::{
+    search::{SearchMode, SearchScope},
     actions,
     app::{App, TOPBAR_H, ViewMode},
     events::{ClickKind, ClipOp, ConfirmDeleteState, DragState, DRAG_THRESHOLD},
@@ -17,6 +18,29 @@ fn close_menu(app: &mut App) {
     app.menu = None;
 }
 
+
+/// Clicks on the search bar: focus the field or toggle a chip. Clicking
+/// anywhere else moves focus to the results.
+fn search_bar_click(app: &mut App, col: u16, row: u16) -> bool {
+    let Some(search) = &mut app.search else { return false; };
+    let hit = |r: Rect| contains(r, col, row);
+    if hit(search.field_rect) {
+        search.focused = true;
+        return true;
+    }
+    if let Some(i) = search.mode_rects.iter().position(|r| hit(*r)) {
+        let want = if i == 0 { SearchMode::Name } else { SearchMode::Content };
+        if search.mode != want { search.toggle_mode(); app.search_changed(); }
+        return true;
+    }
+    if let Some(i) = search.scope_rects.iter().position(|r| hit(*r)) {
+        let want = if i == 0 { SearchScope::Here } else { SearchScope::Home };
+        if search.scope != want { search.toggle_scope(); app.search_changed(); }
+        return true;
+    }
+    search.focused = false;
+    false
+}
 
 fn contains(rect: Rect, col: u16, row: u16) -> bool {
     rect.contains(Position { x: col, y: row })
@@ -185,8 +209,34 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
+    // Search field focused: typing edits the query
+    if let Some(search) = &mut app.search
+        && search.focused
+    {
+        match ev.code {
+            KeyCode::Esc => app.close_search(),
+            KeyCode::Enter | KeyCode::Down => {
+                search.focused = false;
+                if app.selection.is_none() && !app.listing.entries.is_empty() {
+                    app.selection = Some(0);
+                }
+            }
+            KeyCode::Tab => { search.toggle_mode(); app.search_changed(); }
+            KeyCode::BackTab => { search.toggle_scope(); app.search_changed(); }
+            KeyCode::Backspace => { search.query.pop(); app.search_changed(); }
+            KeyCode::Char(c) if !ev.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                search.query.push(c);
+                app.search_changed();
+            }
+            _ => {}
+        }
+        return false;
+    }
+
     // Normal navigation. Modifier combos must precede their plain-key arms.
     match ev.code {
+        KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::CONTROL) => app.open_search(),
+        KeyCode::Esc if app.search.is_some() => app.close_search(),
         KeyCode::Char('q') | KeyCode::Char('Q')
             if ev.modifiers.difference(KeyModifiers::SHIFT).is_empty() =>
         {
@@ -331,6 +381,7 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             }
 
             if path_completion_hit(app, col, row) { return; }
+            if search_bar_click(app, col, row) { return; }
             if app.path_bar_editing && !contains(app.topbar_path_rect, col, row) {
                 app.cancel_path_edit();
             }

@@ -7,6 +7,7 @@ mod fs;
 mod handler;
 mod icons;
 mod places;
+mod search;
 mod thumbs;
 mod ui;
 mod user_actions;

@@ -23,7 +23,18 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         app.selection.into_iter().collect()
     };
 
+    let searching = app.search.as_ref().filter(|s| s.has_query());
+
     match selected.as_slice() {
+        [] if let Some(s) = searching => {
+            let n = entries.len();
+            left.push(Span::raw(if n == 1 { "1 result".to_string() } else { format!("{n} results") }));
+            if s.running {
+                left.push(Span::styled("  searching\u{2026}", muted));
+            } else if s.truncated {
+                left.push(Span::styled(format!("  (first {})", crate::search::MAX_RESULTS), muted));
+            }
+        }
         [] => {
             let dirs = entries.iter().filter(|e| e.is_dir).count();
             let files = entries.len() - dirs;
@@ -37,7 +48,9 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         }
         [i] => {
             if let Some(e) = entries.get(*i) {
-                left.push(Span::raw(format!("\u{201c}{}\u{201d}", e.name)));
+                // In results, show where the file lives
+                let label = if searching.is_some() { display_path(&e.path) } else { e.name.clone() };
+                left.push(Span::raw(format!("\u{201c}{label}\u{201d}")));
                 if !e.is_dir {
                     left.push(sep());
                     left.push(Span::raw(format_size(e.size, e.is_dir)));
@@ -75,4 +88,13 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
 
 fn plural(n: usize, word: &str) -> String {
     if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
+}
+
+/// Path with the home directory shown as ~.
+pub fn display_path(path: &std::path::Path) -> String {
+    match dirs::home_dir().and_then(|h| path.strip_prefix(h).ok().map(|p| p.to_path_buf())) {
+        Some(rel) if rel.as_os_str().is_empty() => "~".to_string(),
+        Some(rel) => format!("~/{}", rel.display()),
+        None => path.display().to_string(),
+    }
 }

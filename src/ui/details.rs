@@ -23,12 +23,13 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     app.grid_cols = 1;
     app.grid_area = area;
 
+    let searching = app.search.as_ref().is_some_and(|s| s.has_query());
     let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
     let header = Row::new(vec![
         Cell::from(" Name"),
         Cell::from(Line::from("Size").alignment(Alignment::Right)),
         Cell::from("Modified"),
-        Cell::from("Type"),
+        Cell::from(if searching { "Location" } else { "Type" }),
     ]).style(header_style).height(1);
 
     // Rows start at scroll_offset so the table, scrolling and click mapping
@@ -50,7 +51,9 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
             let modified = e.modified
                 .map(|t| { let dt: DateTime<Local> = t.into(); dt.format("%Y-%m-%d %H:%M").to_string() })
                 .unwrap_or_default();
-            let type_str = if e.is_dir {
+            let type_str = if searching {
+                e.path.parent().map(crate::ui::statusbar::display_path).unwrap_or_default()
+            } else if e.is_dir {
                 "folder".to_string()
             } else {
                 e.mime_type.clone()
