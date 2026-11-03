@@ -583,6 +583,13 @@ fn handle_topbar_click(app: &mut App, col: u16, row: u16) {
         let r = app.topbar_sort_rect;
         let items = menu::build_sort_menu(app);
         app.menu = Some(MenuState::new(MenuKind::Sort, MenuTarget::Empty, items, (r.x, TOPBAR_H)));
+    } else if contains(app.topbar_search_rect, col, row) {
+        if app.search.is_some() { app.close_search(); } else { app.open_search(); }
+    } else if let Some(path) = app.topbar_crumbs.iter()
+        .find(|(r, _)| contains(*r, col, row))
+        .map(|(_, p)| p.clone())
+    {
+        if path != app.cwd { app.navigate_to(path); }
     } else if contains(app.topbar_path_rect, col, row) {
         app.start_path_edit();
     }

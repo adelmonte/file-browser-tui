@@ -2,7 +2,6 @@ use ratatui::style::Color;
 
 /// Nord palette, as RGB tuples (images get composited onto these) and Colors.
 pub const NORD0: (u8, u8, u8) = (46, 52, 64);
-pub const NORD1: (u8, u8, u8) = (59, 66, 82);
 pub const NORD2: (u8, u8, u8) = (67, 76, 94);
 pub const NORD3: (u8, u8, u8) = (76, 86, 106);
 pub const NORD8: (u8, u8, u8) = (136, 192, 208);
@@ -18,8 +17,6 @@ pub const fn rgb((r, g, b): (u8, u8, u8)) -> Color {
     Color::Rgb(r, g, b)
 }
 
-/// Top and bottom bars.
-pub const BAR_BG: Color = rgb(NORD1);
 /// Recessed fields and popups.
 pub const FIELD_BG: Color = rgb(NORD0);
 /// Borders, separators, de-emphasized text.

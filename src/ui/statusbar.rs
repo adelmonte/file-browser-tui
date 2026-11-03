@@ -3,14 +3,13 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::Paragraph,
 };
 
 use crate::app::App;
 use crate::ui::{details::format_size, theme};
 
 pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
-    f.render_widget(Block::default().style(Style::default().bg(theme::BAR_BG)), area);
 
     let muted = Style::default().fg(theme::MUTED);
     let sep = || Span::styled("  ·  ", muted);

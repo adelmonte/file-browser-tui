@@ -127,7 +127,8 @@ fn usage_bar(usage: f32, width: u16) -> Line<'static> {
     ])
 }
 
-fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Option<(u8, u8, u8)>) {
+/// Draw a theme icon by name (cached separately from file icons).
+pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Option<(u8, u8, u8)>) {
     // Sidebar icons are keyed by theme name, in their own cache
     let key = PathBuf::from(format!("sidebar-icon/{name}"));
     let px = app.picker.font_size().height as u32;

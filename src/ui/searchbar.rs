@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::Paragraph,
 };
 
 use crate::app::App;
@@ -14,13 +14,12 @@ use crate::ui::theme;
 ///  <icon> query█             Name  Content  │  This Folder  Home
 pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(search) = &mut app.search else { return; };
-    f.render_widget(Block::default().style(Style::default().bg(theme::BAR_BG)), area);
 
     let chip = |label: &str, on: bool| {
         let style = if on {
             Style::default().bg(theme::SEL_BG).fg(Color::White)
         } else {
-            Style::default().fg(theme::MUTED)
+            Style::default().fg(theme::TEXT)
         };
         Span::styled(format!(" {label} "), style)
     };
@@ -57,17 +56,18 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
         Rect { x: chips_x, y: area.y, width: area.right() - chips_x, height: 1 },
     );
 
-    // Query field fills the rest, recessed like the path bar
-    let field = Rect {
-        x: area.x + 1,
-        y: area.y,
-        width: chips_x.saturating_sub(area.x + 2),
-        height: 1,
-    };
+    // Query field fills the rest, a rounded recessed field like the path bar
+    let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
+    if outer.width >= 4 {
+        let cap = Style::default().fg(theme::FIELD_BG);
+        f.render_widget(Paragraph::new(Span::styled("\u{e0b6}", cap)), Rect { width: 1, ..outer });
+        f.render_widget(Paragraph::new(Span::styled("\u{e0b4}", cap)), Rect { x: outer.right() - 1, width: 1, ..outer });
+    }
+    let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
     search.field_rect = field;
     let cursor = if search.focused { "\u{2588}" } else { "" };
     let mut line = vec![
-        Span::styled(" \u{f002}  ", Style::default().fg(theme::ACCENT)),
+        Span::styled("\u{f002}  ", Style::default().fg(theme::ACCENT)),
         Span::styled(format!("{}{cursor}", search.query), Style::default().fg(Color::White)),
     ];
     if search.query.is_empty() && !search.focused {

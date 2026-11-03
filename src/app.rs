@@ -179,6 +179,9 @@ pub struct App {
     pub topbar_up_rect: Rect,
     pub topbar_view_rect: Rect,
     pub topbar_sort_rect: Rect,
+    pub topbar_search_rect: Rect,
+    /// Breadcrumb hit areas and the folder each opens.
+    pub topbar_crumbs: Vec<(Rect, PathBuf)>,
     pub topbar_path_rect: Rect,
 
     // Cached layout (updated on each render)
@@ -291,6 +294,8 @@ impl App {
             topbar_up_rect: Rect::default(),
             topbar_view_rect: Rect::default(),
             topbar_sort_rect: Rect::default(),
+            topbar_search_rect: Rect::default(),
+            topbar_crumbs: Vec::new(),
             topbar_path_rect: Rect::default(),
             grid_cols: 8,
             grid_area: Rect::default(),
@@ -529,7 +534,7 @@ impl App {
     }
 
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).
-    fn xdg_folder_icon(path: &std::path::Path) -> Option<String> {
+    pub fn xdg_folder_icon(path: &std::path::Path) -> Option<String> {
         macro_rules! check {
             ($expr:expr, $name:literal) => {
                 if $expr.as_deref() == Some(path) { return Some($name.into()); }

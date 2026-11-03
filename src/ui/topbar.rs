@@ -6,92 +6,125 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
+use std::path::{Path, PathBuf};
+
 use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
 use crate::ui::theme;
 
-const BAR_BG: Color = theme::BAR_BG;
 const PATH_BG: Color = theme::FIELD_BG;
 
+/// Dolphin-style toolbar on the window background: icon buttons, a rounded
+/// location field with the folder's icon and clickable breadcrumbs, then
+/// search and sort.
 pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
-    f.render_widget(Block::default().style(Style::default().bg(BAR_BG)), area);
-
-    // Center content on the middle row of the padded topbar area
-    let content_area = Rect {
-        x: area.x,
-        y: area.y + area.height / 2,
-        width: area.width,
-        height: 1,
-    };
+    let row = Rect { x: area.x, y: area.y + area.height / 2, width: area.width, height: 1 };
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(1),   // left pad
             Constraint::Length(3),   // back
-            Constraint::Length(1),   // gap
             Constraint::Length(3),   // forward
-            Constraint::Length(1),   // gap
             Constraint::Length(3),   // up
             Constraint::Length(2),   // gap
-            Constraint::Length(12),  // view mode button
+            Constraint::Length(5),   // view mode
             Constraint::Length(1),   // gap
-            Constraint::Min(1),      // path bar
+            Constraint::Min(10),     // location field
             Constraint::Length(1),   // gap
-            Constraint::Length(4),   // sort button
+            Constraint::Length(3),   // search
+            Constraint::Length(3),   // sort
+            Constraint::Length(1),   // right pad
         ])
-        .split(content_area);
+        .split(row);
 
     app.topbar_back_rect = chunks[1];
-    app.topbar_fwd_rect = chunks[3];
-    app.topbar_up_rect = chunks[5];
-    app.topbar_view_rect = chunks[7];
-    app.topbar_path_rect = chunks[9];
-    app.topbar_sort_rect = chunks[11];
-
-    let btn = |glyph: &str, enabled: bool| {
-        let style = if enabled {
-            Style::default().bg(BAR_BG)
-        } else {
-            Style::default().bg(BAR_BG).add_modifier(Modifier::DIM)
-        };
-        Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)))
-    };
-
-    f.render_widget(btn("\u{f053}", !app.history_back.is_empty()), chunks[1]);
-    f.render_widget(btn("\u{f054}", !app.history_forward.is_empty()), chunks[3]);
-    f.render_widget(btn("\u{f062}", app.cwd.parent().is_some()), chunks[5]);
+    app.topbar_fwd_rect = chunks[2];
+    app.topbar_up_rect = chunks[3];
+    app.topbar_view_rect = chunks[5];
+    app.topbar_path_rect = chunks[7];
+    app.topbar_search_rect = chunks[9];
+    app.topbar_sort_rect = chunks[10];
 
     let menu_kind = app.menu.as_ref().map(|m| m.kind);
-
-    // View mode button
-    let view_label = format!(" {} {} \u{f0d7}", menu::view_mode_icon(app.view_mode), app.view_mode);
-    let view_style = if menu_kind == Some(MenuKind::View) {
-        Style::default().bg(BAR_BG).add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().bg(BAR_BG)
+    let hover = app.mouse_pos.filter(|_| app.menu.is_none());
+    let button = |f: &mut Frame, rect: Rect, label: &str, enabled: bool, active: bool| {
+        let hovered = hover.is_some_and(|(c, r)| enabled && contains(rect, c, r));
+        let mut style = Style::default().fg(if enabled { theme::TEXT } else { theme::BORDER });
+        if active {
+            style = style.bg(theme::SEL_BG).fg(Color::White);
+        } else if hovered {
+            style = style.bg(theme::HOVER_BG);
+        }
+        f.render_widget(Paragraph::new(label.to_string()).style(style), rect);
     };
-    f.render_widget(Paragraph::new(view_label).style(view_style), chunks[7]);
 
-    // Path bar — recessed field; breadcrumbs when idle, raw text when editing
-    let path_line = if app.path_bar_editing {
-        Line::styled(
-            format!(" {}\u{2588}", app.path_bar_input),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        )
-    } else {
-        breadcrumbs(&app.cwd, chunks[9].width as usize)
-    };
-    f.render_widget(Paragraph::new(path_line).style(Style::default().bg(PATH_BG)), chunks[9]);
+    button(f, chunks[1], " \u{f060} ", !app.history_back.is_empty(), false);
+    button(f, chunks[2], " \u{f061} ", !app.history_forward.is_empty(), false);
+    button(f, chunks[3], " \u{f062} ", app.cwd.parent().is_some(), false);
+    let view = format!(" {} \u{f0d7} ", menu::view_mode_icon(app.view_mode));
+    button(f, chunks[5], &view, true, menu_kind == Some(MenuKind::View));
+    button(f, chunks[9], " \u{f002} ", true, app.search.is_some());
+    button(f, chunks[10], " \u{f0dc} ", true, menu_kind == Some(MenuKind::Sort));
 
-    // Sort button — icon only
-    let sort_style = if menu_kind == Some(MenuKind::Sort) {
-        Style::default().bg(BAR_BG).add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().bg(BAR_BG)
-    };
-    f.render_widget(Paragraph::new(" \u{f0dc} ").style(sort_style), chunks[11]);
+    render_location(f, app, chunks[7]);
     // NOTE: menus/completions rendered in ui/mod.rs AFTER the grid (z-order)
+}
+
+/// Rounded recessed field: folder icon + breadcrumbs, or the typed path.
+fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
+    app.topbar_crumbs.clear();
+    if field.width < 4 {
+        return;
+    }
+    let cap = Style::default().fg(PATH_BG);
+    f.render_widget(Paragraph::new(Span::styled("\u{e0b6}", cap)), Rect { width: 1, ..field });
+    f.render_widget(
+        Paragraph::new(Span::styled("\u{e0b4}", cap)),
+        Rect { x: field.x + field.width - 1, width: 1, ..field },
+    );
+    let body = Rect { x: field.x + 1, width: field.width - 2, ..field };
+    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), body);
+
+    if app.path_bar_editing {
+        let line = Line::styled(format!("{}\u{2588}", app.path_bar_input), Style::default().fg(Color::White));
+        f.render_widget(Paragraph::new(line), body);
+        return;
+    }
+
+    let icon_name = crate::icons::resolver::directory_icon(&app.cwd)
+        .or_else(|| App::xdg_folder_icon(&app.cwd))
+        .unwrap_or_else(|| "folder".into());
+    let icon_rect = Rect { width: 2.min(body.width), ..body };
+    crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, Some(theme::NORD0));
+
+    let crumbs_area = Rect { x: body.x + 3, width: body.width.saturating_sub(3), ..body };
+    let hover = app.mouse_pos.filter(|_| app.menu.is_none());
+    let end = crumbs_area.x + crumbs_area.width;
+    let mut x = crumbs_area.x;
+    let segs = breadcrumbs(&app.cwd, crumbs_area.width as usize);
+    let last = segs.len().saturating_sub(1);
+    for (i, (label, target)) in segs.into_iter().enumerate() {
+        let w = (label.chars().count() as u16).min(end.saturating_sub(x));
+        if w == 0 { break; }
+        let rect = Rect { x, width: w, ..crumbs_area };
+        let style = match &target {
+            None => Style::default().fg(theme::MUTED),
+            Some(_) if i == last => Style::default().fg(Color::White),
+            Some(_) if hover.is_some_and(|(c, r)| contains(rect, c, r)) =>
+                Style::default().fg(Color::White).bg(theme::HOVER_BG),
+            Some(_) => Style::default().fg(theme::TEXT),
+        };
+        f.render_widget(Paragraph::new(Span::styled(label, style)), rect);
+        if let Some(path) = target {
+            app.topbar_crumbs.push((rect, path));
+        }
+        x += w;
+    }
+}
+
+fn contains(r: Rect, col: u16, row: u16) -> bool {
+    col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
 /// Geometry of the path completion dropdown (shared with hit-testing/occlusion).
@@ -149,39 +182,39 @@ pub fn render_path_completions(f: &mut Frame, app: &mut App) {
     );
 }
 
-/// " ~ › Documents › Project" with dim separators and the current folder in
-/// bold. Leading segments collapse to "…" so the end of the path stays visible.
-fn breadcrumbs(path: &std::path::Path, width: usize) -> Line<'static> {
+/// Breadcrumb segments ("~", "Documents", …) with the folder each opens;
+/// separators have no target. Leading segments collapse to "…" so the end
+/// of the path stays visible.
+fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
     let home = dirs::home_dir();
-    let (root, rest) = match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
-        Some(rest) => ("~".to_string(), rest),
-        None => ("/".to_string(), path.strip_prefix("/").unwrap_or(path)),
+    let (mut base, rest, root) = match home.as_deref().and_then(|h| path.strip_prefix(h).ok().map(|r| (h, r))) {
+        Some((h, rest)) => (h.to_path_buf(), rest, "~"),
+        None => (PathBuf::from("/"), path.strip_prefix("/").unwrap_or(path), "/"),
     };
-    let mut segs: Vec<String> = vec![root];
-    segs.extend(rest.iter().map(|s| s.to_string_lossy().into_owned()));
+    let mut segs: Vec<(String, PathBuf)> = vec![(root.to_string(), base.clone())];
+    for s in rest.iter() {
+        base = base.join(s);
+        segs.push((s.to_string_lossy().into_owned(), base.clone()));
+    }
 
-    const SEP: &str = " \u{203a} ";
-    let len = |segs: &[String]| 1 + segs.iter().map(|s| s.chars().count()).sum::<usize>() + SEP.chars().count() * segs.len();
+    const SEP: &str = "  \u{203a}  ";
+    let len = |segs: &[(String, PathBuf)]| segs.iter().map(|s| s.0.chars().count() + 5).sum::<usize>();
     let mut skipped = false;
-    while segs.len() > 1 && len(&segs) > width {
+    while segs.len() > 1 && len(&segs) + 3 > width {
         segs.remove(0);
         skipped = true;
     }
-
-    let sep = Span::styled(SEP, Style::default().fg(theme::MUTED));
-    let mut spans = vec![Span::raw(" ")];
+    let mut out = Vec::new();
     if skipped {
-        spans.push(Span::styled("\u{2026}", Style::default().fg(theme::MUTED)));
-        spans.push(sep.clone());
+        out.push(("\u{2026}".to_string(), None));
+        out.push((SEP.to_string(), None));
     }
-    let last = segs.len() - 1;
-    for (i, seg) in segs.into_iter().enumerate() {
-        if i == last {
-            spans.push(Span::styled(seg, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
-        } else {
-            spans.push(Span::raw(seg));
-            spans.push(sep.clone());
+    let n = segs.len();
+    for (i, (label, p)) in segs.into_iter().enumerate() {
+        out.push((label, Some(p)));
+        if i + 1 < n {
+            out.push((SEP.to_string(), None));
         }
     }
-    Line::from(spans)
+    out
 }
