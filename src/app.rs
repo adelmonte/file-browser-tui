@@ -235,7 +235,7 @@ impl App {
             cell_h,
             icon_rows,
             picker,
-            icon_cache: IconCache::new(),
+            icon_cache: IconCache::new(config.folder_previews),
             thumb_cache: ThumbCache::new(),
             dir_event_rx,
             mount_event_rx,

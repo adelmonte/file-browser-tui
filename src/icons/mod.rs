@@ -1,3 +1,4 @@
+pub mod folder_preview;
 pub mod raster;
 pub mod resolver;
 
@@ -52,7 +53,9 @@ pub struct IconCache {
 }
 
 impl IconCache {
-    pub fn new() -> Self {
+    /// `folder_previews`: follow each folder icon with a version showing
+    /// previews of its media (see `folder_preview`).
+    pub fn new(folder_previews: bool) -> Self {
         let (tx_work, rx_work) = mpsc::sync_channel::<IconRequest>(128);
         let (tx_image, rx_image) = mpsc::channel::<IconImageReady>();
 
@@ -70,8 +73,18 @@ impl IconCache {
                             .map_err(|e| { tracing::warn!("load_icon {:?}: {e}", icon_path); e })
                             .ok()
                     });
+                    let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
+                    let preview_base = if wants_preview { image.clone() } else { None };
+
                     // Always send back (even if no icon) so mime_type reaches the listing
-                    let _ = tx.send(IconImageReady { path: req.path, image, mime_type: mime });
+                    let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone() });
+
+                    // Plain folder shows immediately; the preview replaces it when ready
+                    if let Some(base) = preview_base
+                        && let Some(preview) = folder_preview::build(&req.path, &base)
+                    {
+                        let _ = tx.send(IconImageReady { path: req.path, image: Some(preview), mime_type: mime });
+                    }
                 });
             }
         });
@@ -108,6 +121,10 @@ impl IconCache {
         let mut mime_updates = Vec::new();
         while let Ok(ready) = self.rx_image.try_recv() {
             self.pending.remove(&ready.path);
+            // An upgrade (folder preview) replaces an icon already on screen
+            if self.images.contains(&ready.path) {
+                self.invalidate(&ready.path);
+            }
             self.images.put(ready.path.clone(), ready.image);
             self.mimes.put(ready.path.clone(), ready.mime_type.clone());
             mime_updates.push((ready.path, ready.mime_type));

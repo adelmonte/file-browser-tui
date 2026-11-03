@@ -30,6 +30,9 @@ pub struct Config {
     pub folder_icons: HashMap<String, String>,
     #[serde(default)]
     pub context_menu: ContextMenuConfig,
+    /// Show previews of a folder's images/videos on its icon, Dolphin-style.
+    #[serde(default = "default_true")]
+    pub folder_previews: bool,
     /// Set when the on-disk config failed to parse, so we never overwrite it.
     #[serde(skip)]
     read_only: bool,
@@ -114,6 +117,7 @@ impl Default for Config {
             terminal_command: String::new(),
             folder_icons: HashMap::new(),
             context_menu: ContextMenuConfig::default(),
+            folder_previews: true,
             read_only: false,
         }
     }
