@@ -10,22 +10,18 @@ pub fn resolve_names_and_mime(path: &Path, is_dir: bool) -> (Vec<String>, Option
         return (vec!["folder".into()], Some("inode/directory".into()));
     }
 
-    let ext = path.extension().and_then(|e| e.to_str());
-    let mime = ext.and_then(|_| new_mime_guess::from_path(path).first_raw());
-
-    match mime {
-        Some(mime) => (icon_names_for_mime(mime), Some(mime.to_string())),
-        // Extensionless or unknown: ask gio (rare path)
+    match crate::mime::detect(path) {
+        Some(mime) => (icon_names_for_mime(&mime), Some(mime)),
+        // No name match (extensionless etc.): ask gio, which sniffs content
         None => query_gio_info(path),
     }
 }
 
 /// Map a mime type to freedesktop icon name candidates, most specific first.
 fn icon_names_for_mime(mime: &str) -> Vec<String> {
-    let exact = mime.replace('/', "-");
     let major = mime.split('/').next().unwrap_or("");
 
-    let mut names = vec![exact];
+    let mut names = crate::mime::icon_names(mime);
 
     // Common aliases that themes actually ship
     match mime {
@@ -156,3 +152,5 @@ fn fallback_icon(is_dir: bool) -> Option<(PathBuf, bool)> {
     }
     None
 }
+
+

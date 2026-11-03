@@ -6,6 +6,7 @@ mod events;
 mod fs;
 mod handler;
 mod icons;
+mod mime;
 mod places;
 mod search;
 mod thumbs;

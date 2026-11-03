@@ -23,7 +23,6 @@ nix              = { version = "0.30.1", features = ["inotify", "poll", "fs", "u
 dirs             = "5.0"
 chrono           = { version = "0.4", default-features = false, features = ["std", "clock"] }
 strum            = { version = "0.27", features = ["derive"] }
-new_mime_guess = "4.0.4"
 md5 = "0.8.0"
 png = "0.18"
 unicode-width = "0.2"

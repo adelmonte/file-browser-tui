@@ -42,10 +42,7 @@ impl PropertiesState {
         } else if meta.as_ref().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
             "Symbolic link".to_string()
         } else {
-            new_mime_guess::from_path(path)
-                .first_raw()
-                .unwrap_or("application/octet-stream")
-                .to_string()
+            crate::mime::detect(path).unwrap_or_else(|| "application/octet-stream".into())
         };
 
         let size_str = if is_dir {

@@ -175,7 +175,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 "inode/directory".to_string()
             } else {
                 entry.mime_type.clone()
-                    .or_else(|| new_mime_guess::from_path(&entry.path).first_raw().map(String::from))
+                    .or_else(|| crate::mime::guess_by_name(&entry.path))
                     .unwrap_or_else(|| "application/octet-stream".into())
             };
             push_user_actions(app, &mut items, &mime);

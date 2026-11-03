@@ -57,7 +57,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
                 "folder".to_string()
             } else {
                 e.mime_type.clone()
-                    .or_else(|| new_mime_guess::from_path(&e.path).first_raw().map(str::to_string))
+                    .or_else(|| crate::mime::guess_by_name(&e.path))
                     .unwrap_or_else(|| "file".to_string())
             };
 

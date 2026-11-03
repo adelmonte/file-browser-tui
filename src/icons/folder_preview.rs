@@ -62,9 +62,9 @@ fn media_in(dir: &Path) -> Vec<(PathBuf, String)> {
         .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .filter_map(|e| {
-            let mime = new_mime_guess::from_path(e.path()).first_raw()?;
+            let mime = crate::mime::guess_by_name(&e.path())?;
             let usable = (mime.starts_with("image/") && mime != "image/svg+xml") || mime.starts_with("video/");
-            usable.then(|| (e.path(), mime.to_string()))
+            usable.then(|| (e.path(), mime))
         })
         .collect();
     media.sort_by(|a, b| a.0.cmp(&b.0));
