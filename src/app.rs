@@ -208,8 +208,8 @@ impl App {
             field: config.sort.field,
             ascending: config.sort.ascending,
         };
-        let listing = crate::fs::read_dir(&cwd, config.show_hidden, config.folders_first, &sort)
-            .unwrap_or_default();
+        // Filled by apply_dir_state + reload_dir below
+        let listing = DirListing::default();
 
         let places = crate::places::places_from_config(&config.places);
         let devices = crate::places::default_devices();
@@ -219,15 +219,11 @@ impl App {
         crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
 
         let terminal_size = Size { width: 220, height: 50 };
-        let mut icon_size_idx = config.icon_size_idx.min(ICON_LEVELS.len() - 1);
-        let mut view_mode = config.default_view;
-        if let Some(state) = dirstates.get(&cwd) {
-            if let Some(v) = state.view { view_mode = v; }
-            if let Some(idx) = state.icon_size_idx { icon_size_idx = idx.min(ICON_LEVELS.len() - 1); }
-        }
+        let icon_size_idx = config.icon_size_idx.min(ICON_LEVELS.len() - 1);
+        let view_mode = config.default_view;
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
-        Ok(Self {
+        let mut app = Self {
             watched_path: cwd.clone(),
             sidebar_w: config.sidebar_w.clamp(10, 50),
             sidebar_dragging: false,
@@ -291,7 +287,10 @@ impl App {
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
-        })
+        };
+        app.apply_dir_state();
+        app.reload_dir();
+        Ok(app)
     }
 
     pub fn reload_dir(&mut self) {
@@ -406,22 +405,53 @@ impl App {
         self.reload_dir();
     }
 
-    /// Apply the saved per-directory view settings, if any.
+    /// View settings for the current folder: the global defaults from the
+    /// config, overridden by whatever was saved for this folder (Dolphin's
+    /// per-folder view properties).
     fn apply_dir_state(&mut self) {
-        let Some(state) = self.dirstates.get(&self.cwd) else { return; };
-        let (view, size, field, asc) = (
-            state.view,
-            state.icon_size_idx,
-            state.sort_field,
-            state.sort_ascending,
-        );
-        if let Some(v) = view
-            && v != self.view_mode { self.view_mode = v; }
-        if let Some(idx) = size {
-            self.set_icon_size(idx.min(ICON_LEVELS.len() - 1));
-        }
-        if let Some(f) = field { self.sort.field = f; }
-        if let Some(a) = asc   { self.sort.ascending = a; }
+        let state = self.dirstates.get(&self.cwd).cloned().unwrap_or_default();
+        let c = &self.config;
+        self.view_mode = state.view.unwrap_or(c.default_view);
+        self.sort = SortState {
+            field: state.sort_field.unwrap_or(c.sort.field),
+            ascending: state.sort_ascending.unwrap_or(c.sort.ascending),
+        };
+        self.folders_first = state.folders_first.unwrap_or(c.folders_first);
+        self.show_hidden = state.show_hidden.unwrap_or(c.show_hidden);
+        let idx = state.icon_size_idx.unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
+        self.set_icon_size(idx);
+    }
+
+    /// Save the current sort/filter settings for this folder and re-list.
+    fn save_sort_state(&mut self) {
+        let (sort, folders_first, show_hidden) = (self.sort.clone(), self.folders_first, self.show_hidden);
+        self.dirstates.update(&self.cwd, |s| {
+            s.sort_field = Some(sort.field);
+            s.sort_ascending = Some(sort.ascending);
+            s.folders_first = Some(folders_first);
+            s.show_hidden = Some(show_hidden);
+        });
+        self.reload_dir();
+    }
+
+    pub fn set_sort_field(&mut self, field: SortField) {
+        self.sort.field = field;
+        self.save_sort_state();
+    }
+
+    pub fn set_sort_ascending(&mut self, ascending: bool) {
+        self.sort.ascending = ascending;
+        self.save_sort_state();
+    }
+
+    pub fn toggle_folders_first(&mut self) {
+        self.folders_first = !self.folders_first;
+        self.save_sort_state();
+    }
+
+    pub fn toggle_show_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.save_sort_state();
     }
 
     /// Set view mode and persist it for the current directory.
@@ -429,7 +459,7 @@ impl App {
         if view != self.view_mode {
             self.view_mode = view;
         }
-        self.dirstates.set_view(&self.cwd, view);
+        self.dirstates.update(&self.cwd, |s| s.view = Some(view));
     }
 
     fn set_icon_size(&mut self, idx: usize) {
@@ -453,7 +483,7 @@ impl App {
             .clamp(0, ICON_LEVELS.len() as i8 - 1) as usize;
         if new_idx != self.icon_size_idx {
             self.set_icon_size(new_idx);
-            self.dirstates.set_icon_size(&self.cwd, new_idx);
+            self.dirstates.update(&self.cwd, |s| s.icon_size_idx = Some(new_idx));
         }
     }
 
@@ -847,3 +877,4 @@ fn free_space(path: &std::path::Path) -> Option<u64> {
     let st = nix::sys::statvfs::statvfs(path).ok()?;
     Some(st.blocks_available() as u64 * st.fragment_size() as u64)
 }
+

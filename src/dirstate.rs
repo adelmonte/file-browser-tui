@@ -16,6 +16,10 @@ pub struct DirState {
     pub sort_field: Option<SortField>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_ascending: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folders_first: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_hidden: Option<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -55,20 +59,9 @@ impl DirStates {
         self.map.get(dir.to_string_lossy().as_ref())
     }
 
-    pub fn set_view(&mut self, dir: &Path, view: ViewMode) {
-        self.map.entry(dir.to_string_lossy().to_string()).or_default().view = Some(view);
-        self.save();
-    }
-
-    pub fn set_icon_size(&mut self, dir: &Path, idx: usize) {
-        self.map.entry(dir.to_string_lossy().to_string()).or_default().icon_size_idx = Some(idx);
-        self.save();
-    }
-
-    pub fn set_sort(&mut self, dir: &Path, field: SortField, ascending: bool) {
-        let entry = self.map.entry(dir.to_string_lossy().to_string()).or_default();
-        entry.sort_field = Some(field);
-        entry.sort_ascending = Some(ascending);
+    /// Modify the saved state for `dir` and persist it.
+    pub fn update(&mut self, dir: &Path, f: impl FnOnce(&mut DirState)) {
+        f(self.map.entry(dir.to_string_lossy().to_string()).or_default());
         self.save();
     }
 }

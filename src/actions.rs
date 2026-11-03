@@ -89,26 +89,10 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
         }
 
         MenuAction::SetView(v) => app.set_view_mode(v),
-        MenuAction::SetSortField(f) => {
-            app.sort.field = f;
-            let cwd = app.cwd.clone();
-            app.dirstates.set_sort(&cwd, app.sort.field, app.sort.ascending);
-            app.reload_dir();
-        }
-        MenuAction::SetAscending(asc) => {
-            app.sort.ascending = asc;
-            let cwd = app.cwd.clone();
-            app.dirstates.set_sort(&cwd, app.sort.field, app.sort.ascending);
-            app.reload_dir();
-        }
-        MenuAction::ToggleFoldersFirst => {
-            app.folders_first = !app.folders_first;
-            app.reload_dir();
-        }
-        MenuAction::ToggleShowHidden => {
-            app.show_hidden = !app.show_hidden;
-            app.reload_dir();
-        }
+        MenuAction::SetSortField(f) => app.set_sort_field(f),
+        MenuAction::SetAscending(asc) => app.set_sort_ascending(asc),
+        MenuAction::ToggleFoldersFirst => app.toggle_folders_first(),
+        MenuAction::ToggleShowHidden => app.toggle_show_hidden(),
 
         MenuAction::Custom(idx) => run_custom(app, idx, target),
 

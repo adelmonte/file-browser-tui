@@ -202,14 +202,8 @@ fn build_config(app: &App) -> Config {
         path: p.path.clone(),
         icon: p.icon.clone(),
     }).collect();
-    config.default_view = app.view_mode;
-    config.sort = config::SortConfig {
-        field: app.sort.field,
-        ascending: app.sort.ascending,
-    };
-    config.show_hidden = app.show_hidden;
-    config.folders_first = app.folders_first;
-    config.icon_size_idx = app.icon_size_idx;
+    // View/sort settings are per folder (dirstate.toml); the config's
+    // values are the defaults for folders without their own
     config.sidebar_w = app.sidebar_w;
     config
 }

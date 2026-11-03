@@ -306,10 +306,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         KeyCode::Char(']') => app.navigate_forward(),
 
         // Hidden files toggle
-        KeyCode::Char('.') => {
-            app.show_hidden = !app.show_hidden;
-            app.reload_dir();
-        }
+        KeyCode::Char('.') => app.toggle_show_hidden(),
 
         // Clipboard
         KeyCode::Char('c') => actions::clip_selection(app, ClipOp::Copy),

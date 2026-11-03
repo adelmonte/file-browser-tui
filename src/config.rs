@@ -66,12 +66,18 @@ pub struct PlaceConfig {
     pub icon: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SortConfig {
     #[serde(default)]
     pub field: SortField,
     #[serde(default = "default_true")]
     pub ascending: bool,
+}
+
+impl Default for SortConfig {
+    fn default() -> Self {
+        Self { field: SortField::default(), ascending: true }
+    }
 }
 
 fn default_true() -> bool {
