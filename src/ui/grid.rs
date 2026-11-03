@@ -211,17 +211,19 @@ fn render_cell_image(
         .map(|m| m.starts_with("image/") || m.starts_with("video/"))
         .unwrap_or(false);
 
-    let cell_w = app.cell_w;
-    let icon_rows = app.icon_rows;
+    let (cols, rows) = (icon_rect.width, icon_rect.height);
 
     let drew = {
         let proto = if is_media {
-            app.thumb_cache.get_mut(&app.picker, &entry_path, cell_w, icon_rows, bg)
+            app.thumb_cache.get_mut(&app.picker, &entry_path, cols, rows, bg)
         } else {
-            app.icon_cache.get_mut(&app.picker, &entry_path, cell_w, icon_rows, bg)
+            app.icon_cache.get_mut(&app.picker, &entry_path, cols, rows, bg)
         };
         if let Some(proto) = proto {
             f.render_widget(Clear, icon_rect);
+            if let Some(c) = bg {
+                f.render_widget(Block::default().style(Style::default().bg(rgb(c))), icon_rect);
+            }
             f.render_stateful_widget(StatefulImage::new(), icon_rect, proto);
             // Per-cell placeholders: overlays drawn later cover the image
             // cell by cell instead of the image having to be hidden.

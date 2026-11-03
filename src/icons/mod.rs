@@ -26,17 +26,38 @@ struct IconRequest {
     icon_override: Option<String>,
 }
 
-/// Flatten an RGBA image onto a solid background color so the highlight shows
-/// behind the icon (Kitty composites alpha over the terminal bg, not cell bg).
-pub fn flatten_onto(img: &image::DynamicImage, rgb: (u8, u8, u8)) -> image::DynamicImage {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let mut canvas = image::RgbaImage::from_pixel(w, h, image::Rgba([rgb.0, rgb.1, rgb.2, 255]));
-    image::imageops::overlay(&mut canvas, &rgba, 0, 0);
+/// Fit `img` into a box of `cols`×`rows` terminal cells and pad it to exactly
+/// that box, centered horizontally and resting on the bottom edge (right
+/// above the label). Image protocols pin a fitted image to the top-left, so
+/// without this, portrait thumbnails sit off-center and wide ones float.
+/// With `bg`, the padding and any transparency are filled with that color so
+/// a selection highlight covers the whole box (Kitty composites alpha over
+/// the terminal background, not the cell background).
+pub fn fit_to_cells(
+    img: &image::DynamicImage,
+    picker: &Picker,
+    cols: u16,
+    rows: u16,
+    bg: Option<(u8, u8, u8)>,
+) -> image::DynamicImage {
+    let font = picker.font_size();
+    let (box_w, box_h) = (
+        (cols as u32 * font.width as u32).max(1),
+        (rows as u32 * font.height as u32).max(1),
+    );
+    let fitted = img.resize(box_w, box_h, image::imageops::FilterType::Triangle).to_rgba8();
+    let fill = match bg {
+        Some((r, g, b)) => image::Rgba([r, g, b, 255]),
+        None => image::Rgba([0, 0, 0, 0]),
+    };
+    let mut canvas = image::RgbaImage::from_pixel(box_w, box_h, fill);
+    let x = (box_w - fitted.width()) / 2;
+    let y = box_h - fitted.height();
+    image::imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);
     image::DynamicImage::ImageRgba8(canvas)
 }
 
-/// Protocol cache key: (path, cell_w, cell_h, bg color variant).
+/// Protocol cache key: (path, box cols, box rows, bg color variant).
 type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>);
 
 pub struct IconCache {
@@ -137,17 +158,14 @@ impl IconCache {
         &mut self,
         picker: &Picker,
         path: &Path,
-        cell_w: u16,
-        cell_h: u16,
+        cols: u16,
+        rows: u16,
         bg: Option<(u8, u8, u8)>,
     ) -> Option<&mut StatefulProtocol> {
-        let key = (path.to_path_buf(), cell_w, cell_h, bg);
+        let key = (path.to_path_buf(), cols, rows, bg);
         if !self.protocols.contains(&key) {
             let img = self.images.get(path)?.as_ref()?;
-            let img = match bg {
-                Some(rgb) => flatten_onto(img, rgb),
-                None => img.clone(),
-            };
+            let img = fit_to_cells(img, picker, cols, rows, bg);
             self.protocols.put(key.clone(), picker.new_resize_protocol(img));
         }
         self.protocols.get_mut(&key)
