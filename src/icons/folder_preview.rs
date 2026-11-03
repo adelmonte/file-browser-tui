@@ -1,5 +1,5 @@
-//! Dolphin-style folder previews: a few of the folder's images or videos
-//! drawn as white-bordered prints, tossed at slight angles over the folder icon.
+//! Dolphin-style folder previews: up to four of the folder's images or videos
+//! as thin-bordered prints in a 2x2 grid over the folder icon.
 
 use std::path::{Path, PathBuf};
 
@@ -7,17 +7,17 @@ use image::{DynamicImage, Rgba, RgbaImage, imageops};
 
 /// Below this the prints are too small to read.
 pub const MIN_PX: u32 = 48;
-const MAX_PRINTS: usize = 3;
+const MAX_PRINTS: usize = 4;
 /// Entries scanned per folder looking for media.
 const SCAN_LIMIT: usize = 500;
 const PAPER: Rgba<u8> = Rgba([250, 250, 247, 255]);
 
-/// (center x, center y, degrees) as fractions of the icon, back to front.
-const LAYOUTS: [&[(f32, f32, f32)]; 3] = [
-    &[(0.50, 0.58, -5.0)],
-    &[(0.40, 0.55, -9.0), (0.60, 0.60, 6.0)],
-    &[(0.35, 0.54, -11.0), (0.65, 0.53, 8.0), (0.50, 0.62, -3.0)],
-];
+/// 2x2 grid over the folder body, as fractions of the icon: left, top,
+/// right, bottom, and the gap between tiles.
+const GRID: (f32, f32, f32, f32) = (0.15, 0.31, 0.85, 0.86);
+const GAP: f32 = 0.035;
+/// Slight alternating tilt per quadrant (TL, TR, BL, BR), in degrees.
+const TILT: [f32; 4] = [-2.5, 2.0, 1.5, -2.0];
 
 /// Compose previews of `dir`'s media onto `folder`, or None if it has none.
 pub fn build(dir: &Path, folder: &DynamicImage) -> Option<DynamicImage> {
@@ -31,18 +31,23 @@ pub fn build(dir: &Path, folder: &DynamicImage) -> Option<DynamicImage> {
     }
 
     let mut canvas = folder.to_rgba8();
-    let size = canvas.width().min(canvas.height()) as f32;
-    // Fewer prints get to be bigger
-    let print_max = size * [0.56, 0.50, 0.44][photos.len() - 1];
+    let (w, h) = (canvas.width() as f32, canvas.height() as f32);
+    let (l, t, r, b) = GRID;
+    let tile_w = ((r - l - GAP) / 2.0 * w).max(4.0);
+    let tile_h = ((b - t - GAP) / 2.0 * h).max(4.0);
 
-    for (photo, &(cx, cy, deg)) in photos.iter().zip(LAYOUTS[photos.len() - 1]) {
-        let print = rotate(&make_print(photo, print_max), deg);
-        let shadow = shadow_of(&print, size);
-        let x = (cx * canvas.width() as f32) as i64 - print.width() as i64 / 2;
-        let y = (cy * canvas.height() as f32) as i64 - print.height() as i64 / 2;
-        let off = (size * 0.015).max(1.0) as i64;
+    for (i, photo) in photos.iter().enumerate() {
+        let (col, row) = ((i % 2) as f32, (i / 2) as f32);
+        let cx = l * w + tile_w / 2.0 + col * (tile_w + GAP * w);
+        let cy = t * h + tile_h / 2.0 + row * (tile_h + GAP * h);
+
+        let print = rotate(&make_print(photo, tile_w as u32, tile_h as u32), TILT[i]);
+        let shadow = shadow_of(&print, w.min(h));
+        let x = cx as i64 - print.width() as i64 / 2;
+        let y = cy as i64 - print.height() as i64 / 2;
+        let off = (w.min(h) * 0.01).max(1.0) as i64;
         let pad = (shadow.width() as i64 - print.width() as i64) / 2;
-        imageops::overlay(&mut canvas, &shadow, x - pad + off / 2, y - pad + off);
+        imageops::overlay(&mut canvas, &shadow, x - pad, y - pad + off);
         imageops::overlay(&mut canvas, &print, x, y);
     }
     Some(DynamicImage::ImageRgba8(canvas))
@@ -68,12 +73,12 @@ fn media_in(dir: &Path) -> Vec<(PathBuf, String)> {
     media
 }
 
-/// The photo fitted into `max` px with a white paper border.
-fn make_print(photo: &DynamicImage, max: f32) -> RgbaImage {
-    let border = (max * 0.06).round().max(2.0) as u32;
-    let inner = (max as u32).saturating_sub(border * 2).max(1);
-    let photo = photo.resize(inner, inner, imageops::FilterType::Triangle).to_rgba8();
-    let mut print = RgbaImage::from_pixel(photo.width() + border * 2, photo.height() + border * 2, PAPER);
+/// The photo center-cropped to fill a `w`×`h` tile, inside a thin paper border.
+fn make_print(photo: &DynamicImage, w: u32, h: u32) -> RgbaImage {
+    let border = ((w.min(h) as f32) * 0.035).round().max(1.0) as u32;
+    let (iw, ih) = (w.saturating_sub(border * 2).max(1), h.saturating_sub(border * 2).max(1));
+    let photo = photo.resize_to_fill(iw, ih, imageops::FilterType::Triangle).to_rgba8();
+    let mut print = RgbaImage::from_pixel(iw + border * 2, ih + border * 2, PAPER);
     imageops::overlay(&mut print, &photo, border as i64, border as i64);
     print
 }
@@ -81,7 +86,7 @@ fn make_print(photo: &DynamicImage, max: f32) -> RgbaImage {
 /// Soft drop shadow matching the print's (rotated) silhouette, padded so
 /// the blur has room; centered on the print.
 fn shadow_of(print: &RgbaImage, icon_size: f32) -> RgbaImage {
-    let sigma = (icon_size * 0.02).max(1.0);
+    let sigma = (icon_size * 0.012).max(0.8);
     let pad = (sigma * 2.0).ceil() as u32;
     let mut shadow = RgbaImage::new(print.width() + pad * 2, print.height() + pad * 2);
     for (x, y, p) in print.enumerate_pixels() {
@@ -135,4 +140,5 @@ fn rotate(img: &RgbaImage, deg: f32) -> RgbaImage {
         Rgba([un(acc[0]), un(acc[1]), un(acc[2]), (acc[3] * 255.0).round() as u8])
     })
 }
+
 
