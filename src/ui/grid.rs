@@ -12,10 +12,6 @@ use crate::events::{ClipOp, DragState};
 use crate::ui::{kitty, theme::{self, rgb}};
 
 
-pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
-    (area.width / cell_w).max(1)
-}
-
 /// Inset a content pane for a grid of `cell_w`-wide cells: at least one
 /// padding column per side, leftover width split evenly so the grid sits
 /// centered instead of piling the slack on the right.
@@ -61,10 +57,17 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
     f.render_widget(Block::default(), area);
 
-    let area = centered_grid_area(area, cell_w);
-    let cols = grid_cols(area, cell_w);
+    // Spread the leftover width between columns (Dolphin's layout) instead
+    // of leaving it as margins; items keep their size within the pitch
+    let usable = area.width.saturating_sub(2);
+    let cols = (usable / cell_w).max(1);
+    let pitch = (usable / cols).max(cell_w).min(area.width);
+    let width = (cols * pitch).min(area.width);
+    let area = Rect { x: area.x + area.width.saturating_sub(width) / 2, width, ..area };
     app.grid_cols = cols;
     app.grid_area = area;
+    app.grid_pitch = pitch;
+    let item_off = (pitch - cell_w) / 2;
 
     let entries_len = app.listing.entries.len();
     if entries_len == 0 {
@@ -82,7 +85,13 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
     let rows_visible = (area.height / cell_h + 2) as usize;
     // One column of breathing room on each side so neighbouring labels never touch
-    let label_w = if cell_w >= 6 { cell_w as usize - 2 } else { cell_w as usize };
+    let label_w = if cell_w >= 6 { cell_w as usize - 1 } else { cell_w as usize };
+
+    let hovered = if app.menu.is_none() && matches!(app.drag_state, DragState::Idle) {
+        app.mouse_pos.and_then(|p| cell_at_pos(p, area, app.scroll_offset, cols, entries_len, (pitch, cell_h)))
+    } else {
+        None
+    };
 
     for row_idx in 0..rows_visible {
         let abs_row = app.scroll_offset + row_idx;
@@ -90,7 +99,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             let entry_idx = abs_row * cols as usize + col_idx;
             if entry_idx >= entries_len { break; }
 
-            let cell_x = area.x + col_idx as u16 * cell_w;
+            let cell_x = area.x + col_idx as u16 * pitch + item_off;
             let cell_y = area.y + row_idx as u16 * cell_h;
             if cell_y >= area.y + area.height { break; }
 
@@ -132,6 +141,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 Some(theme::SEL)
             } else if is_drag_target {
                 Some(theme::NORD14)
+            } else if hovered == Some(entry_idx) {
+                Some(theme::HOVER)
             } else {
                 None
             };
@@ -171,6 +182,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().bg(theme::SEL_BG).fg(Color::White)
             } else if is_drag_target {
                 Style::default().bg(rgb(theme::NORD14)).fg(Color::Black)
+            } else if hovered == Some(entry_idx) {
+                Style::default().bg(theme::HOVER_BG)
             } else {
                 Style::default()
             };

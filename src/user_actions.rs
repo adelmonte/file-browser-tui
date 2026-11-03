@@ -259,29 +259,56 @@ fn unescape(v: &str) -> String {
 pub struct KdeConnectDevice {
     pub id: String,
     pub name: String,
+    /// Connected right now (paired devices are listed either way).
+    pub reachable: bool,
 }
 
 /// Poll reachable KDE Connect devices in the background (no-op if
 /// kdeconnect-cli isn't installed), so menus never block on D-Bus.
 pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice>>) {
     std::thread::spawn(move || loop {
-        let out = match Command::new("kdeconnect-cli")
-            .args(["-a", "--id-name-only"])
-            .stdin(Stdio::null()).stderr(Stdio::null())
-            .output()
-        {
-            Ok(o) => o,
-            Err(_) => return, // not installed
+        let list = |flag: &str| -> Option<Vec<(String, String)>> {
+            let out = Command::new("kdeconnect-cli")
+                .args([flag, "--id-name-only"])
+                .stdin(Stdio::null()).stderr(Stdio::null())
+                .output().ok()?;
+            Some(String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| {
+                let (id, name) = l.trim().split_once(' ')?;
+                Some((id.to_string(), name.trim().to_string()))
+            }).collect())
         };
-        let devices = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| {
-            let (id, name) = l.trim().split_once(' ')?;
-            Some(KdeConnectDevice { id: id.to_string(), name: name.trim().to_string() })
+        let Some(paired) = list("-l") else { return; }; // not installed
+        let reachable = list("-a").unwrap_or_default();
+        let mut devices: Vec<KdeConnectDevice> = paired.into_iter().map(|(id, name)| {
+            let reachable = reachable.iter().any(|(r, _)| *r == id);
+            KdeConnectDevice { id, name, reachable }
         }).collect();
+        devices.sort_by_key(|d| !d.reachable);
         if tx.send(devices).is_err() {
             return;
         }
         std::thread::sleep(std::time::Duration::from_secs(10));
     });
+}
+
+/// Mount a device's storage over KDE Connect's SFTP plugin and return the
+/// mount point (blocks for up to a few seconds).
+pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Option<PathBuf> {
+    let object = format!("/modules/kdeconnect/devices/{}/sftp", device.id);
+    let call = |method: &str| {
+        Command::new("gdbus")
+            .args(["call", "--session", "--dest", "org.kde.kdeconnect", "--object-path", &object,
+                   "--method", &format!("org.kde.kdeconnect.device.sftp.{method}")])
+            .stdin(Stdio::null()).stderr(Stdio::null())
+            .output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    call("mountAndWait")?;
+    // Reply looks like ('/run/user/1000/<id>',)
+    let out = call("mountPoint")?;
+    let path = out.split('\'').nth(1)?;
+    let path = PathBuf::from(path);
+    path.is_dir().then_some(path)
 }
 
 pub fn kdeconnect_share(device: &KdeConnectDevice, paths: &[PathBuf]) {

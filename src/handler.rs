@@ -51,7 +51,7 @@ fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     let count = app.listing.entries.len();
     match app.view_mode {
         ViewMode::Icons => {
-            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (app.cell_w, app.cell_h))
+            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (app.grid_pitch, app.cell_h))
         }
         ViewMode::Compact => {
             cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
@@ -405,6 +405,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                         app.places.get(i).map(|p| std::path::PathBuf::from(&p.path)),
                     crate::events::SidebarTarget::Device(i) =>
                         app.devices.get(i).map(|d| std::path::PathBuf::from(&d.path)),
+                    crate::events::SidebarTarget::Phone(i) => {
+                        app.open_phone(i);
+                        None
+                    }
                 };
                 if let Some(path) = path
                     && path.exists() { app.navigate_to(path); }
@@ -514,6 +518,7 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
         }
 
         MouseEventKind::Moved => {
+            app.mouse_pos = Some((col, row));
             if let Some(ref mut m) = app.menu {
                 menu::handle_menu_hover(m, col, row);
             }
@@ -548,6 +553,7 @@ fn context_target_at(app: &App, col: u16, row: u16) -> Option<MenuTarget> {
         return Some(match target {
             crate::events::SidebarTarget::Place(i) => MenuTarget::Place(i),
             crate::events::SidebarTarget::Device(i) => MenuTarget::Device(i),
+            crate::events::SidebarTarget::Phone(_) => MenuTarget::SidebarEmpty,
         });
     }
     if sidebar::contains(app, col, row) {

@@ -12,6 +12,18 @@ use nix::poll::{PollFd, PollFlags, poll};
 pub struct DeviceEntry {
     pub name: String,
     pub path: String,
+    /// Fraction of the filesystem in use (0..=1).
+    pub usage: Option<f32>,
+}
+
+impl DeviceEntry {
+    pub fn new(name: String, path: String) -> Self {
+        let usage = nix::sys::statvfs::statvfs(path.as_str()).ok().and_then(|st| {
+            let total = st.blocks() as f64;
+            (total > 0.0).then(|| (1.0 - st.blocks_available() as f64 / total) as f32)
+        });
+        Self { name, path, usage }
+    }
 }
 
 #[derive(Debug)]
@@ -56,7 +68,7 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
     let mut devices = Vec::new();
 
     // Always include root
-    devices.push(DeviceEntry { name: "Root (/)".into(), path: "/".into() });
+    devices.push(DeviceEntry::new("Root".into(), "/".into()));
 
     for line in reader.lines() {
         let line = line?;
@@ -96,7 +108,7 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
             .unwrap_or(&mountpoint)
             .to_string();
 
-        devices.push(DeviceEntry { name, path: mountpoint });
+        devices.push(DeviceEntry::new(name, mountpoint));
     }
 
     Ok(devices)

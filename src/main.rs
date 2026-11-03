@@ -173,6 +173,7 @@ fn run(
                         app.last_terminal_size = new_size;
                         // Reflowed layout: re-place everything cleanly
                         app.icon_cache.clear_protocols();
+                        app.sidebar_icons.clear_protocols();
                         app.thumb_cache.clear_protocols();
                         app.kitty_delete_all = true;
                     }

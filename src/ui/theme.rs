@@ -11,6 +11,8 @@ pub const NORD11: (u8, u8, u8) = (191, 97, 106);
 pub const NORD14: (u8, u8, u8) = (163, 190, 140);
 /// Selection highlight: 50% blend of nord9 with nord0.
 pub const SEL: (u8, u8, u8) = (88, 107, 128);
+/// Hover highlight: a faint lift, clearly weaker than the selection.
+pub const HOVER: (u8, u8, u8) = (60, 68, 84);
 
 pub const fn rgb((r, g, b): (u8, u8, u8)) -> Color {
     Color::Rgb(r, g, b)
@@ -28,3 +30,6 @@ pub const MUTED: Color = Color::Rgb(150, 160, 180);
 /// Section headers and column titles.
 pub const ACCENT: Color = rgb(NORD8);
 pub const SEL_BG: Color = rgb(SEL);
+pub const HOVER_BG: Color = rgb(HOVER);
+/// Body text (nord4).
+pub const TEXT: Color = Color::Rgb(216, 222, 233);

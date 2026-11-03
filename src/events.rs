@@ -35,6 +35,8 @@ pub struct Clipboard {
 pub enum SidebarTarget {
     Place(usize),
     Device(usize),
+    /// A paired KDE Connect device (index into `kdeconnect_devices`).
+    Phone(usize),
 }
 
 // ---------------------------------------------------------------------------

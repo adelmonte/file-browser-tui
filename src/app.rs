@@ -77,7 +77,7 @@ pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16,
     let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
     let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
     let img_w = ((rows as f32 * fh / fw).round() as u16).max(2);
-    let cell_w = (img_w + 4).max(10);
+    let cell_w = (img_w + 3).max(8);
     let icon_rows = rows + 1;
     (cell_w, icon_rows + 2, icon_rows, img_w)
 }
@@ -112,6 +112,9 @@ pub struct App {
     pub icon_size_idx: usize,
     pub img_w: u16,
     pub cell_w: u16,
+    /// Rendered column pitch: cell_w plus the leftover width spread evenly
+    /// between columns, as Dolphin does.
+    pub grid_pitch: u16,
     pub cell_h: u16,
     pub icon_rows: u16,
 
@@ -131,6 +134,13 @@ pub struct App {
     // Context menu extensions (reloaded each time a context menu opens)
     pub user_actions: Vec<ActionGroup>,
     pub kdeconnect_devices: Vec<KdeConnectDevice>,
+    /// Mount points of phones opened from the sidebar, by device id.
+    pub kdeconnect_mounts: HashMap<String, PathBuf>,
+    kdeconnect_mount_rx: Option<mpsc::Receiver<(String, Option<PathBuf>)>>,
+    /// Theme icons for the sidebar (separate keys from the file grid).
+    pub sidebar_icons: IconCache,
+    /// Last mouse position, for hover highlights.
+    pub mouse_pos: Option<(u16, u16)>,
 
     // Sidebar
     pub places: Vec<PlaceEntry>,
@@ -244,6 +254,7 @@ impl App {
             icon_size_idx,
             img_w,
             cell_w,
+            grid_pitch: cell_w,
             cell_h,
             icon_rows,
             picker,
@@ -255,6 +266,10 @@ impl App {
             user_actions: Vec::new(),
             search: None,
             kdeconnect_devices: Vec::new(),
+            kdeconnect_mounts: HashMap::new(),
+            kdeconnect_mount_rx: None,
+            sidebar_icons: IconCache::new(false),
+            mouse_pos: None,
             places,
             devices,
             menu: None,
@@ -422,6 +437,25 @@ impl App {
         self.set_icon_size(idx);
     }
 
+    /// Open a KDE Connect device's storage, mounting it in the background
+    /// first (takes a few seconds).
+    pub fn open_phone(&mut self, i: usize) {
+        let Some(device) = self.kdeconnect_devices.get(i).cloned() else { return; };
+        if !device.reachable {
+            return;
+        }
+        if let Some(path) = self.kdeconnect_mounts.get(&device.id).filter(|p| p.is_dir()).cloned() {
+            self.navigate_to(path);
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.kdeconnect_mount_rx = Some(rx);
+        std::thread::spawn(move || {
+            let mount = crate::user_actions::kdeconnect_mount(&device);
+            let _ = tx.send((device.id, mount));
+        });
+    }
+
     /// Save the current sort/filter settings for this folder and re-list.
     fn save_sort_state(&mut self) {
         let (sort, folders_first, show_hidden) = (self.sort.clone(), self.folders_first, self.show_hidden);
@@ -552,6 +586,7 @@ impl App {
 
     /// Drain all background channels.
     pub fn drain_channels(&mut self) {
+        self.sidebar_icons.drain_ready();
         let mime_updates = self.icon_cache.drain_ready();
         for (path, mime) in mime_updates {
             if let Some(entry) = self.listing.entries.iter_mut().find(|e| e.path == path)
@@ -578,6 +613,16 @@ impl App {
         if let Ok(ev) = self.mount_event_rx.try_recv() {
             let MountEvent::Updated(devs) = ev;
             self.devices = devs;
+        }
+
+        if let Some(rx) = &self.kdeconnect_mount_rx
+            && let Ok((id, mount)) = rx.try_recv()
+        {
+            self.kdeconnect_mount_rx = None;
+            if let Some(path) = mount {
+                self.kdeconnect_mounts.insert(id, path.clone());
+                self.navigate_to(path);
+            }
         }
 
         if let Some(ref mut props) = self.properties {
@@ -672,6 +717,7 @@ impl App {
         self.prev_frame_images = std::mem::take(&mut self.frame_images);
 
         if delete_all {
+            self.sidebar_icons.clear_protocols();
             self.icon_cache.clear_protocols();
             self.thumb_cache.clear_protocols();
             return (Vec::new(), true);

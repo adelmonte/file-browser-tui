@@ -24,6 +24,6 @@ pub fn places_from_config(configs: &[PlaceConfig]) -> Vec<PlaceEntry> {
 
 pub fn default_devices() -> Vec<DeviceEntry> {
     crate::fs::mounts::parse_mountinfo().unwrap_or_else(|_| {
-        vec![DeviceEntry { name: "Root (/)".into(), path: "/".into() }]
+        vec![DeviceEntry::new("Root".into(), "/".into())]
     })
 }

@@ -1,71 +1,152 @@
+use std::path::PathBuf;
+
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
+use ratatui_image::{StatefulImage, picker::ProtocolType};
 
 use crate::app::App;
 use crate::events::SidebarTarget;
-use crate::ui::theme;
+use crate::ui::{kitty, theme};
 
+/// Columns for the mini icon (one row tall, roughly square).
+const ICON_W: u16 = 2;
+
+/// Places panel in Dolphin's layout: muted section headers, a theme icon
+/// per row, and a usage bar under each device.
 pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::RIGHT)
-        .border_style(Style::default().fg(theme::BORDER));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(1) };
     app.sidebar_area = inner;
 
-    let cwd = app.cwd.to_string_lossy();
-    let width = inner.width as usize;
-    let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
+    let cwd = app.cwd.clone();
+    let hover = app.mouse_pos.and_then(|(c, r)| target_at(app, c, r));
 
-    let mut lines: Vec<Line> = Vec::new();
-    let mut rows: Vec<Option<SidebarTarget>> = Vec::new();
+    struct Row {
+        target: SidebarTarget,
+        icon: String,
+        name: String,
+        current: bool,
+        dim: bool,
+        usage: Option<f32>,
+    }
+    let mut sections: Vec<(&str, Vec<Row>)> = Vec::new();
 
-    // Rows are padded to the full sidebar width so the highlight is a clean bar
-    let item = |icon: &str, name: &str, current: bool| {
-        let text = format!(" {icon}  {name}");
-        let pad = width.saturating_sub(text.chars().count());
-        let style = if current {
-            Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        Line::from(Span::styled(format!("{text}{}", " ".repeat(pad)), style))
-    };
+    let places = app.places.iter().enumerate().map(|(i, p)| Row {
+        target: SidebarTarget::Place(i),
+        icon: place_icon(&p.path, p.icon.as_deref()),
+        name: p.name.clone(),
+        current: std::path::Path::new(&p.path) == cwd,
+        dim: false,
+        usage: None,
+    }).collect();
+    sections.push(("Places", places));
 
-    lines.push(Line::from(Span::styled(" Places", header_style)));
-    rows.push(None);
-
-    for (i, place) in app.places.iter().enumerate() {
-        let icon = place_icon_for_path(&place.path, place.icon.as_deref());
-        lines.push(item(icon, &place.name, place.path == cwd.as_ref()));
-        rows.push(Some(SidebarTarget::Place(i)));
+    let mut devices: Vec<Row> = app.devices.iter().enumerate().map(|(i, d)| Row {
+        target: SidebarTarget::Device(i),
+        icon: if d.path == "/" { "drive-harddisk-root".into() } else { "drive-harddisk".into() },
+        name: d.name.clone(),
+        current: std::path::Path::new(&d.path) == cwd,
+        dim: false,
+        usage: d.usage,
+    }).collect();
+    devices.extend(app.kdeconnect_devices.iter().enumerate().map(|(i, d)| Row {
+        target: SidebarTarget::Phone(i),
+        icon: if d.reachable { "smartphone".into() } else { "smartphonedisconnected".into() },
+        name: d.name.clone(),
+        current: app.kdeconnect_mounts.get(&d.id).is_some_and(|m| cwd.starts_with(m)),
+        dim: !d.reachable,
+        usage: None,
+    }));
+    if !devices.is_empty() {
+        sections.push(("Devices", devices));
     }
 
-    if !app.devices.is_empty() {
-        lines.push(Line::raw(""));
-        rows.push(None);
-        lines.push(Line::from(Span::styled(" Devices", header_style)));
-        rows.push(None);
+    let width = inner.width;
+    let bottom = inner.y + inner.height;
+    let mut y = inner.y;
+    let mut row_map: Vec<Option<SidebarTarget>> = Vec::new();
 
-        for (i, device) in app.devices.iter().enumerate() {
-            lines.push(item("\u{f0a0}", &device.name, device.path == cwd.as_ref()));
-            rows.push(Some(SidebarTarget::Device(i)));
+    for (si, (title, rows)) in sections.iter().enumerate() {
+        if si > 0 && y < bottom {
+            y += 1;
+            row_map.push(None);
+        }
+        if y >= bottom { break; }
+        f.render_widget(
+            Paragraph::new(Span::styled(format!(" {title}"), Style::default().fg(theme::MUTED))),
+            Rect { x: inner.x, y, width, height: 1 },
+        );
+        y += 1;
+        row_map.push(None);
+
+        for row in rows {
+            let h = if row.usage.is_some() { 2 } else { 1 };
+            if y + h > bottom { break; }
+            let rect = Rect { x: inner.x, y, width, height: h };
+            let bg = if row.current {
+                Some(theme::SEL)
+            } else if hover == Some(row.target) {
+                Some(theme::HOVER)
+            } else {
+                None
+            };
+            if let Some(c) = bg {
+                f.render_widget(Block::default().style(Style::default().bg(theme::rgb(c))), rect);
+            }
+            let fg = if row.dim { theme::MUTED } else if row.current { Color::White } else { theme::TEXT };
+
+            draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: ICON_W, height: 1 }, bg);
+            let text_x = inner.x + 1 + ICON_W + 1;
+            let text_w = (inner.x + width).saturating_sub(text_x + 1);
+            let name: String = row.name.chars().take(text_w as usize).collect();
+            f.render_widget(Paragraph::new(Span::styled(name, Style::default().fg(fg))), Rect { x: text_x, y, width: text_w, height: 1 });
+
+            if let Some(usage) = row.usage {
+                f.render_widget(Paragraph::new(usage_bar(usage, text_w)), Rect { x: text_x, y: y + 1, width: text_w, height: 1 });
+            }
+            for _ in 0..h {
+                row_map.push(Some(row.target));
+            }
+            y += h;
         }
     }
+    app.sidebar_rows = row_map;
+}
 
-    app.sidebar_rows = rows;
-    f.render_widget(Paragraph::new(lines), inner);
+/// Thin two-tone bar (Dolphin's free-space indicator); red when nearly full.
+fn usage_bar(usage: f32, width: u16) -> Line<'static> {
+    let filled = ((usage.clamp(0.0, 1.0) * width as f32).round() as usize).min(width as usize);
+    let color = if usage > 0.9 { theme::rgb(theme::NORD11) } else { theme::ACCENT };
+    Line::from(vec![
+        Span::styled("\u{2501}".repeat(filled), Style::default().fg(color)),
+        Span::styled("\u{2501}".repeat(width as usize - filled), Style::default().fg(theme::BORDER)),
+    ])
+}
+
+fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Option<(u8, u8, u8)>) {
+    // Sidebar icons are keyed by theme name, in their own cache
+    let key = PathBuf::from(format!("sidebar-icon/{name}"));
+    let px = app.picker.font_size().height as u32;
+    app.sidebar_icons.request(&key, true, px.max(16), Some(name.to_string()));
+    let Some(proto) = app.sidebar_icons.get_mut(&app.picker, &key, rect.width, rect.height, bg) else { return; };
+    f.render_widget(Clear, rect);
+    if let Some(c) = bg {
+        f.render_widget(Block::default().style(Style::default().bg(theme::rgb(c))), rect);
+    }
+    f.render_stateful_widget(StatefulImage::new(), rect, proto);
+    if app.picker.protocol_type() == ProtocolType::Kitty {
+        kitty::split_placeholder_rows(f.buffer_mut(), rect, &mut app.kitty_transmits);
+    }
 }
 
 /// Map a mouse position to a sidebar target using the rendered row map.
 pub fn target_at(app: &App, col: u16, row: u16) -> Option<SidebarTarget> {
     let area = app.sidebar_area;
-    if col < area.x || col >= area.x + area.width { return None; }
+    if col + 1 < area.x || col > area.x + area.width { return None; }
     if row < area.y || row >= area.y + area.height { return None; }
     app.sidebar_rows.get((row - area.y) as usize).copied().flatten()
 }
@@ -73,46 +154,28 @@ pub fn target_at(app: &App, col: u16, row: u16) -> Option<SidebarTarget> {
 /// Whether a position is anywhere inside the sidebar (for empty-area menus).
 pub fn contains(app: &App, col: u16, row: u16) -> bool {
     let area = app.sidebar_area;
-    col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
+    col + 1 >= area.x && col < area.x + area.width + 1 && row + 1 >= area.y && row < area.y + area.height
 }
 
-/// Pick a nerd-font glyph for a place, preferring an explicit icon hint, then
-/// falling back to XDG directory detection, then the path name, then generic folder.
-fn place_icon_for_path(path: &str, icon_hint: Option<&str>) -> &'static str {
-    // Explicit icon name in config takes priority
-    if let Some(hint) = icon_hint {
-        let mapped = icon_name_to_glyph(hint);
-        if mapped != "\u{f07b}" { return mapped; }
+/// Theme icon name for a place: the configured hint, then XDG folders.
+fn place_icon(path: &str, hint: Option<&str>) -> String {
+    if let Some(h) = hint {
+        return h.to_string();
     }
-
-    // Auto-detect from XDG dirs
     let p = std::path::Path::new(path);
-    if dirs::home_dir().as_deref()     == Some(p) { return "\u{f015}"; }
-    if dirs::desktop_dir().as_deref()  == Some(p) { return "\u{f108}"; }
-    if dirs::download_dir().as_deref() == Some(p) { return "\u{f019}"; }
-    if dirs::audio_dir().as_deref()    == Some(p) { return "\u{f001}"; }
-    if dirs::picture_dir().as_deref()  == Some(p) { return "\u{f03e}"; }
-    if dirs::video_dir().as_deref()    == Some(p) { return "\u{f03d}"; }
-    if dirs::document_dir().as_deref() == Some(p) { return "\u{f0f6}"; }
-    if dirs::template_dir().as_deref() == Some(p) { return "\u{f0c5}"; }
-    if dirs::public_dir().as_deref()   == Some(p) { return "\u{f07c}"; }
-
-    // Trash by path
-    if path.contains("Trash") || path.contains(".local/share/Trash") { return "\u{f1f8}"; }
-
-    "\u{f07b}"
-}
-
-fn icon_name_to_glyph(name: &str) -> &'static str {
-    match name {
-        "user-home"        => "\u{f015}",
-        "user-desktop"     => "\u{f108}",
-        "folder-documents" => "\u{f0f6}",
-        "folder-download" | "folder-downloads" => "\u{f019}",
-        "folder-music"     => "\u{f001}",
-        "folder-pictures"  => "\u{f03e}",
-        "folder-videos"    => "\u{f03d}",
-        "user-trash"       => "\u{f1f8}",
-        _                  => "\u{f07b}",
+    let xdg = [
+        (dirs::home_dir(), "user-home"),
+        (dirs::desktop_dir(), "user-desktop"),
+        (dirs::download_dir(), "folder-download"),
+        (dirs::audio_dir(), "folder-music"),
+        (dirs::picture_dir(), "folder-pictures"),
+        (dirs::video_dir(), "folder-videos"),
+        (dirs::document_dir(), "folder-documents"),
+        (dirs::template_dir(), "folder-templates"),
+        (dirs::public_dir(), "folder-publicshare"),
+    ];
+    if let Some((_, name)) = xdg.iter().find(|(d, _)| d.as_deref() == Some(p)) {
+        return name.to_string();
     }
+    if path.contains("Trash") { "user-trash".into() } else { "folder".into() }
 }

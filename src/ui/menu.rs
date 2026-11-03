@@ -285,7 +285,12 @@ fn push_send_to_device(app: &App, items: &mut Vec<MenuItem>) {
         return;
     }
     let devices = app.kdeconnect_devices.iter().enumerate()
-        .map(|(i, d)| MenuItem::new(format!("\u{f10b}  {}", d.name), MenuAction::SendToDevice(i)))
+        .map(|(i, d)| {
+            let label = if d.reachable { d.name.clone() } else { format!("{} (offline)", d.name) };
+            let mut item = MenuItem::new(format!("\u{f10b}  {label}"), MenuAction::SendToDevice(i));
+            item.enabled = d.reachable;
+            item
+        })
         .collect();
     items.push(MenuItem::sub("\u{f1d8}  Send to Device", devices));
 }
