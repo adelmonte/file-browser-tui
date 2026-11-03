@@ -16,19 +16,17 @@ pub fn grid_cols(area: Rect, cell_w: u16) -> u16 {
     (area.width / cell_w).max(1)
 }
 
-/// Inset a content pane for a grid of `cell_w`-wide cells: one padding row on
-/// top, at least one padding column per side, leftover width split evenly so
-/// the grid sits centered instead of piling the slack on the right.
+/// Inset a content pane for a grid of `cell_w`-wide cells: at least one
+/// padding column per side, leftover width split evenly so the grid sits
+/// centered instead of piling the slack on the right.
 pub fn centered_grid_area(area: Rect, cell_w: u16) -> Rect {
     let usable = area.width.saturating_sub(2);
     let cols = (usable / cell_w).max(1);
     let width = (cols * cell_w).min(area.width);
-    let top = u16::from(area.height > 2);
     Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + top,
         width,
-        height: area.height - top,
+        ..area
     }
 }
 
@@ -77,18 +75,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Compute a square-ish icon rect width using font pixel dimensions.
-    // This centers icon images and prevents edge-to-edge stretching.
-    let font = app.picker.font_size();
-    let img_h_cells = icon_rows.saturating_sub(1); // rows available after top-padding
-    let img_w_cells: u16 = if font.width > 0 && font.height > 0 && img_h_cells > 0 {
-        // pixel height of icon area → how many cell-columns that maps to
-        let h_px = img_h_cells as u32 * font.height as u32;
-        let w_cells = h_px / font.width as u32;
-        (w_cells as u16).clamp(4, cell_w)
-    } else {
-        cell_w.saturating_sub(2).max(4)
-    };
+    // Square-in-pixels icon box (see app::icon_dims), below one padding row
+    let img_h_cells = icon_rows.saturating_sub(1);
+    let img_w_cells = app.img_w.min(cell_w);
     let img_x_off = (cell_w.saturating_sub(img_w_cells)) / 2;
 
     let rows_visible = (area.height / cell_h + 2) as usize;
@@ -179,11 +168,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 }
 
             let label_fg = if is_selected {
-                Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::default().bg(theme::SEL_BG).fg(Color::White)
             } else if is_drag_target {
-                Style::default().bg(rgb(theme::NORD14)).fg(Color::Black).add_modifier(Modifier::BOLD)
-            } else if entry.is_dir {
-                Style::default().add_modifier(Modifier::BOLD)
+                Style::default().bg(rgb(theme::NORD14)).fg(Color::Black)
             } else {
                 Style::default()
             };

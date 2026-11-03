@@ -103,12 +103,6 @@ impl ThumbCache {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.images.clear();
-        self.protocols.clear();
-        self.pending.clear();
-    }
-
     pub fn clear_protocols(&mut self) {
         self.protocols.clear();
     }

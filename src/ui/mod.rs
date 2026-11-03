@@ -30,16 +30,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(TOPBAR_H),
-            Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
     let topbar_area = vertical[0];
-    // vertical[1] is a blank gap row between the topbar and the panels
-    let content_area = vertical[2];
-    let status_area = vertical[3];
+    let content_area = vertical[1];
+    let status_area = vertical[2];
 
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)

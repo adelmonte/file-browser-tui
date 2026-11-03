@@ -38,7 +38,7 @@ pub struct Config {
     read_only: bool,
 }
 
-fn default_icon_size() -> usize { 4 }
+fn default_icon_size() -> usize { crate::app::DEFAULT_ICON_LEVEL }
 fn default_sidebar_w() -> u16 { 18 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -112,7 +112,7 @@ impl Default for Config {
             sort: SortConfig::default(),
             show_hidden: false,
             folders_first: true,
-            icon_size_idx: 4,
+            icon_size_idx: default_icon_size(),
             sidebar_w: 18,
             terminal_command: String::new(),
             folder_icons: HashMap::new(),

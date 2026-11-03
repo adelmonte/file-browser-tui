@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     widgets::{Block, Paragraph},
 };
 
@@ -50,9 +50,7 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             let text = format!(" {icon} {name}");
 
             let style = if is_selected {
-                Style::default().bg(theme::SEL_BG).fg(Color::White).add_modifier(Modifier::BOLD)
-            } else if entry.is_dir {
-                Style::default().add_modifier(Modifier::BOLD)
+                Style::default().bg(theme::SEL_BG).fg(Color::White)
             } else {
                 Style::default()
             };

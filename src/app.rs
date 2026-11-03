@@ -61,23 +61,24 @@ impl Default for SortState {
 /// Topbar height in rows (1 padding + 1 content + 1 padding).
 pub const TOPBAR_H: u16 = 3;
 
-/// Available icon grid cell sizes: (cell_w, cell_h, icon_rows)
-pub const ICON_SIZES: [(u16, u16, u16); 14] = [
-    (4,  2, 1),   // 0: tiny
-    (6,  3, 2),   // 1: xs
-    (8,  4, 3),   // 2: sm
-    (10, 5, 3),   // 3: sm+
-    (12, 6, 4),   // 4: md  (default)
-    (14, 7, 5),   // 5: md+
-    (16, 8, 6),   // 6: lg
-    (18, 9, 7),   // 7: lg+
-    (20, 10, 8),  // 8: xl
-    (24, 12, 10), // 9: xl+
-    (28, 14, 12), // 10: 2xl
-    (32, 17, 15), // 11: 3xl
-    (38, 20, 18), // 12: 4xl
-    (48, 25, 23), // 13: 5xl
-];
+/// Icon zoom levels, as icon height in terminal rows: one-row steps at
+/// small and medium sizes, wider jumps at the top end.
+pub const ICON_LEVELS: [u16; 20] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 27];
+pub const DEFAULT_ICON_LEVEL: usize = 3;
+
+/// Grid geometry for a zoom level: (cell_w, cell_h, icon_rows, img_w).
+/// The image is square in pixels, so its width in columns follows the font's
+/// aspect; the cell adds a small margin for labels so neighbours sit close
+/// together, Dolphin-style. icon_rows includes one row of top padding and
+/// two label rows sit below it.
+pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16, u16) {
+    let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
+    let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
+    let img_w = ((rows as f32 * fh / fw).round() as u16).max(2);
+    let cell_w = (img_w + 4).max(10);
+    let icon_rows = rows + 1;
+    (cell_w, icon_rows + 2, icon_rows, img_w)
+}
 
 /// Image identity rendered in a cell this frame: (rect, bg variant).
 pub type FrameImage = (Rect, Option<(u8, u8, u8)>);
@@ -105,8 +106,9 @@ pub struct App {
     pub show_hidden: bool,
     pub folders_first: bool,
 
-    // Dynamic icon cell size (index into ICON_SIZES)
+    // Icon zoom (index into ICON_LEVELS) and the grid geometry it implies
     pub icon_size_idx: usize,
+    pub img_w: u16,
     pub cell_w: u16,
     pub cell_h: u16,
     pub icon_rows: u16,
@@ -204,13 +206,13 @@ impl App {
         let dirstates = DirStates::load();
 
         let terminal_size = Size { width: 220, height: 50 };
-        let mut icon_size_idx = config.icon_size_idx.min(ICON_SIZES.len() - 1);
+        let mut icon_size_idx = config.icon_size_idx.min(ICON_LEVELS.len() - 1);
         let mut view_mode = config.default_view;
         if let Some(state) = dirstates.get(&cwd) {
             if let Some(v) = state.view { view_mode = v; }
-            if let Some(idx) = state.icon_size_idx { icon_size_idx = idx.min(ICON_SIZES.len() - 1); }
+            if let Some(idx) = state.icon_size_idx { icon_size_idx = idx.min(ICON_LEVELS.len() - 1); }
         }
-        let (cell_w, cell_h, icon_rows) = ICON_SIZES[icon_size_idx];
+        let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
         Ok(Self {
             watched_path: cwd.clone(),
@@ -231,6 +233,7 @@ impl App {
             show_hidden: config.show_hidden,
             folders_first: config.folders_first,
             icon_size_idx,
+            img_w,
             cell_w,
             cell_h,
             icon_rows,
@@ -389,7 +392,7 @@ impl App {
         if let Some(v) = view
             && v != self.view_mode { self.view_mode = v; }
         if let Some(idx) = size {
-            self.set_icon_size(idx.min(ICON_SIZES.len() - 1));
+            self.set_icon_size(idx.min(ICON_LEVELS.len() - 1));
         }
         if let Some(f) = field { self.sort.field = f; }
         if let Some(a) = asc   { self.sort.ascending = a; }
@@ -406,20 +409,22 @@ impl App {
     fn set_icon_size(&mut self, idx: usize) {
         if idx == self.icon_size_idx { return; }
         self.icon_size_idx = idx;
-        let (w, h, r) = ICON_SIZES[idx];
+        let (w, h, r, iw) = icon_dims(idx, self.picker.font_size());
         self.cell_w = w;
         self.cell_h = h;
         self.icon_rows = r;
-        // Raster size changed: drop everything and wipe placements after next draw
+        self.img_w = iw;
+        // Icon raster size changed: re-rasterize icons; thumbnails only need
+        // re-encoding. Wipe placements after the next draw.
         self.icon_cache.clear();
-        self.thumb_cache.clear();
+        self.thumb_cache.clear_protocols();
         self.kitty_delete_all = true;
     }
 
     /// Step icon size up (+1) or down (-1) and persist per-dir.
     pub fn resize_icons(&mut self, delta: i8) {
         let new_idx = (self.icon_size_idx as i8 + delta)
-            .clamp(0, ICON_SIZES.len() as i8 - 1) as usize;
+            .clamp(0, ICON_LEVELS.len() as i8 - 1) as usize;
         if new_idx != self.icon_size_idx {
             self.set_icon_size(new_idx);
             self.dirstates.set_icon_size(&self.cwd, new_idx);
@@ -429,8 +434,8 @@ impl App {
     /// Pixel size to render icons at.
     pub fn icon_target_px(&self) -> u32 {
         let fs = self.picker.font_size();
-        let px = fs.width as u32 * self.cell_w as u32;
-        px.clamp(32, 256)
+        let px = fs.height as u32 * (self.icon_rows as u32 - 1);
+        px.clamp(32, 512)
     }
 
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).

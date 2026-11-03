@@ -64,15 +64,10 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default()
             };
-            let name_style = if e.is_dir {
-                Style::default().add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
             let muted = if is_selected { Style::default() } else { Style::default().fg(theme::MUTED) };
 
             Row::new(vec![
-                Cell::from(name).style(name_style),
+                Cell::from(name),
                 Cell::from(Line::from(size).alignment(Alignment::Right)),
                 Cell::from(modified).style(muted),
                 Cell::from(type_str).style(muted),
