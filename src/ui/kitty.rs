@@ -8,10 +8,11 @@ use ratatui::{
 
 /// Delete Kitty graphics placements that intersect the top-left cell of each
 /// rect (placements are anchored there, so one point per image suffices).
+/// Only z=0 ones: underlays (ui::underlay) beneath that cell must survive.
 /// Coordinates are 1-based cells per the kitty graphics protocol.
 pub fn delete_at(out: &mut impl Write, rects: &[Rect]) -> std::io::Result<()> {
     for r in rects {
-        write!(out, "\x1b_Ga=d,d=p,x={},y={}\x1b\\", r.x + 1, r.y + 1)?;
+        write!(out, "\x1b_Ga=d,d=q,x={},y={},z=0\x1b\\", r.x + 1, r.y + 1)?;
     }
     out.flush()
 }

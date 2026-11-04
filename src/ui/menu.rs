@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Padding},
 };
 use strum::IntoEnumIterator;
 
@@ -434,40 +434,42 @@ pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
 
 /// Background colors behind menu icons: (normal, highlighted).
 pub const ICON_BG: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD9);
+/// Panel drawn under the menu on Kitty (see ui::underlay): fill, outline.
+pub const PANEL: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD3);
 
-pub fn render_menu(f: &mut Frame, menu: &mut MenuState) {
+/// `panel`: the caller draws the background and outline as an image under
+/// the cells, so the items are drawn without a cell border or fill.
+pub fn render_menu(f: &mut Frame, menu: &mut MenuState, panel: bool) {
     let term = f.area();
     let rect = menu_rect(menu, term);
     menu.rect = rect;
-    render_item_list(f, rect, &menu.items, if menu.submenu_open { None } else { Some(menu.selected) });
+    render_item_list(f, rect, &menu.items, if menu.submenu_open { None } else { Some(menu.selected) }, panel);
 
     if menu.submenu_open {
         let sub_rect = submenu_rect(menu, term);
         menu.submenu_rect = sub_rect;
         let items = menu.items[menu.selected].submenu.clone();
-        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected));
+        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected), panel);
     } else {
         menu.submenu_rect = Rect::default();
     }
 }
 
-fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>) {
+fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, panel: bool) {
     f.render_widget(Clear, rect);
+    let bg = |s: Style| if panel { s } else { s.bg(MENU_BG) };
 
     let inner_w = rect.width.saturating_sub(2) as usize;
     let lines: Vec<Line> = items.iter().enumerate().map(|(i, item)| {
         if item.separator {
-            return Line::styled(
-                "\u{2500}".repeat(inner_w),
-                Style::default().fg(theme::BORDER).bg(MENU_BG),
-            );
+            return Line::styled("\u{2500}".repeat(inner_w), bg(Style::default().fg(theme::BORDER)));
         }
         let arrow = if item.submenu.is_empty() { "" } else { " \u{f0da}" };
         let pad = inner_w
             .saturating_sub(item.label.chars().count() + arrow.chars().count() + 1);
         let text = format!(" {}{}{}", item.label, " ".repeat(pad), arrow);
 
-        let mut style = Style::default().bg(MENU_BG);
+        let mut style = bg(Style::default());
         if !item.enabled {
             style = style.add_modifier(Modifier::DIM);
         } else if selected == Some(i) {
@@ -476,16 +478,16 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
         Line::from(Span::styled(text, style))
     }).collect();
 
-    f.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
-                .style(Style::default().bg(MENU_BG)),
-        ),
-        rect,
-    );
+    let block = if panel {
+        Block::default().padding(Padding::uniform(1))
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
+            .style(Style::default().bg(MENU_BG))
+    };
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 // ---------------------------------------------------------------------------

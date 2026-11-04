@@ -71,9 +71,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {
-        menu::render_menu(f, &mut m);
+        let panel = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
+        menu::render_menu(f, &mut m, panel);
         let slots = menu::icon_slots(&m);
+        let (rect, sub) = (m.rect, m.submenu_rect);
         app.menu = Some(m);
+        if panel {
+            let (fill, line) = menu::PANEL;
+            underlay::panel(app, 2, rect, fill, line);
+            if sub.width > 0 {
+                underlay::panel(app, 3, sub, fill, line);
+            }
+        }
         for (icon, rect, hot) in slots {
             let bg = if hot { menu::ICON_BG.1 } else { menu::ICON_BG.0 };
             sidebar::draw_icon(f, app, &icon, rect, Some(bg));
