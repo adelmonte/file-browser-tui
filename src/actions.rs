@@ -38,6 +38,17 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
             }
         }
 
+        MenuAction::OpenPath => {
+            if let Some(path) = target_path(app, target) {
+                app.reveal(&path);
+            }
+        }
+        MenuAction::OpenPathNewWindow | MenuAction::OpenNewWindow => {
+            if let Some(path) = target_path(app, target) {
+                open_new_window(&path);
+            }
+        }
+
         MenuAction::OpenTerminal => {
             if let Some(dir) = target_dir(app, target) {
                 open_terminal(app, &dir);
@@ -119,6 +130,42 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
 // ---------------------------------------------------------------------------
 // Target resolution
 // ---------------------------------------------------------------------------
+
+/// Kitty options every window of the app is launched with (see the
+/// launchers): no padding, and Shift/Ctrl+Shift clicks passed to the app.
+const KITTY_ARGS: &[&str] = &[
+    "--app-id=file-browser-tui",
+    "-o", "window_margin_width=0",
+    "-o", "window_padding_width=0",
+    "-o", "mouse_map=shift+left press grabbed",
+    "-o", "mouse_map=shift+left click grabbed",
+    "-o", "mouse_map=shift+left doublepress grabbed",
+    "-o", "mouse_map=shift+left triplepress grabbed",
+    "-o", "mouse_map=ctrl+shift+left press grabbed",
+    "-o", "mouse_map=ctrl+shift+left release grabbed",
+];
+
+/// Another window of the app at `path` (a file opens its folder with it
+/// selected).
+pub fn open_new_window(path: &Path) {
+    let Ok(exe) = std::env::current_exe() else { return; };
+    let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+    spawn_detached_cmd(
+        Command::new("kitty")
+            .args(KITTY_ARGS)
+            .arg(format!("--directory={}", dir.display()))
+            .arg(exe)
+            .arg(path),
+    );
+}
+
+fn spawn_detached_cmd(cmd: &mut Command) {
+    // Own process group: closing this window (SIGHUP) mustn't take it along
+    use std::os::unix::process::CommandExt;
+    let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .process_group(0)
+        .spawn();
+}
 
 fn target_path(app: &App, target: MenuTarget) -> Option<PathBuf> {
     match target {
@@ -494,4 +541,5 @@ fn spawn_detached(bin: &str, args: &[&std::ffi::OsStr]) {
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn();
 }
+
 

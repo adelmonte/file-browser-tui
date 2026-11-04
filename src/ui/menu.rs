@@ -26,6 +26,9 @@ pub enum MenuAction {
     /// Open with `App::open_with[i]`.
     OpenWith(usize),
     OpenTerminal,
+    OpenPath,
+    OpenPathNewWindow,
+    OpenNewWindow,
     Rename,
     Cut,
     Copy,
@@ -187,7 +190,14 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 items.push(MenuItem::sub("\u{f08e}  Open With", others));
             }
             if is_dir {
+                items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
                 items.push(MenuItem::new("\u{f120}  Open in Terminal", MenuAction::OpenTerminal));
+            }
+            // Search results live elsewhere: go to where they are
+            if app.search.as_ref().is_some_and(|s| s.has_query()) {
+                items.push(MenuItem::sep());
+                items.push(MenuItem::new("\u{f115}  Open Path", MenuAction::OpenPath));
+                items.push(MenuItem::new("\u{f2d0}  Open Path in New Window", MenuAction::OpenPathNewWindow));
             }
             items.push(MenuItem::sep());
             items.push(MenuItem::new("\u{f0c4}  Cut", MenuAction::Cut));
@@ -236,6 +246,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
 
         MenuTarget::Place(idx) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
+            items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
             let is_trash = app.places.get(idx)
                 .map(|p| p.icon.as_deref() == Some("user-trash") || p.path.ends_with("Trash/files"))
                 .unwrap_or(false);
@@ -249,6 +260,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
 
         MenuTarget::Device(_) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
+            items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
         }
 
         MenuTarget::SidebarEmpty => {

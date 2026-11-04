@@ -81,7 +81,21 @@ fn main() -> anyhow::Result<()> {
     let (dir_tx, dir_rx) = mpsc::channel();
     let (mount_tx, mount_rx) = mpsc::channel();
 
+    // Optional start path: a folder opens there, a file opens its folder
+    // with it selected
+    let start = std::env::args_os().nth(1).map(std::path::PathBuf::from)
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    if let Some(p) = &start {
+        let dir = if p.is_dir() { Some(p.as_path()) } else { p.parent() };
+        if let Some(dir) = dir {
+            let _ = std::env::set_current_dir(dir);
+        }
+    }
+
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
+    if let Some(p) = start.filter(|p| !p.is_dir()) {
+        app.reveal(&p);
+    }
 
     // Start background watchers
     let dir_watcher = fs::watcher::DirWatcher::spawn(dir_tx);

@@ -548,6 +548,22 @@ impl App {
         self.after_navigate();
     }
 
+    /// Go to `path`'s folder with it selected (search results' Open Path).
+    pub fn reveal(&mut self, path: &std::path::Path) {
+        let Some(parent) = path.parent() else { return; };
+        if parent == self.cwd {
+            self.close_search();
+        } else {
+            self.navigate_to(parent.to_path_buf());
+        }
+        if let Some(idx) = self.listing.entries.iter().position(|e| e.path == path) {
+            self.multi_selection.clear();
+            self.selection = Some(idx);
+            self.selection_anchor = Some(idx);
+            self.ensure_selection_visible();
+        }
+    }
+
     pub fn navigate_back(&mut self) {
         if let Some(prev) = self.history_back.pop() {
             let current = std::mem::replace(&mut self.cwd, prev);
