@@ -12,7 +12,14 @@ use ratatui::layout::Rect;
 use crate::app::App;
 
 /// Ids for underlay images, far from ratatui-image's random ids in practice.
+/// Each slot has two, alternated on re-upload: kitty drops an image as soon
+/// as a new upload under its id starts, so reusing one id blanks the
+/// underlay until the upload finishes (a flicker while resizing).
 const ID_BASE: u32 = 0x00F1_E1D0;
+
+fn image_id(app: &App, slot: u32) -> u32 {
+    ID_BASE + slot * 2 + u32::from(app.underlays_alt.contains(&slot))
+}
 
 /// Where an underlay is currently placed, to skip redundant re-placement.
 /// Geometry in pixels from the window's top-left cell corner.
@@ -134,7 +141,7 @@ fn place(app: &mut App, slot: u32, want: Placed) -> bool {
 
     let (cw, ch) = cell(app);
     let Placed { x, y, w, h, radius, fill, border, z, alpha } = want;
-    let id = ID_BASE + slot;
+    let mut id = image_id(app, slot);
     let (col, row, x_off, y_off) = (x / cw, y / ch, x % cw, y % ch);
     let mut out = format!("\x1b7\x1b[{};{}H", row + 1, col + 1);
 
@@ -142,6 +149,12 @@ fn place(app: &mut App, slot: u32, want: Placed) -> bool {
         // Moved only: re-place the uploaded image
         let _ = write!(out, "\x1b_Ga=p,i={id},p=1,X={x_off},Y={y_off},z={z},C=1,q=2\x1b\\");
     } else {
+        // Upload under the other id, then drop the old image
+        let old = id;
+        if !app.underlays_alt.remove(&slot) {
+            app.underlays_alt.insert(slot);
+        }
+        id = image_id(app, slot);
         let radius = radius as f32;
         let mut rgba = Vec::with_capacity((w * h * 4) as usize);
         for py in 0..h {
@@ -175,6 +188,9 @@ fn place(app: &mut App, slot: u32, want: Placed) -> bool {
             out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
             out.push_str("\x1b\\");
         }
+        if prev.is_some() {
+            let _ = write!(out, "\x1b_Ga=d,d=I,i={old},q=2\x1b\\");
+        }
     }
     out.push_str("\x1b8");
     app.post_draw.push(out);
@@ -188,7 +204,7 @@ pub fn finish_frame(app: &mut App) {
     let gone: Vec<u32> = app.underlays.keys().copied().filter(|s| !app.underlays_seen.contains(s)).collect();
     for slot in gone {
         app.underlays.remove(&slot);
-        app.post_draw.push(format!("\x1b_Ga=d,d=I,i={},q=2\x1b\\", ID_BASE + slot));
+        app.post_draw.push(format!("\x1b_Ga=d,d=I,i={},q=2\x1b\\", image_id(app, slot)));
     }
     app.underlays_seen.clear();
 }
@@ -204,3 +220,4 @@ fn rounded_alpha(x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     let d = (dx * dx + dy * dy).sqrt();
     (r - d + 0.5).clamp(0.0, 1.0)
 }
+

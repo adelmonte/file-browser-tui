@@ -247,6 +247,8 @@ pub struct App {
     /// Field backgrounds drawn under the text (see ui::underlay), by slot.
     pub underlays: HashMap<u32, crate::ui::underlay::Placed>,
     pub underlays_seen: std::collections::HashSet<u32>,
+    /// Underlay slots currently shown under their alternate image id.
+    pub underlays_alt: std::collections::HashSet<u32>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -379,6 +381,7 @@ impl App {
             post_draw: Vec::new(),
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
+            underlays_alt: std::collections::HashSet::new(),
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
