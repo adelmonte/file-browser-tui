@@ -190,7 +190,7 @@ fn render_paste_name(f: &mut Frame, app: &App) {
     // Input field scrolled so the cursor stays visible
     let field_w = w.saturating_sub(6) as usize;
     let mut shown = p.input.clone();
-    shown.insert(p.cursor_pos.min(shown.len()), '\u{258f}');
+    shown.insert(p.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
     let chars: Vec<char> = shown.chars().collect();
     let cur = shown[..p.cursor_pos.min(p.input.len())].chars().count();
     let start = (cur + 1).saturating_sub(field_w);

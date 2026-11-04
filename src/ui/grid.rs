@@ -207,7 +207,7 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
         && rename.item_idx == entry_idx {
             // Thin bar marks the cursor inside the wrapped name
             let mut shown = rename.input.clone();
-            shown.insert(rename.cursor_pos.min(shown.len()), '\u{258f}');
+            shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
             let lines = wrap_label(&shown, label_w, label_rows);
             let bg = if rename.invalid { theme::NORD11 } else { theme::SEL };
             Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))

@@ -98,6 +98,7 @@ fn total_scroll_rows(app: &App) -> usize {
 }
 
 pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
+    crate::lineedit::bump_cursor();
     // Global quit — works regardless of any modal state
     if ev.modifiers.contains(KeyModifiers::CONTROL) && ev.code == KeyCode::Char('q') {
         return true;
@@ -381,6 +382,18 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     let row = ev.row;
 
     match ev.kind {
+        MouseEventKind::Down(MouseButton::Left) if app.rename_state.is_some() => {
+            // Clicking elsewhere finishes the rename, like Dolphin; a name
+            // that can't be applied is dropped
+            crate::lineedit::bump_cursor();
+            let idx = app.rename_state.as_ref().map(|r| r.item_idx);
+            if hit_test(app, col, row) == idx {
+                return;
+            }
+            app.commit_rename();
+            app.rename_state = None;
+            handle_mouse(app, ev);
+        }
         MouseEventKind::Down(MouseButton::Left) => {
             // Sidebar border drag: clicking on the right edge of the sidebar
             if col == app.sidebar_w.saturating_sub(1) && row >= TOPBAR_H && app.menu.is_none() {
@@ -765,4 +778,5 @@ fn handle_topbar_click(app: &mut App, col: u16, row: u16) {
         app.start_path_edit();
     }
 }
+
 

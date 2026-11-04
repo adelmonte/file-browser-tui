@@ -161,6 +161,29 @@ pub fn edit(text: &mut String, cursor: &mut usize, ev: KeyEvent) -> Edit {
 }
 
 /// The text as spans with a block cursor at `cursor`.
+/// Last keypress/click, so text cursors stay solid while typing and blink
+/// when idle (milliseconds since START).
+static LAST_INPUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+fn now_ms() -> u64 {
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+pub fn bump_cursor() {
+    LAST_INPUT.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Text cursors blink at Qt's default rate (on/off 500 ms each).
+pub fn cursor_visible() -> bool {
+    (now_ms().saturating_sub(LAST_INPUT.load(std::sync::atomic::Ordering::Relaxed)) / 500).is_multiple_of(2)
+}
+
+/// The thin bar cursor, or an invisible same-width stand-in.
+pub fn bar_cursor() -> char {
+    if cursor_visible() { '\u{258f}' } else { '\u{2800}' }
+}
+
 pub fn spans(text: &str, cursor: usize, style: Style) -> Vec<Span<'static>> {
     let cursor = cursor.min(text.len());
     let (before, rest) = text.split_at(cursor);
@@ -169,7 +192,10 @@ pub fn spans(text: &str, cursor: usize, style: Style) -> Vec<Span<'static>> {
     let after: String = chars.collect();
     vec![
         Span::styled(before.to_string(), style),
-        Span::styled(under.map_or(" ".to_string(), String::from), style.add_modifier(Modifier::REVERSED)),
+        Span::styled(
+            under.map_or(" ".to_string(), String::from),
+            if cursor_visible() { style.add_modifier(Modifier::REVERSED) } else { style },
+        ),
         Span::styled(after, style),
     ]
 }
