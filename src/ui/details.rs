@@ -1,13 +1,13 @@
 use chrono::{DateTime, Local};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Cell, Row, Table},
 };
 
-use crate::app::App;
+use crate::app::{App, SortField};
 use crate::ui::theme;
 
 pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
@@ -31,11 +31,16 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         None
     };
     let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
+    // Clickable headers; the active sort column shows its direction
+    let arrow = if app.sort.ascending { " \u{25b4}" } else { " \u{25be}" };
+    let title = |label: &str, field: SortField| {
+        if app.sort.field == field { format!("{label}{arrow}") } else { label.to_string() }
+    };
     let header = Row::new(vec![
-        Cell::from(" Name"),
-        Cell::from(Line::from("Size").alignment(Alignment::Right)),
-        Cell::from("Modified"),
-        Cell::from(if searching { "Location" } else { "Type" }),
+        Cell::from(format!(" {}", title("Name", SortField::Name))),
+        Cell::from(Line::from(title("Size", SortField::Size)).alignment(Alignment::Right)),
+        Cell::from(title("Modified", SortField::Modified)),
+        Cell::from(if searching { "Location".to_string() } else { title("Type", SortField::Type) }),
     ]).style(header_style).height(1);
 
     // Rows start at scroll_offset so the table, scrolling and click mapping
@@ -116,6 +121,10 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(16),
         Constraint::Fill(1),
     ];
+    // Same split the table makes, for header hit-testing
+    let cols = Layout::horizontal(widths).spacing(2).split(Rect { height: 1, ..area });
+    let fields = [SortField::Name, SortField::Size, SortField::Modified, SortField::Type];
+    app.details_headers = cols.iter().zip(fields).take(if searching { 3 } else { 4 }).map(|(r, f)| (*r, f)).collect();
 
     let table = Table::new(rows, widths)
         .header(header)

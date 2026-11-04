@@ -140,6 +140,8 @@ pub struct App {
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
     pub place_drag: Option<crate::events::PlaceDrag>,
+    /// Details column headers and the sort field each sets.
+    pub details_headers: Vec<(Rect, SortField)>,
     /// Last mouse position, for hover highlights.
     pub mouse_pos: Option<(u16, u16)>,
 
@@ -290,6 +292,7 @@ impl App {
                 }),
             mouse_pos: None,
             place_drag: None,
+            details_headers: Vec::new(),
             places,
             devices,
             menu: None,

@@ -418,6 +418,18 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             }
             if sidebar::contains(app, col, row) { return; }
 
+            // Details headers sort; clicking the active one flips direction
+            if app.view_mode == ViewMode::Details
+                && let Some(&(_, field)) = app.details_headers.iter().find(|(r, _)| contains(*r, col, row))
+            {
+                if app.sort.field == field {
+                    app.set_sort_ascending(!app.sort.ascending);
+                } else {
+                    app.set_sort_field(field);
+                }
+                return;
+            }
+
             // Details tree: the arrow left of a folder's icon expands it
             if app.view_mode == ViewMode::Details
                 && let Some(idx) = hit_test(app, col, row)
