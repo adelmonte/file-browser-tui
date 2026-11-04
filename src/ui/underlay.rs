@@ -39,12 +39,18 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
     place(app, slot, Placed { rect, pad, fill: color, border: None }, -1)
 }
 
-/// A rounded panel exactly covering `rect` with a 1px outline the same
-/// distance from every edge (box-drawing borders sit mid-cell, so they're
-/// twice as far from the top/bottom edges as from the sides). Drawn under
-/// cell backgrounds, so highlighted cells still show on top.
+/// A rounded panel with a 1px outline for a popup whose first and last
+/// rows of `rect` are margins: it covers the rows between them and reaches
+/// only a few pixels into the margins, so the space above and below the
+/// items matches the sides (a whole margin row is twice a column's width).
+/// Drawn under cell backgrounds, so highlighted cells still show on top.
 pub fn panel(app: &mut App, slot: u32, rect: Rect, fill: (u8, u8, u8), border: (u8, u8, u8)) -> bool {
-    place(app, slot, Placed { rect, pad: 0, fill, border: Some(border) }, -1_073_741_825)
+    if rect.height < 3 {
+        return false;
+    }
+    let inner = Rect { y: rect.y + 1, height: rect.height - 2, ..rect };
+    let pad = field_pad(app);
+    place(app, slot, Placed { rect: inner, pad, fill, border: Some(border) }, -1_073_741_825)
 }
 
 fn place(app: &mut App, slot: u32, want: Placed, z: i32) -> bool {
@@ -61,7 +67,8 @@ fn place(app: &mut App, slot: u32, want: Placed, z: i32) -> bool {
     let font = app.picker.font_size();
     let (cw, ch) = (font.width.max(1) as u32, font.height.max(1) as u32);
     let (w, h) = (rect.width as u32 * cw, rect.height as u32 * ch + 2 * pad);
-    let radius = (ch as f32 * if border.is_some() { 0.35 } else { 0.3 }).max(3.0);
+    // Panels keep their rounded corners inside the margin strips
+    let radius = if border.is_some() && pad > 0 { pad as f32 } else { ch as f32 * 0.3 }.max(3.0);
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {

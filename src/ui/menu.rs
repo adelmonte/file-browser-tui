@@ -456,7 +456,10 @@ pub fn render_menu(f: &mut Frame, menu: &mut MenuState, panel: bool) {
 }
 
 fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, panel: bool) {
-    f.render_widget(Clear, rect);
+    // On a panel the top/bottom margin rows are left showing what's under
+    // them (the panel only reaches a few pixels into them)
+    let cleared = if panel { Rect { y: rect.y + 1, height: rect.height.saturating_sub(2), ..rect } } else { rect };
+    f.render_widget(Clear, cleared);
     let bg = |s: Style| if panel { s } else { s.bg(MENU_BG) };
 
     let inner_w = rect.width.saturating_sub(2) as usize;
