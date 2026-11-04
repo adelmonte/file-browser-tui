@@ -74,20 +74,14 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     // NOTE: menus/completions rendered in ui/mod.rs AFTER the grid (z-order)
 }
 
-/// Rounded recessed field: folder icon + breadcrumbs, or the typed path.
+/// Recessed field: folder icon + the path, or the typed path.
 fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
     app.topbar_crumbs.clear();
     if field.width < 4 {
         return;
     }
-    let cap = Style::default().fg(PATH_BG);
-    f.render_widget(Paragraph::new(Span::styled("\u{e0b6}", cap)), Rect { width: 1, ..field });
-    f.render_widget(
-        Paragraph::new(Span::styled("\u{e0b4}", cap)),
-        Rect { x: field.x + field.width - 1, width: 1, ..field },
-    );
+    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), field);
     let body = Rect { x: field.x + 1, width: field.width - 2, ..field };
-    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), body);
 
     if app.path_bar_editing {
         let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(Color::White)));
