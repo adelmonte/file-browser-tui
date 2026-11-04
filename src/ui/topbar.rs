@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
-use crate::ui::theme;
+use crate::ui::{kitty, theme};
 
 const PATH_BG: Color = theme::INPUT_BG;
 
@@ -80,8 +80,10 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
     if field.width < 4 {
         return;
     }
-    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), field);
     let body = Rect { x: field.x + 1, width: field.width - 2, ..field };
+    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), body);
+    kitty::field_cap(f, app, "location", field, false, theme::INPUT);
+    kitty::field_cap(f, app, "location", Rect { x: field.right() - 1, ..field }, true, theme::INPUT);
 
     if app.path_bar_editing {
         let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(Color::White)));

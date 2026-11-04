@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::search::{SearchMode, SearchScope};
-use crate::ui::theme;
+use crate::ui::{kitty, theme};
 
 /// One-row search bar under the toolbar:
 ///  <icon> query█             Name  Content  │  This Folder  Home
@@ -58,9 +58,9 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Query field fills the rest, a recessed field like the path bar
     let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
-    let field = outer;
-    search.field_rect = field;
-    let mut line = vec![Span::styled(" \u{f002}  ", Style::default().fg(theme::ACCENT))];
+    search.field_rect = outer;
+    let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
+    let mut line = vec![Span::styled("\u{f002}  ", Style::default().fg(theme::ACCENT))];
     if search.focused {
         line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(Color::White)));
     } else {
@@ -81,4 +81,8 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default().bg(theme::INPUT_BG)
     };
     f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
+    if outer.width >= 2 {
+        kitty::field_cap(f, app, "search", outer, false, theme::INPUT);
+        kitty::field_cap(f, app, "search", Rect { x: outer.right() - 1, ..outer }, true, theme::INPUT);
+    }
 }

@@ -52,6 +52,45 @@ pub fn centered_text(
     (out, used)
 }
 
+/// Draw one end cell of a text field as an image: the field color with
+/// slightly rounded outer corners (a glyph can only do a full half-circle).
+/// Without Kitty graphics the cell is just filled with the color.
+pub fn field_cap(
+    f: &mut ratatui::Frame, app: &mut crate::app::App,
+    key: &'static str, rect: ratatui::layout::Rect, right: bool, color: (u8, u8, u8),
+) {
+    use ratatui::{style::Style, widgets::{Block, Clear}};
+    use ratatui_image::{StatefulImage, picker::ProtocolType};
+
+    let rect = ratatui::layout::Rect { width: 1, height: 1, ..rect };
+    if app.picker.protocol_type() != ProtocolType::Kitty {
+        f.render_widget(Block::default().style(Style::default().bg(crate::ui::theme::rgb(color))), rect);
+        return;
+    }
+    if !app.field_caps.contains_key(&(key, right)) {
+        let font = app.picker.font_size();
+        let (w, h) = (font.width.max(1) as u32, font.height.max(1) as u32);
+        let radius = (h as f32 * 0.22).max(2.0);
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            // Distance into the rounded corner region on the outer side
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let cx = if right { w as f32 - radius } else { radius };
+            let dx = if right { (px - cx).max(0.0) } else { (cx - px).max(0.0) };
+            let dy = if py < radius { radius - py } else if py > h as f32 - radius { py - (h as f32 - radius) } else { 0.0 };
+            let d = (dx * dx + dy * dy).sqrt();
+            let alpha = (radius - d + 0.5).clamp(0.0, 1.0);
+            image::Rgba([color.0, color.1, color.2, (alpha * 255.0) as u8])
+        });
+        let proto = app.picker.new_resize_protocol(image::DynamicImage::ImageRgba8(img));
+        app.field_caps.insert((key, right), proto);
+    }
+    let Some(proto) = app.field_caps.get_mut(&(key, right)) else { return; };
+    f.render_widget(Clear, rect);
+    f.render_stateful_widget(StatefulImage::new(), rect, proto);
+    split_placeholder_rows(f.buffer_mut(), rect, &mut app.kitty_transmits);
+}
+
 pub fn delete_all(out: &mut impl Write) -> std::io::Result<()> {
     write!(out, "\x1b_Ga=d\x1b\\")?;
     out.flush()

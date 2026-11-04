@@ -61,7 +61,7 @@ impl Default for SortState {
 // ---------------------------------------------------------------------------
 
 /// Topbar height in rows (1 padding + 1 content + 1 padding).
-pub const TOPBAR_H: u16 = 3;
+pub const TOPBAR_H: u16 = 4;
 
 /// Icon zoom levels, as icon height in terminal rows: one-row steps at
 /// small and medium sizes, wider jumps at the top end.
@@ -211,6 +211,8 @@ pub struct App {
     /// Raw output written after ratatui flushes a frame (Kitty multicell
     /// text, which ratatui can't express).
     pub post_draw: Vec<String>,
+    /// Rounded end caps of text fields, keyed by (field, right side).
+    pub field_caps: HashMap<(&'static str, bool), ratatui_image::protocol::StatefulProtocol>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -323,6 +325,7 @@ impl App {
             dirstates,
             kitty_transmits: Vec::new(),
             post_draw: Vec::new(),
+            field_caps: HashMap::new(),
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
@@ -824,6 +827,7 @@ impl App {
         self.prev_frame_images = std::mem::take(&mut self.frame_images);
 
         if delete_all {
+            self.field_caps.clear();
             self.sidebar_icons.clear_protocols();
             self.icon_cache.clear_protocols();
             self.thumb_cache.clear_protocols();
