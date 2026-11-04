@@ -136,6 +136,7 @@ fn run(
         app.drain_channels();
 
         // Render frame
+        app.tick_scroll();
         terminal.draw(|f| ui::render(f, app))?;
         // Window title follows the current folder, like Dolphin's
         if app.cwd != title_path {

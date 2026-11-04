@@ -101,6 +101,15 @@ pub struct App {
     pub listing: DirListing,
     pub selection: Option<usize>,
     pub scroll_offset: usize,
+    /// Icons view smooth scrolling, in terminal rows: `scroll_pos` eases
+    /// toward `scroll_target`; `scroll_offset`/`scroll_sub` (grid row and
+    /// rows into it) are derived from it each frame.
+    pub scroll_pos: f32,
+    pub scroll_target: f32,
+    pub scroll_sub: u16,
+    /// `scroll_offset` as last derived; a different value means it was set
+    /// directly (new folder, view change) and the animation jumps there.
+    scroll_seen: usize,
     /// Bytes available on the cwd's filesystem, refreshed on reload.
     pub free_space: Option<u64>,
 
@@ -270,6 +279,10 @@ impl App {
             listing,
             selection: None,
             scroll_offset: 0,
+            scroll_pos: 0.0,
+            scroll_target: 0.0,
+            scroll_sub: 0,
+            scroll_seen: 0,
             free_space: free_space(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
             view_mode,
             sort,
@@ -516,7 +529,7 @@ impl App {
     fn after_navigate(&mut self) {
         self.search = None;
         self.expanded.clear();
-        self.scroll_offset = 0;
+        self.reset_scroll();
         self.selection = None;
         self.multi_selection.clear();
         self.selection_anchor = None;
@@ -634,6 +647,10 @@ impl App {
         self.icon_cache.clear();
         self.thumb_cache.clear_protocols();
         self.kitty_delete_all = true;
+        // Rows changed height: re-derive the position from the grid row
+        self.scroll_pos = (self.scroll_offset * h as usize) as f32;
+        self.scroll_target = self.scroll_pos;
+        self.scroll_sub = 0;
     }
 
     /// Step icon size up (+1) or down (-1) and persist per-dir.
@@ -767,7 +784,7 @@ impl App {
 
     pub fn close_search(&mut self) {
         if self.search.take().is_some_and(|s| s.has_query()) {
-            self.scroll_offset = 0;
+            self.reset_scroll();
             self.reload_dir();
         }
     }
@@ -797,7 +814,7 @@ impl App {
         let entries = match update {
             SearchUpdate::None => return,
             SearchUpdate::Replace(entries) => {
-                self.scroll_offset = 0;
+                self.reset_scroll();
                 self.selection = None;
                 self.multi_selection.clear();
                 self.selection_anchor = None;
@@ -918,7 +935,62 @@ impl App {
         self.ensure_selection_visible();
     }
 
+    pub fn reset_scroll(&mut self) {
+        self.scroll_offset = 0;
+        self.scroll_pos = 0.0;
+        self.scroll_target = 0.0;
+        self.scroll_sub = 0;
+    }
+
+    fn max_scroll(&self) -> f32 {
+        let rows = self.listing.entries.len().div_ceil(self.grid_cols.max(1) as usize);
+        (rows as f32 * self.cell_h as f32 - self.grid_area.height as f32).max(0.0)
+    }
+
+    /// Scroll the Icons view by `rows` terminal rows (animated).
+    pub fn scroll_by(&mut self, rows: f32) {
+        self.scroll_target = (self.scroll_target + rows).clamp(0.0, self.max_scroll());
+    }
+
+    /// Advance the scroll animation one frame. Returns whether it's moving.
+    pub fn tick_scroll(&mut self) -> bool {
+        let ch = self.cell_h.max(1) as usize;
+        if self.view_mode != ViewMode::Icons {
+            self.scroll_sub = 0;
+            self.scroll_seen = self.scroll_offset;
+            self.scroll_pos = (self.scroll_offset * ch) as f32;
+            self.scroll_target = self.scroll_pos;
+            return false;
+        }
+        if self.scroll_offset != self.scroll_seen {
+            self.scroll_pos = (self.scroll_offset * ch) as f32;
+            self.scroll_target = self.scroll_pos;
+        }
+        self.scroll_target = self.scroll_target.clamp(0.0, self.max_scroll());
+        let d = self.scroll_target - self.scroll_pos;
+        let moving = d.abs() >= 0.5;
+        self.scroll_pos = if moving { self.scroll_pos + d * 0.35 } else { self.scroll_target };
+        let rows = self.scroll_pos.round().max(0.0) as usize;
+        self.scroll_offset = rows / ch;
+        self.scroll_sub = (rows % ch) as u16;
+        self.scroll_seen = self.scroll_offset;
+        moving
+    }
+
     fn ensure_selection_visible(&mut self) {
+        if self.view_mode == ViewMode::Icons {
+            // Bring the whole item into view, animated
+            let Some(idx) = self.selection else { return; };
+            let ch = self.cell_h as f32;
+            let top = (idx / self.grid_cols.max(1) as usize) as f32 * ch;
+            let h = self.grid_area.height as f32;
+            if top < self.scroll_target {
+                self.scroll_target = top;
+            } else if top + ch > self.scroll_target + h {
+                self.scroll_target = (top + ch - h).max(0.0);
+            }
+            return;
+        }
         let rows_visible = match self.view_mode {
             ViewMode::Details => self.grid_area.height.saturating_sub(1) as usize,
             ViewMode::Compact => (self.grid_area.height / crate::ui::compact::COMPACT_CELL_H).max(1) as usize,

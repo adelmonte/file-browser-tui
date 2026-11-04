@@ -52,10 +52,10 @@ fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     let count = app.listing.entries.len();
     match app.view_mode {
         ViewMode::Icons => {
-            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (app.grid_pitch, app.cell_h))
+            cell_at_pos((col, row), app.grid_area, (app.scroll_offset, app.scroll_sub), app.grid_cols, count, (app.grid_pitch, app.cell_h))
         }
         ViewMode::Compact => {
-            cell_at_pos((col, row), app.grid_area, app.scroll_offset, app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
+            cell_at_pos((col, row), app.grid_area, (app.scroll_offset, 0), app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
         }
         ViewMode::Details => {
             details_row_at_pos(row, app.grid_area, app.scroll_offset, count)
@@ -593,6 +593,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::ScrollDown => {
             if app.menu.is_some() { return; }
+            if app.view_mode == ViewMode::Icons {
+                app.scroll_by(app.cell_h as f32 * 0.5);
+                return;
+            }
             let vis = visible_rows(app);
             let total = total_scroll_rows(app);
             if app.scroll_offset + vis < total {
@@ -602,6 +606,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::ScrollUp => {
             if app.menu.is_some() { return; }
+            if app.view_mode == ViewMode::Icons {
+                app.scroll_by(-(app.cell_h as f32 * 0.5));
+                return;
+            }
             if app.scroll_offset > 0 {
                 app.scroll_offset -= 1;
             }

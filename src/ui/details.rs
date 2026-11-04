@@ -148,7 +148,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         let x = expander_x(area, depth) + 2;
         if x + 2 > area.right() { continue; }
         let rect = Rect { x, y: area.y + 1 + row as u16, width: 2, height: 1 };
-        crate::ui::grid::render_cell_image(f, app, i, rect, bg);
+        crate::ui::grid::render_cell_image(f.buffer_mut(), app, i, rect, bg);
     }
 }
 
