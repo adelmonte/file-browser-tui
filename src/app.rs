@@ -100,6 +100,9 @@ pub struct App {
     pub cwd: PathBuf,
     pub history_back: Vec<PathBuf>,
     pub history_forward: Vec<PathBuf>,
+    /// The item selected in each folder when it was left, re-selected on
+    /// coming back.
+    pub left_selection: HashMap<PathBuf, PathBuf>,
 
     // Directory contents
     pub listing: DirListing,
@@ -303,6 +306,7 @@ impl App {
             cwd,
             history_back: Vec::new(),
             history_forward: Vec::new(),
+            left_selection: HashMap::new(),
             listing,
             selection: None,
             scroll_offset: 0,
@@ -542,6 +546,7 @@ impl App {
 
     pub fn navigate_to(&mut self, path: PathBuf) {
         if path == self.cwd { return; }
+        self.remember_selection();
         let old = std::mem::replace(&mut self.cwd, path);
         self.history_back.push(old);
         self.history_forward.clear();
@@ -566,23 +571,53 @@ impl App {
 
     pub fn navigate_back(&mut self) {
         if let Some(prev) = self.history_back.pop() {
+            self.remember_selection();
             let current = std::mem::replace(&mut self.cwd, prev);
-            self.history_forward.push(current);
+            self.history_forward.push(current.clone());
             self.after_navigate();
+            self.restore_selection(&current, false);
         }
     }
 
     pub fn navigate_forward(&mut self) {
         if let Some(next) = self.history_forward.pop() {
+            self.remember_selection();
             let current = std::mem::replace(&mut self.cwd, next);
-            self.history_back.push(current);
+            self.history_back.push(current.clone());
             self.after_navigate();
+            self.restore_selection(&current, false);
         }
     }
 
     pub fn navigate_up(&mut self) {
         if let Some(parent) = self.cwd.parent().map(|p| p.to_path_buf()) {
+            let child = self.cwd.clone();
             self.navigate_to(parent);
+            self.restore_selection(&child, true);
+        }
+    }
+
+    fn remember_selection(&mut self) {
+        if self.search.as_ref().is_some_and(|s| s.has_query()) {
+            return;
+        }
+        match self.selection.and_then(|i| self.listing.entries.get(i)) {
+            Some(e) => { self.left_selection.insert(self.cwd.clone(), e.path.clone()); }
+            None => { self.left_selection.remove(&self.cwd); }
+        }
+    }
+
+    /// Like Dolphin, coming back to a folder selects what was selected
+    /// there, or else the folder just left (that first when going up).
+    fn restore_selection(&mut self, came_from: &std::path::Path, prefer_from: bool) {
+        let find = |p: &std::path::Path| self.listing.entries.iter().position(|e| e.path == p);
+        let left = self.left_selection.get(&self.cwd).and_then(|w| find(w));
+        let from = find(came_from);
+        let idx = if prefer_from { from.or(left) } else { left.or(from) };
+        if let Some(idx) = idx {
+            self.selection = Some(idx);
+            self.selection_anchor = Some(idx);
+            self.ensure_selection_visible();
         }
     }
 
