@@ -1,5 +1,6 @@
-//! Dolphin-style folder previews: up to four of the folder's images or videos
-//! as thin-bordered prints in a 2x2 grid over the folder icon.
+//! Dolphin-style folder previews: up to four of the folder's previewable
+//! files as thin-bordered prints over the folder icon (one or two large,
+//! more in a 2x2 grid).
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ const MAX_PRINTS: usize = 4;
 const SCAN_LIMIT: usize = 500;
 const PAPER: Rgba<u8> = Rgba([250, 250, 247, 255]);
 
-/// 2x2 grid over the folder body, as fractions of the icon: left, top,
+/// Area over the folder body, as fractions of the icon: left, top,
 /// right, bottom, and the gap between tiles.
 const GRID: (f32, f32, f32, f32) = (0.15, 0.31, 0.85, 0.86);
 const GAP: f32 = 0.035;
@@ -33,15 +34,39 @@ pub fn build(dir: &Path, folder: &DynamicImage) -> Option<DynamicImage> {
     let mut canvas = folder.to_rgba8();
     let (w, h) = (canvas.width() as f32, canvas.height() as f32);
     let (l, t, r, b) = GRID;
-    let tile_w = ((r - l - GAP) / 2.0 * w).max(4.0);
-    let tile_h = ((b - t - GAP) / 2.0 * h).max(4.0);
+    let (gw, gh, gap) = ((r - l) * w, (b - t) * h, GAP * w);
 
-    for (i, photo) in photos.iter().enumerate() {
-        let (col, row) = ((i % 2) as f32, (i / 2) as f32);
-        let cx = l * w + tile_w / 2.0 + col * (tile_w + GAP * w);
-        let cy = t * h + tile_h / 2.0 + row * (tile_h + GAP * h);
+    // One or two get larger slots, shaped like the item (a book cover stays
+    // whole); three or four share the 2x2 grid, cropped to fill
+    let n = photos.len();
+    let slots: Vec<(f32, f32, f32, f32)> = match n {
+        1 => vec![(l * w + gw / 2.0, t * h + gh / 2.0, gw, gh)],
+        2 => {
+            let sw = (gw - gap) / 2.0;
+            (0..2).map(|i| (l * w + sw / 2.0 + i as f32 * (sw + gap), t * h + gh / 2.0, sw, gh)).collect()
+        }
+        _ => {
+            let (sw, sh) = ((gw - gap) / 2.0, (gh - GAP * h) / 2.0);
+            (0..4).map(|i| {
+                let (col, row) = ((i % 2) as f32, (i / 2) as f32);
+                (l * w + sw / 2.0 + col * (sw + gap), t * h + sh / 2.0 + row * (sh + GAP * h), sw, sh)
+            }).collect()
+        }
+    };
+    let tilt: &[f32] = match n {
+        1 => &[-1.5],
+        2 => &[-2.5, 2.0],
+        _ => &TILT,
+    };
 
-        let print = rotate(&make_print(photo, tile_w as u32, tile_h as u32), TILT[i]);
+    for (i, (photo, &(cx, cy, sw, sh))) in photos.iter().zip(&slots).enumerate() {
+        let (tw, th) = if n <= 2 {
+            let aspect = photo.width().max(1) as f32 / photo.height().max(1) as f32;
+            if aspect > sw / sh { (sw, sw / aspect) } else { (sh * aspect, sh) }
+        } else {
+            (sw, sh)
+        };
+        let print = rotate(&make_print(photo, tw.max(4.0) as u32, th.max(4.0) as u32), tilt[i]);
         let shadow = shadow_of(&print, w.min(h));
         let x = cx as i64 - print.width() as i64 / 2;
         let y = cy as i64 - print.height() as i64 / 2;
@@ -144,5 +169,6 @@ fn rotate(img: &RgbaImage, deg: f32) -> RgbaImage {
         Rgba([un(acc[0]), un(acc[1]), un(acc[2]), (acc[3] * 255.0).round() as u8])
     })
 }
+
 
 
