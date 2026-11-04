@@ -145,19 +145,35 @@ impl IconCache {
                         add_link_emblem(img);
                     }
                     let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
-                    let preview_base = if wants_preview { image.clone() } else { None };
+                    let Some(base) = image.clone().filter(|_| wants_preview) else {
+                        // Always send back (even if no icon) so mime_type reaches the listing
+                        let _ = tx.send(IconImageReady { path: req.path, image, mime_type: mime });
+                        return;
+                    };
 
-                    // Always send back (even if no icon) so mime_type reaches the listing
-                    let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone() });
-
-                    // Plain folder shows immediately; the preview replaces it when ready
-                    if let Some(base) = preview_base
-                        && let Some(mut preview) = folder_preview::build(&req.path, &base)
-                    {
-                        if is_link {
-                            add_link_emblem(&mut preview);
+                    // A preview that's quick (cached thumbnails) replaces the plain
+                    // folder outright, so it doesn't visibly swap; a slow one follows it
+                    let (ptx, prx) = std::sync::mpsc::channel();
+                    let dir = req.path.clone();
+                    // Own thread: blocking a pool worker on a pool task could deadlock
+                    std::thread::spawn(move || {
+                        let _ = ptx.send(folder_preview::build(&dir, &base).map(|mut p| {
+                            if is_link {
+                                add_link_emblem(&mut p);
+                            }
+                            p
+                        }));
+                    });
+                    let send = |image| { let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone() }); };
+                    match prx.recv_timeout(std::time::Duration::from_millis(150)) {
+                        Ok(Some(preview)) => send(Some(preview)),
+                        Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => send(image),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            send(image);
+                            if let Ok(Some(preview)) = prx.recv() {
+                                send(Some(preview));
+                            }
                         }
-                        let _ = tx.send(IconImageReady { path: req.path, image: Some(preview), mime_type: mime });
                     }
                 });
             }
