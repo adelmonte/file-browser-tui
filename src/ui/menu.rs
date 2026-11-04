@@ -1,15 +1,16 @@
 use ratatui::{
     Frame,
+    buffer::CellDiffOption,
     crossterm::event::KeyCode,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Padding},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use strum::IntoEnumIterator;
 
 use crate::app::{App, SortField, ViewMode};
-use crate::ui::theme;
+use crate::ui::{kitty, theme};
 
 const MENU_BG: Color = theme::FIELD_BG;
 const MENU_SEL: Color = theme::rgb(theme::NORD9);
@@ -121,6 +122,8 @@ pub struct MenuState {
     /// Actual rendered rects, used for hit-testing and occlusion.
     pub rect: Rect,
     pub submenu_rect: Rect,
+    /// Kitty layout: two-row items with vertically centered text.
+    pub tall: bool,
 }
 
 impl MenuState {
@@ -136,6 +139,7 @@ impl MenuState {
             submenu_selected: 0,
             rect: Rect::default(),
             submenu_rect: Rect::default(),
+            tall: false,
         }
     }
 }
@@ -377,17 +381,37 @@ pub fn build_sort_menu(app: &App) -> Vec<MenuItem> {
 // Geometry (shared by render, occlusion pre-pass, and hit-testing)
 // ---------------------------------------------------------------------------
 
-fn menu_size(items: &[MenuItem]) -> (u16, u16) {
+fn item_h(item: &MenuItem, tall: bool) -> u16 {
+    if tall && !item.separator { 2 } else { 1 }
+}
+
+/// Rows above the first item: a border/padding row, none for tall menus
+/// (their items carry their own half-row margins).
+fn top(tall: bool) -> u16 {
+    u16::from(!tall)
+}
+
+/// Each item's (y, height) inside a menu at `rect`.
+fn item_rows(rect: Rect, items: &[MenuItem], tall: bool) -> Vec<(u16, u16)> {
+    let mut y = rect.y + top(tall);
+    items.iter().map(|item| {
+        let h = item_h(item, tall);
+        y += h;
+        (y - h, h)
+    }).collect()
+}
+
+fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
         .map(|i| i.label.chars().count() + if i.submenu.is_empty() { 0 } else { 2 })
         .max()
         .unwrap_or(8) as u16 + 4;
-    let h = items.len() as u16 + 2;
+    let h = items.iter().map(|i| item_h(i, tall)).sum::<u16>() + 2 * top(tall);
     (w, h)
 }
 
 pub fn menu_rect(menu: &MenuState, term: Rect) -> Rect {
-    let (w, h) = menu_size(&menu.items);
+    let (w, h) = menu_size(&menu.items, menu.tall);
     let w = w.min(term.width);
     let h = h.min(term.height);
     let x = menu.pos.0.min(term.width.saturating_sub(w));
@@ -398,14 +422,16 @@ pub fn menu_rect(menu: &MenuState, term: Rect) -> Rect {
 pub fn submenu_rect(menu: &MenuState, term: Rect) -> Rect {
     let parent = menu_rect(menu, term);
     let items = &menu.items[menu.selected].submenu;
-    let (w, h) = menu_size(items);
+    let (w, h) = menu_size(items, menu.tall);
     let w = w.min(term.width);
     let h = h.min(term.height);
     let mut x = parent.x + parent.width;
     if x + w > term.width {
         x = parent.x.saturating_sub(w);
     }
-    let y = (parent.y + 1 + menu.selected as u16).min(term.height.saturating_sub(h));
+    // First item level with the parent item
+    let item_y = item_rows(parent, &menu.items, menu.tall).get(menu.selected).map_or(parent.y, |r| r.0);
+    let y = item_y.min(term.height.saturating_sub(h));
     Rect { x, y, width: w, height: h }
 }
 
@@ -415,61 +441,87 @@ pub fn submenu_rect(menu: &MenuState, term: Rect) -> Rect {
 
 /// Where to draw each visible item's icon image: (icon, cell rect, highlighted).
 pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
-    fn list(rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<(String, Rect, bool)>) {
-        for (i, item) in items.iter().enumerate() {
+    fn list(rect: Rect, items: &[MenuItem], tall: bool, selected: Option<usize>, out: &mut Vec<(String, Rect, bool)>) {
+        for (i, (item, (y, h))) in items.iter().zip(item_rows(rect, items, tall)).enumerate() {
             let Some(icon) = item.icon.clone() else { continue; };
-            let y = rect.y + 1 + i as u16;
-            if y + 1 < rect.bottom() && rect.width > 4 {
-                out.push((icon, Rect { x: rect.x + 2, y, width: 2, height: 1 }, selected == Some(i) && item.enabled));
+            if y + h + top(tall) <= rect.bottom() && rect.width > 4 {
+                out.push((icon, Rect { x: rect.x + 2, y, width: 2, height: h }, selected == Some(i) && item.enabled));
             }
         }
     }
     let mut out = Vec::new();
-    list(menu.rect, &menu.items, (!menu.submenu_open).then_some(menu.selected), &mut out);
+    list(menu.rect, &menu.items, menu.tall, (!menu.submenu_open).then_some(menu.selected), &mut out);
     if menu.submenu_open && let Some(parent) = menu.items.get(menu.selected) {
-        list(menu.submenu_rect, &parent.submenu, Some(menu.submenu_selected), &mut out);
+        list(menu.submenu_rect, &parent.submenu, menu.tall, Some(menu.submenu_selected), &mut out);
     }
     out
+}
+
+/// Rows of the highlighted items in a tall menu: the parent's item (kept
+/// lit while its submenu is open) and the submenu's.
+pub fn highlight_rects(menu: &MenuState) -> (Option<Rect>, Option<Rect>) {
+    let at = |rect: Rect, items: &[MenuItem], i: usize| {
+        items.get(i).filter(|it| it.selectable())?;
+        let (y, h) = item_rows(rect, items, menu.tall)[i];
+        (y + h <= rect.bottom()).then_some(Rect { x: rect.x, y, width: rect.width, height: h })
+    };
+    let main = at(menu.rect, &menu.items, menu.selected);
+    let sub = if menu.submenu_open {
+        at(menu.submenu_rect, &menu.items[menu.selected].submenu, menu.submenu_selected)
+    } else {
+        None
+    };
+    (main, sub)
 }
 
 /// Background colors behind menu icons: (normal, highlighted).
 pub const ICON_BG: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD9);
 /// Panel drawn under the menu on Kitty (see ui::underlay): fill, outline.
 pub const PANEL: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD3);
+/// Selection highlight in panel menus.
+pub const HIGHLIGHT: (u8, u8, u8) = theme::NORD9;
 
-/// `panel`: the caller draws the background and outline as an image under
-/// the cells, so the items are drawn without a cell border or fill.
-pub fn render_menu(f: &mut Frame, menu: &mut MenuState, panel: bool) {
+/// `tall`: Kitty draws the background, outline and highlight as images
+/// under the cells, and the text centered across two-row items. Returns
+/// escape sequences to write after the frame.
+pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) -> Vec<String> {
     let term = f.area();
+    menu.tall = tall;
     let rect = menu_rect(menu, term);
     menu.rect = rect;
-    render_item_list(f, rect, &menu.items, if menu.submenu_open { None } else { Some(menu.selected) }, panel);
+    let mut out = Vec::new();
+    let parent_sel = if menu.submenu_open && !tall { None } else { Some(menu.selected) };
+    render_item_list(f, rect, &menu.items, parent_sel, tall, &mut out);
 
     if menu.submenu_open {
         let sub_rect = submenu_rect(menu, term);
         menu.submenu_rect = sub_rect;
         let items = menu.items[menu.selected].submenu.clone();
-        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected), panel);
+        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected), tall, &mut out);
     } else {
         menu.submenu_rect = Rect::default();
     }
+    out
 }
 
-fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, panel: bool) {
+fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, tall: bool, out: &mut Vec<String>) {
     f.render_widget(Clear, rect);
-    let bg = |s: Style| if panel { s } else { s.bg(MENU_BG) };
+    if tall {
+        render_tall(f, rect, items, selected, out);
+        return;
+    }
 
     let inner_w = rect.width.saturating_sub(2) as usize;
     let lines: Vec<Line> = items.iter().enumerate().map(|(i, item)| {
         if item.separator {
-            return Line::styled("\u{2500}".repeat(inner_w), bg(Style::default().fg(theme::BORDER)));
+            return Line::styled("\u{2500}".repeat(inner_w), Style::default().fg(theme::BORDER).bg(MENU_BG));
         }
         let arrow = if item.submenu.is_empty() { "" } else { " \u{f0da}" };
         let pad = inner_w
             .saturating_sub(item.label.chars().count() + arrow.chars().count() + 1);
         let text = format!(" {}{}{}", item.label, " ".repeat(pad), arrow);
 
-        let mut style = bg(Style::default());
+        let mut style = Style::default().bg(MENU_BG);
         if !item.enabled {
             style = style.add_modifier(Modifier::DIM);
         } else if selected == Some(i) {
@@ -478,16 +530,55 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
         Line::from(Span::styled(text, style))
     }).collect();
 
-    let block = if panel {
-        Block::default().padding(Padding::uniform(1))
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
-            .style(Style::default().bg(MENU_BG))
-    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
+        .style(Style::default().bg(MENU_BG));
     f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<String>) {
+    let (text_x, right) = (rect.x + 2, rect.right().saturating_sub(2));
+    for (i, (item, (y, h))) in items.iter().zip(item_rows(rect, items, true)).enumerate() {
+        if y + h > rect.bottom() {
+            break;
+        }
+        if item.separator {
+            let w = rect.width.saturating_sub(2);
+            f.render_widget(
+                Paragraph::new("\u{2500}".repeat(w as usize)).style(Style::default().fg(theme::BORDER)),
+                Rect { x: rect.x + 1, y, width: w, height: 1 },
+            );
+            continue;
+        }
+        let fg = if !item.enabled {
+            theme::MUTED_RGB
+        } else if selected == Some(i) {
+            (255, 255, 255)
+        } else {
+            theme::TEXT_RGB
+        };
+        let arrow_w = if item.submenu.is_empty() { 0 } else { 2 };
+        let mut emit = |x: u16, w: u16, text: &str| {
+            if w == 0 { return; }
+            let (seq, used) = kitty::centered_text(x, y, h, w, text, fg, None);
+            let buf = f.buffer_mut();
+            for cy in y..y + h {
+                for cx in x..x + used {
+                    buf[(cx, cy)].set_symbol(" ").set_diff_option(CellDiffOption::Skip);
+                }
+            }
+            out.push(seq);
+        };
+        // Icon items keep their leading spaces free for the image
+        let label = item.label.trim_start();
+        let lead = (item.label.chars().count() - label.chars().count()) as u16;
+        emit(text_x + lead, right.saturating_sub(text_x + lead + arrow_w), label);
+        if arrow_w > 0 {
+            emit(right - arrow_w, arrow_w, "\u{f0da}");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -568,22 +659,18 @@ fn open_submenu(menu: &mut MenuState) {
     menu.submenu_selected = first;
 }
 
-fn item_at(rect: Rect, items: &[MenuItem], col: u16, row: u16) -> Option<usize> {
+fn item_at(rect: Rect, items: &[MenuItem], tall: bool, col: u16, row: u16) -> Option<usize> {
     if !rect.contains(ratatui::layout::Position { x: col, y: row }) {
         return None;
     }
-    if row <= rect.y || row >= rect.y + rect.height.saturating_sub(1) {
-        return None; // border rows
-    }
-    let idx = (row - rect.y - 1) as usize;
-    if idx < items.len() { Some(idx) } else { None }
+    item_rows(rect, items, tall).iter().position(|&(y, h)| row >= y && row < y + h && y + h <= rect.bottom())
 }
 
 /// Left-click routing while a menu is open.
 pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcome {
     if menu.submenu_open {
         let sub = menu.items[menu.selected].submenu.clone();
-        if let Some(idx) = item_at(menu.submenu_rect, &sub, col, row) {
+        if let Some(idx) = item_at(menu.submenu_rect, &sub, menu.tall, col, row) {
             if sub[idx].selectable() {
                 return MenuOutcome::Action(sub[idx].action.clone());
             }
@@ -596,7 +683,7 @@ pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcom
         menu.submenu_open = false;
     }
 
-    if let Some(idx) = item_at(menu.rect, &menu.items, col, row) {
+    if let Some(idx) = item_at(menu.rect, &menu.items, menu.tall, col, row) {
         let item = &menu.items[idx];
         if item.separator || !item.enabled {
             return MenuOutcome::Consumed;
@@ -619,15 +706,35 @@ pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcom
 pub fn handle_menu_hover(menu: &mut MenuState, col: u16, row: u16) {
     if menu.submenu_open {
         let sub = &menu.items[menu.selected].submenu;
-        if let Some(idx) = item_at(menu.submenu_rect, sub, col, row)
+        if let Some(idx) = item_at(menu.submenu_rect, sub, menu.tall, col, row)
             && sub[idx].selectable() {
                 menu.submenu_selected = idx;
             }
         return;
     }
     let items = menu.items.clone();
-    if let Some(idx) = item_at(menu.rect, &items, col, row)
+    if let Some(idx) = item_at(menu.rect, &items, menu.tall, col, row)
         && items[idx].selectable() {
             menu.selected = idx;
         }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tall_items_hit_test() {
+        let items = vec![
+            MenuItem::new("Open", MenuAction::None),
+            MenuItem::sep(),
+            MenuItem::new("Copy", MenuAction::None),
+        ];
+        let rect = Rect { x: 10, y: 5, width: 12, height: menu_size(&items, true).1 };
+        assert_eq!(rect.height, 5);
+        let hits: Vec<_> = (5..10).map(|r| item_at(rect, &items, true, 12, r)).collect();
+        assert_eq!(hits, vec![Some(0), Some(0), Some(1), Some(2), Some(2)]);
+        assert_eq!(item_at(rect, &items, false, 12, 5), None);
+        assert_eq!(item_at(rect, &items, false, 12, 6), Some(0));
+    }
 }

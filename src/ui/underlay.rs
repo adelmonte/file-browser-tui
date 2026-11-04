@@ -15,17 +15,38 @@ use crate::app::App;
 const ID_BASE: u32 = 0x00F1_E1D0;
 
 /// Where an underlay is currently placed, to skip redundant re-placement.
+/// Geometry in pixels from the window's top-left cell corner.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Placed {
-    rect: Rect,
-    pad: u32,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    radius: u32,
     fill: (u8, u8, u8),
     border: Option<(u8, u8, u8)>,
+    z: i32,
 }
+
+impl Placed {
+    /// Same image, possibly elsewhere: only the placement needs moving.
+    fn same_image(&self, o: &Placed) -> bool {
+        (self.w, self.h, self.radius, self.fill, self.border, self.z) == (o.w, o.h, o.radius, o.fill, o.border, o.z)
+    }
+}
+
+/// Under cell backgrounds (menus), panels below highlights.
+const Z_PANEL: i32 = -1_073_741_830;
+const Z_HIGHLIGHT: i32 = -1_073_741_825;
 
 /// How far (in pixels) a field reaches above and below its text row.
 pub fn field_pad(app: &App) -> u32 {
     (app.picker.font_size().height as f32 * 0.32).round() as u32
+}
+
+fn cell(app: &App) -> (u32, u32) {
+    let font = app.picker.font_size();
+    (font.width.max(1) as u32, font.height.max(1) as u32)
 }
 
 /// Show a rounded field background behind `rect` (one text row), reaching
@@ -36,7 +57,13 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
         return false;
     }
     let pad = field_pad(app);
-    place(app, slot, Placed { rect, pad, fill: color, border: None }, -1)
+    let (cw, ch) = cell(app);
+    let radius = (ch as f32 * 0.3).max(3.0) as u32;
+    place(app, slot, Placed {
+        x: rect.x as u32 * cw, y: rect.y as u32 * ch - pad,
+        w: rect.width as u32 * cw, h: rect.height as u32 * ch + 2 * pad,
+        radius, fill: color, border: None, z: -1,
+    })
 }
 
 /// A rounded panel exactly covering `rect` with a 1px outline the same
@@ -44,60 +71,89 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
 /// twice as far from the top/bottom edges as from the sides). Drawn under
 /// cell backgrounds, so highlighted cells still show on top.
 pub fn panel(app: &mut App, slot: u32, rect: Rect, fill: (u8, u8, u8), border: (u8, u8, u8)) -> bool {
-    place(app, slot, Placed { rect, pad: 0, fill, border: Some(border) }, -1_073_741_825)
+    let (cw, ch) = cell(app);
+    let radius = (ch as f32 * 0.35).max(3.0) as u32;
+    place(app, slot, Placed {
+        x: rect.x as u32 * cw, y: rect.y as u32 * ch,
+        w: rect.width as u32 * cw, h: rect.height as u32 * ch,
+        radius, fill, border: Some(border), z: Z_PANEL,
+    })
 }
 
-fn place(app: &mut App, slot: u32, want: Placed, z: i32) -> bool {
+/// Margin between a menu panel's edge and an item highlight, on every side.
+pub fn highlight_inset(app: &App) -> u32 {
+    (cell(app).1 as f32 * 0.15).round().max(2.0) as u32
+}
+
+/// A rounded selection highlight for `rect`, shrunk by `inset_x`/`inset_y`
+/// pixels, above a panel.
+pub fn highlight(app: &mut App, slot: u32, rect: Rect, inset_x: u32, inset_y: u32, color: (u8, u8, u8)) -> bool {
+    let (cw, ch) = cell(app);
+    let (w, h) = (rect.width as u32 * cw, rect.height as u32 * ch);
+    if w <= 2 * inset_x || h <= 2 * inset_y {
+        return false;
+    }
+    let radius = (ch as f32 * 0.25).max(3.0) as u32;
+    place(app, slot, Placed {
+        x: rect.x as u32 * cw + inset_x, y: rect.y as u32 * ch + inset_y,
+        w: w - 2 * inset_x, h: h - 2 * inset_y,
+        radius, fill: color, border: None, z: Z_HIGHLIGHT,
+    })
+}
+
+fn place(app: &mut App, slot: u32, want: Placed) -> bool {
     use ratatui_image::picker::ProtocolType;
-    let Placed { rect, pad, fill, border } = want;
-    if app.picker.protocol_type() != ProtocolType::Kitty || rect.width == 0 || rect.height == 0 {
+    if app.picker.protocol_type() != ProtocolType::Kitty || want.w == 0 || want.h == 0 {
         return false;
     }
     app.underlays_seen.insert(slot);
-    if app.underlays.get(&slot) == Some(&want) {
+    let prev = app.underlays.get(&slot).copied();
+    if prev == Some(want) {
         return true;
     }
 
-    let font = app.picker.font_size();
-    let (cw, ch) = (font.width.max(1) as u32, font.height.max(1) as u32);
-    let (w, h) = (rect.width as u32 * cw, rect.height as u32 * ch + 2 * pad);
-    let radius = (ch as f32 * if border.is_some() { 0.35 } else { 0.3 }).max(3.0);
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h {
-        for x in 0..w {
-            let a = rounded_alpha(x as f32, y as f32, w as f32, h as f32, radius);
-            let c = match border {
-                // Fill inside a 1px-inset rounded rect, outline around it
-                Some(b) if w > 2 && h > 2 => {
-                    let t = rounded_alpha(x as f32 - 1.0, y as f32 - 1.0, w as f32 - 2.0, h as f32 - 2.0, radius - 1.0);
-                    let mix = |o: u8, i: u8| (o as f32 + (i as f32 - o as f32) * t).round() as u8;
-                    [mix(b.0, fill.0), mix(b.1, fill.1), mix(b.2, fill.2)]
-                }
-                _ => [fill.0, fill.1, fill.2],
-            };
-            rgba.extend_from_slice(&[c[0], c[1], c[2], (a * 255.0) as u8]);
-        }
-    }
-
-    // A field is anchored on the row above, offset down so its box starts
-    // `pad` px above the text row; a panel sits on its own cells
+    let (cw, ch) = cell(app);
+    let Placed { x, y, w, h, radius, fill, border, z } = want;
     let id = ID_BASE + slot;
-    let (row, y_off) = if pad > 0 { (rect.y - 1, ch - pad) } else { (rect.y, 0) };
-    let mut out = format!("\x1b7\x1b[{};{}H", row + 1, rect.x + 1);
-    let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
-    let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
-    for (i, chunk) in chunks.iter().enumerate() {
-        let more = u8::from(i + 1 < chunks.len());
-        if i == 0 {
-            let _ = write!(
-                out,
-                "\x1b_Ga=T,f=32,s={w},v={h},i={id},p=1,Y={y_off},z={z},C=1,q=2,m={more};",
-            );
-        } else {
-            let _ = write!(out, "\x1b_Gm={more};");
+    let (col, row, x_off, y_off) = (x / cw, y / ch, x % cw, y % ch);
+    let mut out = format!("\x1b7\x1b[{};{}H", row + 1, col + 1);
+
+    if prev.is_some_and(|p| p.same_image(&want)) {
+        // Moved only: re-place the uploaded image
+        let _ = write!(out, "\x1b_Ga=p,i={id},p=1,X={x_off},Y={y_off},z={z},C=1,q=2\x1b\\");
+    } else {
+        let radius = radius as f32;
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for py in 0..h {
+            for px in 0..w {
+                let a = rounded_alpha(px as f32, py as f32, w as f32, h as f32, radius);
+                let c = match border {
+                    // Fill inside a 1px-inset rounded rect, outline around it
+                    Some(b) if w > 2 && h > 2 => {
+                        let t = rounded_alpha(px as f32 - 1.0, py as f32 - 1.0, w as f32 - 2.0, h as f32 - 2.0, radius - 1.0);
+                        let mix = |o: u8, i: u8| (o as f32 + (i as f32 - o as f32) * t).round() as u8;
+                        [mix(b.0, fill.0), mix(b.1, fill.1), mix(b.2, fill.2)]
+                    }
+                    _ => [fill.0, fill.1, fill.2],
+                };
+                rgba.extend_from_slice(&[c[0], c[1], c[2], (a * 255.0) as u8]);
+            }
         }
-        out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
-        out.push_str("\x1b\\");
+        let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
+        let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let more = u8::from(i + 1 < chunks.len());
+            if i == 0 {
+                let _ = write!(
+                    out,
+                    "\x1b_Ga=T,f=32,s={w},v={h},i={id},p=1,X={x_off},Y={y_off},z={z},C=1,q=2,m={more};",
+                );
+            } else {
+                let _ = write!(out, "\x1b_Gm={more};");
+            }
+            out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
+            out.push_str("\x1b\\");
+        }
     }
     out.push_str("\x1b8");
     app.post_draw.push(out);

@@ -72,9 +72,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {
         let panel = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
-        menu::render_menu(f, &mut m, panel);
+        let text = menu::render_menu(f, &mut m, panel);
+        app.post_draw.extend(text);
         let slots = menu::icon_slots(&m);
         let (rect, sub) = (m.rect, m.submenu_rect);
+        let lit = menu::highlight_rects(&m);
         app.menu = Some(m);
         if panel {
             let (fill, line) = menu::PANEL;
@@ -82,10 +84,21 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if sub.width > 0 {
                 underlay::panel(app, 3, sub, fill, line);
             }
+            // Highlights sit the same distance from the panel edge on all sides
+            let inset = underlay::highlight_inset(app);
+            for (slot, r) in [(4, lit.0), (5, lit.1)] {
+                if let Some(r) = r {
+                    underlay::highlight(app, slot, r, inset, inset, menu::HIGHLIGHT);
+                }
+            }
         }
         for (icon, rect, hot) in slots {
-            let bg = if hot { menu::ICON_BG.1 } else { menu::ICON_BG.0 };
-            sidebar::draw_icon(f, app, &icon, rect, Some(bg));
+            let bg = match (panel, hot) {
+                (true, _) => None,
+                (false, true) => Some(menu::ICON_BG.1),
+                (false, false) => Some(menu::ICON_BG.0),
+            };
+            sidebar::draw_icon(f, app, &icon, rect, bg);
         }
     }
     drag_ghost::render_drag_ghost(f, app);
