@@ -21,7 +21,7 @@ use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use ratatui::crossterm::{execute, terminal::supports_keyboard_enhancement};
+use ratatui::crossterm::{execute, terminal::{SetTitle, supports_keyboard_enhancement}};
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use app::App;
@@ -129,6 +129,7 @@ fn run(
     app.queue_visible_icons();
 
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
+    let mut title_path = std::path::PathBuf::new();
 
     loop {
         // Drain background results (icons, thumbs, dir events, mount events)
@@ -136,6 +137,11 @@ fn run(
 
         // Render frame
         terminal.draw(|f| ui::render(f, app))?;
+        // Window title follows the current folder, like Dolphin's
+        if app.cwd != title_path {
+            title_path = app.cwd.clone();
+            let _ = execute!(std::io::stdout(), SetTitle(title_path.to_string_lossy()));
+        }
         if !app.post_draw.is_empty() {
             let mut out = std::io::stdout().lock();
             for s in app.post_draw.drain(..) {
