@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 use ratatui_image::{StatefulImage, picker::ProtocolType};
 
@@ -13,14 +13,24 @@ use crate::app::App;
 use crate::events::SidebarTarget;
 use crate::ui::{kitty, theme};
 
-/// Columns for the mini icon (one row tall, roughly square).
-const ICON_W: u16 = 2;
+/// Rows per place: the name sits on the middle one.
+const ITEM_H: u16 = 3;
+/// Icon height in rows, centered in the item.
+pub const ICON_ROWS: f32 = 1.8;
 
 /// Places panel in Dolphin's layout: muted section headers, a theme icon
 /// per row, and a usage bar under each device.
 pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let inner = Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(1) };
     app.sidebar_area = inner;
+
+    // Resize handle (dragged in handler): a faint divider, brighter on hover
+    if area.width > 0 {
+        let handle = Rect { x: area.right() - 1, width: 1, ..area };
+        let hot = app.sidebar_dragging || app.mouse_pos.is_some_and(|(c, r)| c == handle.x && r >= handle.y);
+        let color = if hot { theme::ACCENT } else { theme::BORDER };
+        f.render_widget(Block::default().borders(Borders::RIGHT).border_style(Style::default().fg(color)), handle);
+    }
 
     let cwd = app.cwd.clone();
     let hover = app.mouse_pos.and_then(|(c, r)| target_at(app, c, r));
@@ -65,6 +75,15 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         sections.push(("Devices", devices));
     }
 
+    let font = app.picker.font_size();
+    let icon_w = (ICON_ROWS * font.height as f32 / font.width.max(1) as f32).ceil() as u16;
+    // Roomy rows when they fit, tighter ones on short terminals
+    let fixed: u16 = sections.iter().map(|(_, r)| r.iter().filter(|r| r.usage.is_some()).count() as u16).sum::<u16>()
+        + sections.len() as u16 * 2;
+    let items = sections.iter().map(|(_, r)| r.len() as u16).sum::<u16>().max(1);
+    let item_h = (1..=ITEM_H).rev()
+        .find(|h| fixed + items * h <= inner.height)
+        .unwrap_or(1);
     let width = inner.width;
     let bottom = inner.y + inner.height;
     let mut y = inner.y;
@@ -84,7 +103,8 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         row_map.push(None);
 
         for row in rows {
-            let h = if row.usage.is_some() { 2 } else { 1 };
+            // A device needs a row under its name for the usage bar
+            let h = if row.usage.is_some() { item_h.max(2) } else { item_h };
             if y + h > bottom { break; }
             let rect = Rect { x: inner.x, y, width, height: h };
             let bg = if row.current {
@@ -99,14 +119,15 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             }
             let fg = if row.dim { theme::MUTED } else if row.current { Color::White } else { theme::TEXT };
 
-            draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: ICON_W, height: 1 }, bg);
-            let text_x = inner.x + 1 + ICON_W + 1;
+            draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: icon_w, height: h }, bg);
+            let text_x = inner.x + 1 + icon_w + 1;
             let text_w = (inner.x + width).saturating_sub(text_x + 1);
             let name: String = row.name.chars().take(text_w as usize).collect();
-            f.render_widget(Paragraph::new(Span::styled(name, Style::default().fg(fg))), Rect { x: text_x, y, width: text_w, height: 1 });
+            let name_y = if row.usage.is_some() { y + (h - 1) / 2 } else { y + h / 2 };
+            f.render_widget(Paragraph::new(Span::styled(name, Style::default().fg(fg))), Rect { x: text_x, y: name_y, width: text_w, height: 1 });
 
             if let Some(usage) = row.usage {
-                f.render_widget(Paragraph::new(usage_bar(usage, text_w)), Rect { x: text_x, y: y + 1, width: text_w, height: 1 });
+                f.render_widget(Paragraph::new(usage_bar(usage, text_w)), Rect { x: text_x, y: name_y + 1, width: text_w, height: 1 });
             }
             for _ in 0..h {
                 row_map.push(Some(row.target));
@@ -117,13 +138,15 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     app.sidebar_rows = row_map;
 }
 
-/// Thin two-tone bar (Dolphin's free-space indicator); red when nearly full.
+/// Thin two-tone bar hugging the top of its row, right under the device
+/// name (Dolphin's free-space indicator); red when nearly full.
 fn usage_bar(usage: f32, width: u16) -> Line<'static> {
     let filled = ((usage.clamp(0.0, 1.0) * width as f32).round() as usize).min(width as usize);
     let color = if usage > 0.9 { theme::rgb(theme::NORD11) } else { theme::ACCENT };
     Line::from(vec![
-        Span::styled("\u{2501}".repeat(filled), Style::default().fg(color)),
-        Span::styled("\u{2501}".repeat(width as usize - filled), Style::default().fg(theme::BORDER)),
+        // Upper one-quarter block (kitty draws these itself)
+        Span::styled("\u{1fb82}".repeat(filled), Style::default().fg(color)),
+        Span::styled("\u{1fb82}".repeat(width as usize - filled), Style::default().fg(theme::BORDER)),
     ])
 }
 
@@ -131,8 +154,8 @@ fn usage_bar(usage: f32, width: u16) -> Line<'static> {
 pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Option<(u8, u8, u8)>) {
     // Sidebar icons are keyed by theme name, in their own cache
     let key = PathBuf::from(format!("sidebar-icon/{name}"));
-    let px = app.picker.font_size().height as u32;
-    app.sidebar_icons.request(&key, true, px.max(16), Some(name.to_string()));
+    let px = (app.picker.font_size().height as f32 * ICON_ROWS) as u32;
+    app.sidebar_icons.request(&key, true, px.max(24), Some(name.to_string()));
     let Some(proto) = app.sidebar_icons.get_mut(&app.picker, &key, rect.width, rect.height, bg) else { return; };
     f.render_widget(Clear, rect);
     if let Some(c) = bg {
@@ -158,8 +181,13 @@ pub fn contains(app: &App, col: u16, row: u16) -> bool {
     col + 1 >= area.x && col < area.x + area.width + 1 && row + 1 >= area.y && row < area.y + area.height
 }
 
-/// Theme icon name for a place: the configured hint, then XDG folders.
+/// Theme icon name for a place: its custom folder icon, the configured
+/// hint, then XDG folders.
 fn place_icon(path: &str, hint: Option<&str>) -> String {
+    // A custom folder icon (Dolphin's .directory) wins, matching the grid
+    if let Some(custom) = crate::icons::resolver::directory_icon(std::path::Path::new(path)) {
+        return custom;
+    }
     if let Some(h) = hint {
         return h.to_string();
     }

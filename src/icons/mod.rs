@@ -32,12 +32,14 @@ struct IconRequest {
 pub struct Fit {
     /// Largest image height as a fraction of the box (the rest is margin).
     pub max_h: f32,
+    /// Cap on the image height in terminal rows (0 = none).
+    pub max_rows: f32,
     /// Center vertically instead of resting on the bottom edge.
     pub center: bool,
 }
 
 /// Grid items: a small margin above, resting on the label.
-pub const GRID_FIT: Fit = Fit { max_h: 0.88, center: false };
+pub const GRID_FIT: Fit = Fit { max_h: 0.88, max_rows: 0.0, center: false };
 
 /// Fit `img` into a box of `cols`×`rows` terminal cells and pad it to exactly
 /// that box, centered horizontally and resting on the bottom edge (right
@@ -59,7 +61,11 @@ pub fn fit_to_cells(
         (cols as u32 * font.width as u32).max(1),
         (rows as u32 * font.height as u32).max(1),
     );
-    let max_h = ((box_h as f32 * fit.max_h) as u32).max(1);
+    let mut max_h = box_h as f32 * fit.max_h;
+    if fit.max_rows > 0.0 {
+        max_h = max_h.min(fit.max_rows * font.height as f32);
+    }
+    let max_h = (max_h as u32).max(1);
     let fitted = img.resize(box_w, max_h, image::imageops::FilterType::Triangle).to_rgba8();
     let fill = match bg {
         Some((r, g, b)) => image::Rgba([r, g, b, 255]),
