@@ -400,8 +400,11 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             // Sidebar
             if let Some(target) = sidebar::target_at(app, col, row) {
                 let path = match target {
-                    crate::events::SidebarTarget::Place(i) =>
-                        app.places.get(i).map(|p| std::path::PathBuf::from(&p.path)),
+                    // Opens on release, unless it turns into a reorder drag
+                    crate::events::SidebarTarget::Place(i) => {
+                        app.place_drag = Some(crate::events::PlaceDrag { from: i, origin_row: row, active: false, target: None });
+                        None
+                    }
                     crate::events::SidebarTarget::Device(i) =>
                         app.devices.get(i).map(|d| std::path::PathBuf::from(&d.path)),
                     crate::events::SidebarTarget::Phone(i) => {
@@ -476,6 +479,21 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 return;
             }
 
+            // Reordering places
+            if let Some(mut drag) = app.place_drag {
+                if row != drag.origin_row {
+                    drag.active = true;
+                }
+                if drag.active {
+                    drag.target = match sidebar::target_at(app, col, row) {
+                        Some(crate::events::SidebarTarget::Place(j)) => Some(j),
+                        _ => drag.target,
+                    };
+                }
+                app.place_drag = Some(drag);
+                return;
+            }
+
             match app.drag_state.clone() {
                 DragState::Armed { item_idx, origin } => {
                     let dc = col.abs_diff(origin.0);
@@ -505,6 +523,18 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::Up(MouseButton::Left) => {
             app.sidebar_dragging = false;
+            if let Some(drag) = app.place_drag.take() {
+                if !drag.active {
+                    if let Some(p) = app.places.get(drag.from).map(|p| std::path::PathBuf::from(&p.path))
+                        && p.exists()
+                    {
+                        app.navigate_to(p);
+                    }
+                } else if let Some(to) = drag.target {
+                    app.move_place(drag.from, to);
+                }
+                return;
+            }
             if let DragState::Dragging { item_idx, hover_target, .. } = app.drag_state.clone()
                 && let Some(dst_idx) = hover_target {
                     let copy = ev.modifiers.contains(KeyModifiers::CONTROL);

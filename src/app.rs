@@ -139,6 +139,7 @@ pub struct App {
     kdeconnect_mount_rx: Option<mpsc::Receiver<(String, Option<PathBuf>)>>,
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
+    pub place_drag: Option<crate::events::PlaceDrag>,
     /// Last mouse position, for hover highlights.
     pub mouse_pos: Option<(u16, u16)>,
 
@@ -286,6 +287,7 @@ impl App {
                     valign: crate::icons::VAlign::Center,
                 }),
             mouse_pos: None,
+            place_drag: None,
             places,
             devices,
             menu: None,
@@ -520,6 +522,20 @@ impl App {
         self.show_hidden = state.show_hidden.unwrap_or(c.show_hidden);
         let idx = state.icon_size_idx.unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
         self.set_icon_size(idx);
+    }
+
+    /// Move a place to another position in the list and save it.
+    pub fn move_place(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.places.len() || to >= self.places.len() {
+            return;
+        }
+        let place = self.places.remove(from);
+        self.places.insert(to, place);
+        if from < self.config.places.len() && to < self.config.places.len() {
+            let c = self.config.places.remove(from);
+            self.config.places.insert(to, c);
+            let _ = self.config.save();
+        }
     }
 
     /// Open a KDE Connect device's storage, mounting it in the background

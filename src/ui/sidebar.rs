@@ -6,7 +6,7 @@ use ratatui::{
     buffer::CellDiffOption,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 use ratatui_image::{StatefulImage, picker::ProtocolType};
 
@@ -27,12 +27,15 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let inner = Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(1) };
     app.sidebar_area = inner;
 
-    // Resize handle (dragged in handler): a faint divider, brighter on hover
-    if area.width > 0 {
-        let handle = Rect { x: area.right() - 1, width: 1, ..area };
-        let hot = app.sidebar_dragging || app.mouse_pos.is_some_and(|(c, r)| c == handle.x && r >= handle.y);
+    // Resize handle: a short grabber mid-height (the whole edge column
+    // drags, see handler), brighter on hover
+    if area.width > 0 && area.height > 0 {
+        let x = area.right() - 1;
+        let hot = app.sidebar_dragging || app.mouse_pos.is_some_and(|(c, r)| c == x && r >= area.y);
         let color = if hot { theme::ACCENT } else { theme::BORDER };
-        f.render_widget(Block::default().borders(Borders::RIGHT).border_style(Style::default().fg(color)), handle);
+        let h = area.height.min(3);
+        let grip = Rect { x, y: area.y + (area.height - h) / 2, width: 1, height: h };
+        f.render_widget(Paragraph::new(vec![Line::from("\u{2503}"); h as usize]).style(Style::default().fg(color)), grip);
     }
 
     let cwd = app.cwd.clone();
@@ -111,7 +114,12 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let h = if row.usage.is_some() { item_h.max(2) } else { item_h };
             if y + h > bottom { break; }
             let rect = Rect { x: inner.x, y, width, height: h };
-            let bg = if row.current {
+            let drag = app.place_drag.filter(|d| d.active);
+            let is_drop = matches!((drag, row.target),
+                (Some(d), SidebarTarget::Place(j)) if d.target == Some(j) && d.from != j);
+            let bg = if is_drop {
+                Some(theme::HOVER)
+            } else if row.current {
                 Some(theme::SEL)
             } else if hover == Some(row.target) {
                 Some(theme::HOVER)
@@ -120,6 +128,13 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             };
             if let Some(c) = bg {
                 f.render_widget(Block::default().style(Style::default().bg(theme::rgb(c))), rect);
+            }
+            // Drop target of a place being dragged: accent bar on its left
+            if is_drop {
+                f.render_widget(
+                    Paragraph::new(vec![Line::from("\u{258c}"); h as usize]).style(Style::default().fg(theme::ACCENT)),
+                    Rect { width: 1, ..rect },
+                );
             }
             let fg = if row.dim { theme::MUTED_RGB } else if row.current { (255, 255, 255) } else { theme::TEXT_RGB };
 

@@ -61,6 +61,17 @@ pub enum DragState {
 
 pub const DRAG_THRESHOLD: u16 = 2;
 
+/// A press on a place in the sidebar: a click opens it on release; moving
+/// the mouse first turns it into a reorder drag.
+#[derive(Debug, Clone, Copy)]
+pub struct PlaceDrag {
+    pub from: usize,
+    pub origin_row: u16,
+    pub active: bool,
+    /// Place the dragged one would take the position of.
+    pub target: Option<usize>,
+}
+
 // ---------------------------------------------------------------------------
 // Double-click tracker
 // ---------------------------------------------------------------------------
