@@ -23,28 +23,31 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(1),   // left pad
+            Constraint::Length(2),   // left pad
             Constraint::Length(3),   // back
-            Constraint::Length(3),   // forward
-            Constraint::Length(3),   // up
             Constraint::Length(2),   // gap
+            Constraint::Length(3),   // forward
+            Constraint::Length(2),   // gap
+            Constraint::Length(3),   // up
+            Constraint::Length(3),   // gap
             Constraint::Length(5),   // view mode
-            Constraint::Length(1),   // gap
+            Constraint::Length(3),   // gap
             Constraint::Min(10),     // location field
-            Constraint::Length(1),   // gap
+            Constraint::Length(3),   // gap
             Constraint::Length(3),   // search
+            Constraint::Length(2),   // gap
             Constraint::Length(3),   // sort
-            Constraint::Length(1),   // right pad
+            Constraint::Length(2),   // right pad
         ])
         .split(row);
 
     app.topbar_back_rect = chunks[1];
-    app.topbar_fwd_rect = chunks[2];
-    app.topbar_up_rect = chunks[3];
-    app.topbar_view_rect = chunks[5];
-    app.topbar_path_rect = chunks[7];
-    app.topbar_search_rect = chunks[9];
-    app.topbar_sort_rect = chunks[10];
+    app.topbar_fwd_rect = chunks[3];
+    app.topbar_up_rect = chunks[5];
+    app.topbar_view_rect = chunks[7];
+    app.topbar_path_rect = chunks[9];
+    app.topbar_search_rect = chunks[11];
+    app.topbar_sort_rect = chunks[13];
 
     let menu_kind = app.menu.as_ref().map(|m| m.kind);
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());
@@ -60,14 +63,14 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     button(f, chunks[1], " \u{f060} ", !app.history_back.is_empty(), false);
-    button(f, chunks[2], " \u{f061} ", !app.history_forward.is_empty(), false);
-    button(f, chunks[3], " \u{f062} ", app.cwd.parent().is_some(), false);
+    button(f, chunks[3], " \u{f061} ", !app.history_forward.is_empty(), false);
+    button(f, chunks[5], " \u{f062} ", app.cwd.parent().is_some(), false);
     let view = format!(" {} \u{f0d7} ", menu::view_mode_icon(app.view_mode));
-    button(f, chunks[5], &view, true, menu_kind == Some(MenuKind::View));
-    button(f, chunks[9], " \u{f002} ", true, app.search.is_some());
-    button(f, chunks[10], " \u{f0dc} ", true, menu_kind == Some(MenuKind::Sort));
+    button(f, chunks[7], &view, true, menu_kind == Some(MenuKind::View));
+    button(f, chunks[11], " \u{f002} ", true, app.search.is_some());
+    button(f, chunks[13], " \u{f0dc} ", true, menu_kind == Some(MenuKind::Sort));
 
-    render_location(f, app, chunks[7]);
+    render_location(f, app, chunks[9]);
     // NOTE: menus/completions rendered in ui/mod.rs AFTER the grid (z-order)
 }
 
@@ -109,11 +112,11 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         if w == 0 { break; }
         let rect = Rect { x, width: w, ..crumbs_area };
         let style = match &target {
-            None => Style::default().fg(theme::MUTED),
-            Some(_) if i == last => Style::default().fg(Color::White),
+            None => Style::default().fg(theme::TEXT),
+            Some(_) if i == last => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
             Some(_) if hover.is_some_and(|(c, r)| contains(rect, c, r)) =>
                 Style::default().fg(Color::White).bg(theme::HOVER_BG),
-            Some(_) => Style::default().fg(theme::TEXT),
+            Some(_) => Style::default().fg(Color::White),
         };
         f.render_widget(Paragraph::new(Span::styled(label, style)), rect);
         if let Some(path) = target {
@@ -182,17 +185,13 @@ pub fn render_path_completions(f: &mut Frame, app: &mut App) {
     );
 }
 
-/// Breadcrumb segments ("~", "Documents", …) with the folder each opens;
+/// Breadcrumb segments ("/", "home", "user", …) with the folder each opens;
 /// separators have no target. Leading segments collapse to "…" so the end
 /// of the path stays visible.
 fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
-    let home = dirs::home_dir();
-    let (mut base, rest, root) = match home.as_deref().and_then(|h| path.strip_prefix(h).ok().map(|r| (h, r))) {
-        Some((h, rest)) => (h.to_path_buf(), rest, "~"),
-        None => (PathBuf::from("/"), path.strip_prefix("/").unwrap_or(path), "/"),
-    };
-    let mut segs: Vec<(String, PathBuf)> = vec![(root.to_string(), base.clone())];
-    for s in rest.iter() {
+    let mut base = PathBuf::from("/");
+    let mut segs: Vec<(String, PathBuf)> = vec![("/".to_string(), base.clone())];
+    for s in path.strip_prefix("/").unwrap_or(path).iter() {
         base = base.join(s);
         segs.push((s.to_string_lossy().into_owned(), base.clone()));
     }
