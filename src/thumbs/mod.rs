@@ -179,7 +179,15 @@ fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u6
 }
 
 /// Enabled preview plugins (Dolphin's names, see `Config::preview_plugins`).
+#[derive(Clone)]
 pub struct Previews(HashSet<String>);
+
+static GLOBAL: std::sync::OnceLock<Previews> = std::sync::OnceLock::new();
+
+/// The startup preview settings, for background workers (folder previews).
+pub fn previews() -> Option<&'static Previews> {
+    GLOBAL.get()
+}
 
 /// Dolphin's defaults when it has never been configured.
 const DEFAULT_PLUGINS: &[&str] = &[
@@ -192,7 +200,9 @@ impl Previews {
         let names: Vec<String> = config.preview_plugins.clone()
             .or_else(dolphin_plugins)
             .unwrap_or_else(|| DEFAULT_PLUGINS.iter().map(|s| s.to_string()).collect());
-        Self(names.into_iter().collect())
+        let p = Self(names.into_iter().collect());
+        let _ = GLOBAL.set(p.clone());
+        p
     }
 
     fn on(&self, plugin: &str) -> bool {
