@@ -40,13 +40,17 @@ fn send(msg: &str) {
     let _ = out.flush();
 }
 
-/// Send base64 data in chunks under `meta`, then the empty end-of-data chunk.
+/// Send data under `meta` the way kitty's own kitten does: unpadded base64
+/// in chunks (the last with m=0), then an empty message marking the end.
+/// Kitty's stream decoder rejects '=' padding.
 fn send_data(meta: &str, data: &[u8]) {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(data);
-    for chunk in b64.as_bytes().chunks(CHUNK) {
-        send(&format!("{meta}:m=1;{}", std::str::from_utf8(chunk).unwrap_or_default()));
+    let b64 = base64::engine::general_purpose::STANDARD_NO_PAD.encode(data);
+    let chunks: Vec<&[u8]> = b64.as_bytes().chunks(CHUNK).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let more = u8::from(i + 1 < chunks.len());
+        send(&format!("{meta}:m={more};{}", std::str::from_utf8(chunk).unwrap_or_default()));
     }
-    send(&format!("{meta}:m=0;"));
+    send(meta);
 }
 
 /// Start accepting drops and offering drags.
@@ -103,6 +107,7 @@ pub fn swallow(app: &mut App, key: &KeyEvent) -> bool {
 }
 
 fn handle(app: &mut App, body: &str) {
+    tracing::debug!("dnd: {}", body.chars().take(200).collect::<String>());
     let (meta, payload) = body.split_once(';').unwrap_or((body, ""));
     let key = |k: &str| meta.split(':').find_map(|kv| kv.strip_prefix(k)?.strip_prefix('='));
     let int = |k: &str| key(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
@@ -116,7 +121,10 @@ fn handle(app: &mut App, body: &str) {
         }
         "o" => start_drag(app, int("x") as u16, int("y") as u16),
         "e" => drag_event(app, int("x"), int("y")),
-        "E" if payload != "OK" => {
+        // The system drag is running: it owns the pointer now
+        "E" if payload == "OK" => app.drag_state = crate::events::DragState::Idle,
+        "E" => {
+            // Not started: the in-window drag carries on as before
             tracing::warn!("drag failed: {payload}");
             app.dnd.outgoing = None;
         }
@@ -265,9 +273,6 @@ fn start_drag(app: &mut App, col: u16, row: u16) {
     } else {
         vec![entry.path.clone()]
     };
-    // The terminal owns the pointer from here on
-    app.drag_state = crate::events::DragState::Idle;
-
     let uris: String = paths.iter().map(|p| {
         let mut uri = crate::thumbs::file_uri(p);
         if p.is_dir() {
