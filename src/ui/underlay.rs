@@ -38,6 +38,9 @@ impl Placed {
 /// Under cell backgrounds (menus), panels below highlights.
 const Z_PANEL: i32 = -1_073_741_830;
 const Z_HIGHLIGHT: i32 = -1_073_741_825;
+/// Fields go under icons: kitty draws placeholder images at z=-1, and an
+/// equal z put the (later uploaded) field on top of the path bar's icon.
+const Z_FIELD: i32 = -2;
 
 /// How far (in pixels) a field reaches above and below its text row.
 pub fn field_pad(app: &App) -> u32 {
@@ -62,7 +65,7 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
     place(app, slot, Placed {
         x: rect.x as u32 * cw, y: rect.y as u32 * ch - pad,
         w: rect.width as u32 * cw, h: rect.height as u32 * ch + 2 * pad,
-        radius, fill: color, border: None, z: -1,
+        radius, fill: color, border: None, z: Z_FIELD,
     })
 }
 
