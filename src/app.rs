@@ -169,6 +169,7 @@ pub struct App {
 
     // Overlay / interaction state
     pub menu: Option<MenuState>,
+    pub dnd: crate::dnd::Dnd,
     pub properties: Option<PropertiesState>,
     pub rename_state: Option<RenameState>,
     pub drag_state: DragState,
@@ -318,6 +319,7 @@ impl App {
             places,
             devices,
             menu: None,
+            dnd: Default::default(),
             properties: None,
             rename_state: None,
             drag_state: DragState::Idle,

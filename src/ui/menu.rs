@@ -50,6 +50,8 @@ pub enum MenuAction {
     UserAction(usize, usize),
     /// Index into `App::kdeconnect_devices`.
     SendToDevice(usize),
+    /// What to do with files dropped from another program.
+    Drop(crate::dnd::DropOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

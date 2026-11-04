@@ -48,7 +48,7 @@ fn contains(rect: Rect, col: u16, row: u16) -> bool {
 }
 
 /// Hit-test across all view modes.
-fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
+pub(crate) fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     let count = app.listing.entries.len();
     match app.view_mode {
         ViewMode::Icons => {

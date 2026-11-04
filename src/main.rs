@@ -2,6 +2,7 @@ mod actions;
 mod app;
 mod config;
 mod dirstate;
+mod dnd;
 mod events;
 mod fs;
 mod handler;
@@ -89,7 +90,14 @@ fn main() -> anyhow::Result<()> {
     }
     fs::mounts::spawn_mount_watcher(mount_tx);
 
+    let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
+    if is_kitty {
+        dnd::enable();
+    }
     let result = run(&mut app, &mut terminal, dir_watcher.as_ref());
+    if is_kitty {
+        dnd::disable();
+    }
 
     if kbd_enhanced {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
@@ -169,7 +177,20 @@ fn run(
 
         // Poll for terminal events
         if event::poll(Duration::from_millis(16))? {
-            match event::read()? {
+            let ev = event::read()?;
+            if let Event::Key(key) = &ev
+                && dnd::swallow(app, key)
+            {
+                // The rest of the message is already buffered: take it
+                // whole instead of redrawing per character
+                while app.dnd.collecting() && event::poll(Duration::from_millis(50))? {
+                    if let Event::Key(key) = event::read()? {
+                        dnd::swallow(app, &key);
+                    }
+                }
+                continue;
+            }
+            match ev {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Release {
                         continue;

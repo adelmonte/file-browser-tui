@@ -166,7 +166,7 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
     let is_drag_target = matches!(&app.drag_state,
         DragState::Dragging { hover_target: Some(t), .. }
         if *t == entry_idx
-    );
+    ) || app.dnd.hover_entry == Some(entry_idx);
     let is_cut = app.clipboard.as_ref()
         .map(|c| c.op == ClipOp::Cut
             && c.paths.contains(&app.listing.entries[entry_idx].path))

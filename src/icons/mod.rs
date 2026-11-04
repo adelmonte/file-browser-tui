@@ -247,6 +247,11 @@ impl IconCache {
         self.protocols.get_mut(&key)
     }
 
+    /// The loaded image for a path, if any.
+    pub fn image(&self, path: &Path) -> Option<&image::DynamicImage> {
+        self.images.peek(path)?.as_ref()
+    }
+
     /// Drop all protocol variants for a path (raw image stays cached).
     /// Used when a Kitty placement was deleted and must be re-transmitted.
     pub fn invalidate(&mut self, path: &Path) {

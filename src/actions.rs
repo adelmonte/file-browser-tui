@@ -17,6 +17,7 @@ use crate::{
 pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
     match action {
         MenuAction::None => {}
+        MenuAction::Drop(op) => crate::dnd::perform(app, op),
 
         MenuAction::Open => {
             match target {

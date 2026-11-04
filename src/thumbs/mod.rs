@@ -117,7 +117,7 @@ fn thumbnails_root() -> PathBuf {
 
 /// file:// URI as the thumbnail spec (and Dolphin/GLib) hash it: path bytes
 /// percent-encoded except unreserved and path-safe characters.
-fn file_uri(abs_path: &Path) -> String {
+pub(crate) fn file_uri(abs_path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut uri = String::from("file://");
     for &b in abs_path.as_os_str().as_bytes() {
