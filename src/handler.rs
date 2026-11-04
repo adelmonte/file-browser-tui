@@ -245,6 +245,8 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     // Normal navigation. Modifier combos must precede their plain-key arms.
     match ev.code {
         KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::CONTROL) => app.open_search(),
+        KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::ALT) =>
+            actions::execute(app, crate::ui::menu::MenuAction::NewFolder, crate::ui::menu::MenuTarget::Empty),
         KeyCode::Char('a') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
             let n = app.listing.entries.len();
             if n > 0 {
@@ -330,6 +332,8 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         // Clipboard
         KeyCode::Char('c') => actions::clip_selection(app, ClipOp::Copy),
         KeyCode::Char('x') => actions::clip_selection(app, ClipOp::Cut),
+        // Dolphin's Create Folder (F10, and Alt+F in this user's dolphinui.rc)
+        KeyCode::F(10) => actions::execute(app, crate::ui::menu::MenuAction::NewFolder, crate::ui::menu::MenuTarget::Empty),
         KeyCode::Char('v' | 'p') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
             let cwd = app.cwd.clone();
             actions::paste_clipboard(app, &cwd);
