@@ -31,6 +31,12 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
             }
         }
 
+        MenuAction::OpenWith(i) => {
+            if let Some(desktop_app) = app.open_with.get(i).cloned() {
+                crate::apps::launch(&desktop_app, &action_paths(app, target), &terminal_bin(app));
+            }
+        }
+
         MenuAction::OpenTerminal => {
             if let Some(dir) = target_dir(app, target) {
                 open_terminal(app, &dir);
@@ -311,12 +317,21 @@ fn compress(app: &mut App, target: MenuTarget, targz: bool) {
     }
 }
 
-fn open_terminal(app: &App, dir: &Path) {
-    let cmd = if !app.config.terminal_command.is_empty() {
+fn terminal_command(app: &App) -> String {
+    if !app.config.terminal_command.is_empty() {
         app.config.terminal_command.clone()
     } else {
         std::env::var("TERMINAL").unwrap_or_else(|_| "kitty".into())
-    };
+    }
+}
+
+/// Terminal program for apps that need one (Terminal=true).
+fn terminal_bin(app: &App) -> String {
+    terminal_command(app).split_whitespace().next().unwrap_or("kitty").to_string()
+}
+
+fn open_terminal(app: &App, dir: &Path) {
+    let cmd = terminal_command(app);
     let mut parts = cmd.split_whitespace();
     let Some(bin) = parts.next() else { return; };
     let _ = Command::new(bin)

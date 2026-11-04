@@ -133,6 +133,8 @@ pub struct App {
 
     // Context menu extensions (reloaded each time a context menu opens)
     pub user_actions: Vec<ActionGroup>,
+    /// Apps for the right-clicked item: the default first (Open With).
+    pub open_with: Vec<crate::apps::DesktopApp>,
     pub kdeconnect_devices: Vec<KdeConnectDevice>,
     /// Mount points of phones opened from the sidebar, by device id.
     pub kdeconnect_mounts: HashMap<String, PathBuf>,
@@ -281,6 +283,7 @@ impl App {
             mount_event_rx,
             kdeconnect_rx,
             user_actions: Vec::new(),
+            open_with: Vec::new(),
             search: None,
             kdeconnect_devices: Vec::new(),
             kdeconnect_mounts: HashMap::new(),

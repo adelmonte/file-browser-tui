@@ -564,6 +564,19 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                     app.selection = Some(idx);
                 }
                 app.user_actions = crate::user_actions::load();
+                app.open_with = match target {
+                    MenuTarget::Entry(idx) => app.listing.entries.get(idx).map(|e| {
+                        let mime = if e.is_dir {
+                            "inode/directory".to_string()
+                        } else {
+                            e.mime_type.clone().or_else(|| crate::mime::detect(&e.path))
+                                .unwrap_or_else(|| "application/octet-stream".into())
+                        };
+                        let (default, others) = crate::apps::apps_for(&mime);
+                        default.into_iter().chain(others).collect()
+                    }).unwrap_or_default(),
+                    _ => Vec::new(),
+                };
                 let items = menu::build_context_menu(app, target);
                 if !items.is_empty() {
                     app.menu = Some(MenuState::new(MenuKind::Context, target, items, (col, row)));

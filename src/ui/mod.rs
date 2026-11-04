@@ -72,7 +72,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {
         menu::render_menu(f, &mut m);
+        let slots = menu::icon_slots(&m);
         app.menu = Some(m);
+        for (icon, rect, hot) in slots {
+            let bg = if hot { menu::ICON_BG.1 } else { menu::ICON_BG.0 };
+            sidebar::draw_icon(f, app, &icon, rect, Some(bg));
+        }
     }
     drag_ghost::render_drag_ghost(f, app);
     if app.path_bar_editing {

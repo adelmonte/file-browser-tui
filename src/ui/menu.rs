@@ -22,6 +22,8 @@ const MENU_SEL: Color = theme::rgb(theme::NORD9);
 pub enum MenuAction {
     None,
     Open,
+    /// Open with `App::open_with[i]`.
+    OpenWith(usize),
     OpenTerminal,
     Rename,
     Cut,
@@ -68,6 +70,8 @@ pub enum MenuKind {
 #[derive(Debug, Clone)]
 pub struct MenuItem {
     pub label: String,
+    /// Theme icon (or path) drawn as an image in the glyph slot.
+    pub icon: Option<String>,
     pub action: MenuAction,
     pub enabled: bool,
     pub submenu: Vec<MenuItem>,
@@ -76,15 +80,23 @@ pub struct MenuItem {
 
 impl MenuItem {
     pub fn new(label: impl Into<String>, action: MenuAction) -> Self {
-        Self { label: label.into(), action, enabled: true, submenu: Vec::new(), separator: false }
+        Self { label: label.into(), icon: None, action, enabled: true, submenu: Vec::new(), separator: false }
     }
 
     pub fn sub(label: impl Into<String>, items: Vec<MenuItem>) -> Self {
-        Self { label: label.into(), action: MenuAction::None, enabled: true, submenu: items, separator: false }
+        Self { label: label.into(), icon: None, action: MenuAction::None, enabled: true, submenu: items, separator: false }
     }
 
     pub fn sep() -> Self {
-        Self { label: String::new(), action: MenuAction::None, enabled: true, submenu: Vec::new(), separator: true }
+        Self { label: String::new(), icon: None, action: MenuAction::None, enabled: true, submenu: Vec::new(), separator: true }
+    }
+
+    /// An item showing an icon image instead of a glyph.
+    pub fn with_icon(label: &str, icon: Option<String>, action: MenuAction) -> Self {
+        // Three columns: the 2-wide image and a space, like "glyph  "
+        let mut item = Self::new(format!("   {label}"), action);
+        item.icon = icon;
+        item
     }
 
     pub fn enabled_if(mut self, cond: bool) -> Self {
@@ -151,7 +163,22 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             let Some(entry) = app.listing.entries.get(idx) else { return items; };
             let is_dir = entry.is_dir;
 
-            items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
+            // Files open with the default app (named, with its icon, like
+            // Dolphin); folders open here. Other capable apps go in Open With.
+            let apps = &app.open_with;
+            match apps.first() {
+                Some(default) if !is_dir => items.push(MenuItem::with_icon(
+                    &format!("Open with {}", default.name), default.icon.clone(), MenuAction::OpenWith(0),
+                )),
+                _ => items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open)),
+            }
+            let skip = usize::from(!is_dir);
+            if apps.len() > skip {
+                let others = apps.iter().enumerate().skip(skip)
+                    .map(|(i, a)| MenuItem::with_icon(&a.name, a.icon.clone(), MenuAction::OpenWith(i)))
+                    .collect();
+                items.push(MenuItem::sub("\u{f08e}  Open With", others));
+            }
             if is_dir {
                 items.push(MenuItem::new("\u{f120}  Open in Terminal", MenuAction::OpenTerminal));
             }
@@ -385,6 +412,28 @@ pub fn submenu_rect(menu: &MenuState, term: Rect) -> Rect {
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
+
+/// Where to draw each visible item's icon image: (icon, cell rect, highlighted).
+pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
+    fn list(rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<(String, Rect, bool)>) {
+        for (i, item) in items.iter().enumerate() {
+            let Some(icon) = item.icon.clone() else { continue; };
+            let y = rect.y + 1 + i as u16;
+            if y + 1 < rect.bottom() && rect.width > 4 {
+                out.push((icon, Rect { x: rect.x + 2, y, width: 2, height: 1 }, selected == Some(i) && item.enabled));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    list(menu.rect, &menu.items, (!menu.submenu_open).then_some(menu.selected), &mut out);
+    if menu.submenu_open && let Some(parent) = menu.items.get(menu.selected) {
+        list(menu.submenu_rect, &parent.submenu, Some(menu.submenu_selected), &mut out);
+    }
+    out
+}
+
+/// Background colors behind menu icons: (normal, highlighted).
+pub const ICON_BG: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD9);
 
 pub fn render_menu(f: &mut Frame, menu: &mut MenuState) {
     let term = f.area();

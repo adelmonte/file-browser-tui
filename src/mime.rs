@@ -103,6 +103,27 @@ fn is_a(mime: &str, ancestor: &str) -> bool {
     false
 }
 
+/// The type, its aliases and every ancestor (most specific first), e.g.
+/// application/x-shellscript -> text/plain. Used to find capable apps.
+pub fn lineage(mime: &str) -> Vec<String> {
+    let db = db();
+    let mut out: Vec<String> = Vec::new();
+    let mut queue = vec![canonical(mime).to_string()];
+    while let Some(m) = (!queue.is_empty()).then(|| queue.remove(0)) {
+        if out.contains(&m) || out.len() > 32 {
+            continue;
+        }
+        out.push(m.clone());
+        out.extend(db.aliases_of.get(&m).into_iter().flatten().cloned());
+        queue.extend(db.parents.get(&m).into_iter().flatten().cloned());
+        // Every text type is also plain text
+        if m.starts_with("text/") && m != "text/plain" {
+            queue.push("text/plain".into());
+        }
+    }
+    out
+}
+
 fn is_text(mime: &str) -> bool {
     mime.starts_with("text/") || is_a(mime, "text/plain")
 }
