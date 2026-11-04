@@ -60,7 +60,7 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
     search.field_rect = outer;
     let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
-    let mut line = vec![Span::styled("\u{f002}  ", Style::default().fg(theme::ACCENT))];
+    let mut line = vec![Span::styled("\u{f002} ", Style::default().fg(theme::ACCENT))];
     if search.focused {
         line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(Color::White)));
     } else {
