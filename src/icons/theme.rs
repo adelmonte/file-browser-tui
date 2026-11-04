@@ -1,40 +1,60 @@
 //! Freedesktop icon theme lookup: the user's theme (from kdeglobals), its
-//! Inherits chain, then hicolor. Indexed once so lookups are a map hit.
+//! Inherits chain, then hicolor. Only the index.theme files are read up
+//! front; each icon name is looked up on demand (a few stats) and cached,
+//! since listing every icon in large themes takes half a second.
 
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Mutex, OnceLock},
 };
 
-struct Found {
-    /// Position in the theme chain (lower wins).
-    theme: usize,
-    /// Preference within a theme: big rasters and vectors win.
-    score: u32,
-    path: PathBuf,
+/// Each theme's icon directories (existing ones, all base dirs), best
+/// first: big rasters and vectors win. Themes in inheritance order.
+fn chain() -> &'static Vec<Vec<PathBuf>> {
+    static CHAIN: OnceLock<Vec<Vec<PathBuf>>> = OnceLock::new();
+    CHAIN.get_or_init(build_chain)
 }
 
-fn index() -> &'static HashMap<String, Found> {
-    static INDEX: OnceLock<HashMap<String, Found>> = OnceLock::new();
-    INDEX.get_or_init(build_index)
-}
-
-/// Build the index in the background so the first lookups don't wait.
+/// Read the theme files in the background so the first lookup doesn't wait.
 pub fn prewarm() {
-    std::thread::spawn(|| { index(); });
+    std::thread::spawn(|| { chain(); });
 }
 
 /// Icon file for a theme icon name (or an absolute path), as (path, is_svg).
 pub fn lookup(name: &str) -> Option<(PathBuf, bool)> {
+    static CACHE: Mutex<Option<HashMap<String, Option<PathBuf>>>> = Mutex::new(None);
     let path = if name.starts_with('/') {
         let p = PathBuf::from(name);
         p.exists().then_some(p)?
     } else {
-        index().get(name)?.path.clone()
+        if let Some(hit) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(name) {
+            return hit.clone().map(with_kind);
+        }
+        let found = find(name);
+        CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), found.clone());
+        found?
     };
+    Some(with_kind(path))
+}
+
+fn with_kind(path: PathBuf) -> (PathBuf, bool) {
     let is_svg = path.extension().is_some_and(|e| e == "svg" || e == "svgz");
-    Some((path, is_svg))
+    (path, is_svg)
+}
+
+fn find(name: &str) -> Option<PathBuf> {
+    for dirs in chain() {
+        for dir in dirs {
+            for ext in ["png", "svg", "svgz", "xpm"] {
+                let p = dir.join(format!("{name}.{ext}"));
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn base_dirs() -> Vec<PathBuf> {
@@ -98,12 +118,11 @@ fn read_index(theme_dir: &Path) -> Option<ThemeIndex> {
     Some((dirs, inherits))
 }
 
-fn build_index() -> HashMap<String, Found> {
+fn build_chain() -> Vec<Vec<PathBuf>> {
     let bases = base_dirs();
-    let mut index: HashMap<String, Found> = HashMap::new();
+    let mut chain = Vec::new();
     let mut queue = vec![user_theme()];
     let mut seen = HashSet::new();
-    let mut rank = 0;
 
     while !queue.is_empty() || !seen.contains("hicolor") {
         let theme = if queue.is_empty() { "hicolor".to_string() } else { queue.remove(0) };
@@ -111,26 +130,20 @@ fn build_index() -> HashMap<String, Found> {
             continue;
         }
         let mut inherits = Vec::new();
+        let mut dirs: Vec<(PathBuf, u32)> = Vec::new();
         for base in &bases {
             let theme_dir = base.join(&theme);
-            let Some((dirs, inh)) = read_index(&theme_dir) else { continue; };
+            let Some((sub, inh)) = read_index(&theme_dir) else { continue; };
             if inherits.is_empty() { inherits = inh; }
-            for (dir, score) in dirs {
-                let Ok(rd) = std::fs::read_dir(theme_dir.join(&dir)) else { continue; };
-                for path in rd.filter_map(|e| e.ok().map(|e| e.path())) {
-                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if !matches!(ext, "png" | "svg" | "svgz" | "xpm") { continue; }
-                    let Some(name) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else { continue; };
-                    let better = index.get(&name).is_none_or(|f| rank < f.theme || (rank == f.theme && score > f.score));
-                    if better {
-                        index.insert(name, Found { theme: rank, score, path });
-                    }
-                }
-            }
+            dirs.extend(sub.into_iter()
+                .map(|(d, score)| (theme_dir.join(d), score))
+                .filter(|(d, _)| d.is_dir()));
         }
+        // Stable: equal scores keep base-dir order (user dirs first)
+        dirs.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+        chain.push(dirs.into_iter().map(|(d, _)| d).collect());
         queue.extend(inherits.into_iter().filter(|t| !seen.contains(t)));
-        rank += 1;
     }
-    tracing::info!("icon theme index: {} icons", index.len());
-    index
+    chain
 }
+
