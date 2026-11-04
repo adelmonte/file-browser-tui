@@ -200,7 +200,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_cell_image(
+pub(crate) fn render_cell_image(
     f: &mut Frame,
     app: &mut App,
     entry_idx: usize,

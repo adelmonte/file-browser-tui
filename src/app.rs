@@ -9,7 +9,7 @@ use crate::{
     config::Config,
     dirstate::DirStates,
     events::{ClickTracker, Clipboard, ConfirmDeleteState, DragState, RenameState, SidebarTarget},
-    fs::{DirListing, mounts::DeviceEntry, mounts::MountEvent, watcher::DirEvent},
+    fs::{DirEntry, DirListing, mounts::DeviceEntry, mounts::MountEvent, watcher::DirEvent},
     icons::IconCache,
     places::PlaceEntry,
     thumbs::ThumbCache,
@@ -163,6 +163,10 @@ pub struct App {
 
     // Multi-selection
     pub multi_selection: std::collections::HashSet<usize>,
+    /// Folders expanded in place in the Details view.
+    pub expanded: std::collections::HashSet<PathBuf>,
+    /// Item counts shown as folder sizes in Details (None = unreadable).
+    pub dir_counts: HashMap<PathBuf, Option<usize>>,
     pub selection_anchor: Option<usize>,
 
     // Path bar editing
@@ -285,6 +289,8 @@ impl App {
             clipboard: None,
             confirm_delete: None,
             multi_selection: std::collections::HashSet::new(),
+            expanded: std::collections::HashSet::new(),
+            dir_counts: HashMap::new(),
             selection_anchor: None,
             path_bar_editing: false,
             path_bar_input: String::new(),
@@ -330,6 +336,11 @@ impl App {
             Err(e) => { tracing::error!("reload_dir: {e}"); return; }
         };
 
+        if self.view_mode == ViewMode::Details && !self.expanded.is_empty() {
+            listing.entries = self.with_expanded(listing.entries, 0);
+        }
+        self.dir_counts.clear();
+
         // Mime types are only resolved once per path; restore them so media
         // entries keep showing thumbnails instead of generic icons.
         for entry in &mut listing.entries {
@@ -341,6 +352,63 @@ impl App {
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);
         self.free_space = free_space(&self.cwd);
+    }
+
+    /// Insert the contents of expanded folders after each one (Details tree).
+    fn with_expanded(&self, entries: Vec<DirEntry>, depth: u16) -> Vec<DirEntry> {
+        let mut out = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            entry.depth = depth;
+            let open = entry.is_dir && depth < 32 && self.expanded.contains(&entry.path);
+            let path = entry.path.clone();
+            out.push(entry);
+            if open
+                && let Ok(children) = crate::fs::read_dir(&path, self.show_hidden, self.folders_first, &self.sort)
+            {
+                out.extend(self.with_expanded(children.entries, depth + 1));
+            }
+        }
+        out
+    }
+
+    /// Expand or collapse a folder in the Details tree.
+    pub fn toggle_expand(&mut self, idx: usize) {
+        let Some(entry) = self.listing.entries.get(idx) else { return; };
+        if !entry.is_dir {
+            return;
+        }
+        let path = entry.path.clone();
+        if self.expanded.contains(&path) {
+            self.expanded.retain(|p| !p.starts_with(&path));
+        } else {
+            self.expanded.insert(path);
+        }
+        self.reload_dir();
+    }
+
+    /// Details tree: Right expands a folder (or steps into it), Left
+    /// collapses it (or steps out to its parent). Returns false when the
+    /// key doesn't apply, so it can move the selection as usual.
+    pub fn tree_key(&mut self, expand: bool) -> bool {
+        let Some(idx) = self.selection else { return false; };
+        let Some(entry) = self.listing.entries.get(idx) else { return false; };
+        let open = self.expanded.contains(&entry.path);
+        match (expand, entry.is_dir, open) {
+            (true, true, false) | (false, true, true) => self.toggle_expand(idx),
+            (true, true, true) => {
+                if self.listing.entries.get(idx + 1).is_some_and(|e| e.depth > entry.depth) {
+                    self.selection = Some(idx + 1);
+                }
+            }
+            (false, _, _) if entry.depth > 0 => {
+                let depth = entry.depth;
+                self.selection = self.listing.entries[..idx].iter().rposition(|e| e.depth < depth);
+            }
+            _ => return false,
+        }
+        self.multi_selection.clear();
+        self.ensure_selection_visible();
+        true
     }
 
     /// Re-point every index into the listing at the same path in the new
@@ -419,6 +487,7 @@ impl App {
 
     fn after_navigate(&mut self) {
         self.search = None;
+        self.expanded.clear();
         self.scroll_offset = 0;
         self.selection = None;
         self.multi_selection.clear();
@@ -500,6 +569,10 @@ impl App {
     pub fn set_view_mode(&mut self, view: ViewMode) {
         if view != self.view_mode {
             self.view_mode = view;
+            // The tree only exists in Details
+            if !self.expanded.is_empty() {
+                self.reload_dir();
+            }
         }
         self.dirstates.update(&self.cwd, |s| s.view = Some(view));
     }
@@ -557,12 +630,14 @@ impl App {
 
     /// Queue icon loads for all visible entries.
     pub fn queue_visible_icons(&mut self) {
-        if self.view_mode != ViewMode::Icons {
+        if self.view_mode == ViewMode::Compact {
             return;
         }
         let target_px = self.icon_target_px();
-        let cols = self.grid_cols.max(1) as usize;
-        let rows_visible = (self.grid_area.height / self.cell_h + 2) as usize;
+        let (cols, rows_visible) = match self.view_mode {
+            ViewMode::Details => (1, self.grid_area.height as usize),
+            _ => (self.grid_cols.max(1) as usize, (self.grid_area.height / self.cell_h + 2) as usize),
+        };
         let start = self.scroll_offset * cols;
         let end = ((self.scroll_offset + rows_visible) * cols).min(self.listing.entries.len());
         if start >= end { return; }

@@ -268,6 +268,8 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         }
 
         // Navigation (plain, clears multi-selection)
+        KeyCode::Left | KeyCode::Right if app.view_mode == ViewMode::Details
+            && app.tree_key(ev.code == KeyCode::Right) => {}
         KeyCode::Left  | KeyCode::Char('h') => {
             app.multi_selection.clear();
             app.selection_anchor = None;
@@ -412,6 +414,19 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 return;
             }
             if sidebar::contains(app, col, row) { return; }
+
+            // Details tree: the arrow left of a folder's icon expands it
+            if app.view_mode == ViewMode::Details
+                && let Some(idx) = hit_test(app, col, row)
+                && let Some(e) = app.listing.entries.get(idx)
+                && e.is_dir
+            {
+                let x = crate::ui::details::expander_x(app.grid_area, e.depth);
+                if col >= x && col < x + 2 {
+                    app.toggle_expand(idx);
+                    return;
+                }
+            }
 
             // Grid
             if let Some(idx) = hit_test(app, col, row) {

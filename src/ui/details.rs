@@ -3,7 +3,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Cell, Row, Table},
 };
 
@@ -24,6 +24,12 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     app.grid_area = area;
 
     let searching = app.search.as_ref().is_some_and(|s| s.has_query());
+    let hovered = if app.menu.is_none() {
+        app.mouse_pos.and_then(|(_, r)| crate::ui::grid::details_row_at_pos(r, area, app.scroll_offset, app.listing.entries.len()))
+            .filter(|_| app.mouse_pos.is_some_and(|(c, _)| c >= area.x && c < area.right()))
+    } else {
+        None
+    };
     let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
     let header = Row::new(vec![
         Cell::from(" Name"),
@@ -35,19 +41,41 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     // Rows start at scroll_offset so the table, scrolling and click mapping
     // (details_row_at_pos) all agree on which entry is on which line.
     let visible = area.height.saturating_sub(1) as usize;
+
+    // Folder "sizes" are item counts, read for the visible rows only
+    let show_hidden = app.show_hidden;
+    for e in app.listing.entries.iter().skip(app.scroll_offset).take(visible).filter(|e| e.is_dir) {
+        app.dir_counts.entry(e.path.clone()).or_insert_with(|| {
+            std::fs::read_dir(&e.path).ok().map(|rd| rd.filter_map(|d| d.ok())
+                .filter(|d| show_hidden || !d.file_name().to_string_lossy().starts_with('.'))
+                .count())
+        });
+    }
+
     let rows: Vec<Row> = app.listing.entries.iter().enumerate()
         .skip(app.scroll_offset)
         .take(visible)
         .map(|(i, e)| {
-            let icon = if e.is_dir {
-                "\u{f07b}"
-            } else {
-                crate::ui::grid::file_placeholder_icon_pub(
-                    e.path.extension().and_then(|ex| ex.to_str()).unwrap_or("")
-                )
+            // indent, expander, icon (drawn as an image below), name
+            let expander = match (e.is_dir, app.expanded.contains(&e.path)) {
+                (true, true) => "\u{f107} ",
+                (true, false) => "\u{f105} ",
+                _ => "  ",
             };
-            let name = format!(" {} {}", icon, e.name);
-            let size = format_size(e.size, e.is_dir);
+            let name = Line::from(vec![
+                Span::raw(format!(" {}", "  ".repeat(e.depth as usize))),
+                Span::styled(expander, Style::default().fg(theme::MUTED)),
+                Span::raw(format!("   {}", e.name)),
+            ]);
+            let size = if e.is_dir {
+                match app.dir_counts.get(&e.path).copied().flatten() {
+                    Some(1) => "1 item".to_string(),
+                    Some(n) => format!("{n} items"),
+                    None => "\u{2014}".to_string(),
+                }
+            } else {
+                format_size(e.size, false)
+            };
             let modified = e.modified
                 .map(|t| { let dt: DateTime<Local> = t.into(); dt.format("%Y-%m-%d %H:%M").to_string() })
                 .unwrap_or_default();
@@ -60,10 +88,13 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
                     .or_else(|| crate::mime::guess_by_name(&e.path))
                     .unwrap_or_else(|| "file".to_string())
             };
+            let type_str = if e.is_symlink && !searching { format!("{type_str} (link)") } else { type_str };
 
             let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
             let row_style = if is_selected {
                 Style::default().bg(theme::SEL_BG).fg(Color::White)
+            } else if hovered == Some(i) {
+                Style::default().bg(theme::HOVER_BG)
             } else {
                 Style::default()
             };
@@ -81,7 +112,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
 
     let widths = [
         Constraint::Fill(3),
-        Constraint::Length(10),
+        Constraint::Length(11),
         Constraint::Length(16),
         Constraint::Fill(1),
     ];
@@ -91,6 +122,30 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         .column_spacing(2);
 
     f.render_widget(table, area);
+
+    // Real icons/thumbnails, one row tall, after each row's expander
+    let first = app.scroll_offset;
+    let last = (first + visible).min(app.listing.entries.len());
+    for (row, i) in (first..last).enumerate() {
+        let depth = app.listing.entries[i].depth;
+        let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
+        let bg = if is_selected {
+            Some(theme::SEL)
+        } else if hovered == Some(i) {
+            Some(theme::HOVER)
+        } else {
+            None
+        };
+        let x = expander_x(area, depth) + 2;
+        if x + 2 > area.right() { continue; }
+        let rect = Rect { x, y: area.y + 1 + row as u16, width: 2, height: 1 };
+        crate::ui::grid::render_cell_image(f, app, i, rect, bg);
+    }
+}
+
+/// Column of a row's expander arrow (the icon follows 2 columns later).
+pub fn expander_x(area: Rect, depth: u16) -> u16 {
+    area.x + 1 + depth * 2
 }
 
 pub fn format_size(size: Option<u64>, is_dir: bool) -> String {
@@ -98,8 +153,8 @@ pub fn format_size(size: Option<u64>, is_dir: bool) -> String {
     match size {
         None => "\u{2014}".to_string(),
         Some(b) if b < 1024 => format!("{b} B"),
-        Some(b) if b < 1024 * 1024 => format!("{:.1} KB", b as f64 / 1024.0),
-        Some(b) if b < 1024 * 1024 * 1024 => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
-        Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
+        Some(b) if b < 1024 * 1024 => format!("{:.1} KiB", b as f64 / 1024.0),
+        Some(b) if b < 1024 * 1024 * 1024 => format!("{:.1} MiB", b as f64 / (1024.0 * 1024.0)),
+        Some(b) => format!("{:.1} GiB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
     }
 }
