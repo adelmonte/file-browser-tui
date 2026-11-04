@@ -19,6 +19,10 @@ pub const fn rgb((r, g, b): (u8, u8, u8)) -> Color {
 
 /// Recessed fields and popups.
 pub const FIELD_BG: Color = rgb(NORD0);
+/// Text fields on the window background (location, search): light enough
+/// to stand out on a dark translucent terminal.
+pub const INPUT: (u8, u8, u8) = (72, 82, 102);
+pub const INPUT_BG: Color = rgb(INPUT);
 /// Borders, separators, de-emphasized text.
 pub const BORDER: Color = rgb(NORD3);
 /// Secondary text: dimmer than the body text but readable on dark and

@@ -12,7 +12,7 @@ use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
 use crate::ui::theme;
 
-const PATH_BG: Color = theme::FIELD_BG;
+const PATH_BG: Color = theme::INPUT_BG;
 
 /// Dolphin-style toolbar on the window background: icon buttons, a rounded
 /// location field with the folder's icon and clickable breadcrumbs, then
@@ -99,24 +99,22 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         .or_else(|| App::xdg_folder_icon(&app.cwd))
         .unwrap_or_else(|| "folder".into());
     let icon_rect = Rect { width: 2.min(body.width), ..body };
-    crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, Some(theme::NORD0));
+    crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, Some(theme::INPUT));
 
     let crumbs_area = Rect { x: body.x + 3, width: body.width.saturating_sub(3), ..body };
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());
     let end = crumbs_area.x + crumbs_area.width;
     let mut x = crumbs_area.x;
     let segs = breadcrumbs(&app.cwd, crumbs_area.width as usize);
-    let last = segs.len().saturating_sub(1);
-    for (i, (label, target)) in segs.into_iter().enumerate() {
+    for (label, target) in segs {
         let w = (label.chars().count() as u16).min(end.saturating_sub(x));
         if w == 0 { break; }
         let rect = Rect { x, width: w, ..crumbs_area };
-        let style = match &target {
-            None => Style::default().fg(theme::TEXT),
-            Some(_) if i == last => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            Some(_) if hover.is_some_and(|(c, r)| contains(rect, c, r)) =>
-                Style::default().fg(Color::White).bg(theme::HOVER_BG),
-            Some(_) => Style::default().fg(Color::White),
+        let hovered = target.is_some() && hover.is_some_and(|(c, r)| contains(rect, c, r));
+        let style = if hovered {
+            Style::default().fg(Color::White).add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(Color::White)
         };
         f.render_widget(Paragraph::new(Span::styled(label, style)), rect);
         if let Some(path) = target {
@@ -185,35 +183,30 @@ pub fn render_path_completions(f: &mut Frame, app: &mut App) {
     );
 }
 
-/// Breadcrumb segments ("/", "home", "user", …) with the folder each opens;
-/// separators have no target. Leading segments collapse to "…" so the end
-/// of the path stays visible.
+/// The full path as plain text ("/home/user/Documents/"), split into
+/// pieces: each folder name carries the path it opens, slashes carry none.
+/// If it doesn't fit, leading folders collapse to "…".
 fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
     let mut base = PathBuf::from("/");
-    let mut segs: Vec<(String, PathBuf)> = vec![("/".to_string(), base.clone())];
+    let mut segs: Vec<(String, PathBuf)> = Vec::new();
     for s in path.strip_prefix("/").unwrap_or(path).iter() {
         base = base.join(s);
         segs.push((s.to_string_lossy().into_owned(), base.clone()));
     }
 
-    const SEP: &str = "  \u{203a}  ";
-    let len = |segs: &[(String, PathBuf)]| segs.iter().map(|s| s.0.chars().count() + 5).sum::<usize>();
+    let len = |segs: &[(String, PathBuf)]| 1 + segs.iter().map(|s| s.0.chars().count() + 1).sum::<usize>();
     let mut skipped = false;
-    while segs.len() > 1 && len(&segs) + 3 > width {
+    while segs.len() > 1 && len(&segs) + 2 > width {
         segs.remove(0);
         skipped = true;
     }
-    let mut out = Vec::new();
+    let mut out = vec![("/".to_string(), Some(PathBuf::from("/")))];
     if skipped {
-        out.push(("\u{2026}".to_string(), None));
-        out.push((SEP.to_string(), None));
+        out.push(("\u{2026}/".to_string(), None));
     }
-    let n = segs.len();
-    for (i, (label, p)) in segs.into_iter().enumerate() {
+    for (label, p) in segs {
         out.push((label, Some(p)));
-        if i + 1 < n {
-            out.push((SEP.to_string(), None));
-        }
+        out.push(("/".to_string(), None));
     }
     out
 }

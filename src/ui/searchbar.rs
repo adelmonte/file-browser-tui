@@ -59,7 +59,7 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     // Query field fills the rest, a rounded recessed field like the path bar
     let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
     if outer.width >= 4 {
-        let cap = Style::default().fg(theme::FIELD_BG);
+        let cap = Style::default().fg(theme::INPUT_BG);
         f.render_widget(Paragraph::new(Span::styled("\u{e0b6}", cap)), Rect { width: 1, ..outer });
         f.render_widget(Paragraph::new(Span::styled("\u{e0b4}", cap)), Rect { x: outer.right() - 1, width: 1, ..outer });
     }
@@ -81,9 +81,9 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
         line.push(Span::styled(format!(" {hint}  (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::MUTED)));
     }
     let field_style = if search.focused {
-        Style::default().bg(theme::FIELD_BG).add_modifier(Modifier::BOLD)
+        Style::default().bg(theme::INPUT_BG).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().bg(theme::FIELD_BG)
+        Style::default().bg(theme::INPUT_BG)
     };
     f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
 }
