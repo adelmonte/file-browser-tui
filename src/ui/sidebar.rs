@@ -13,10 +13,11 @@ use crate::app::App;
 use crate::events::SidebarTarget;
 use crate::ui::{kitty, theme};
 
-/// Rows per place: the name sits on the middle one.
-const ITEM_H: u16 = 3;
-/// Icon height in rows, centered in the item.
-pub const ICON_ROWS: f32 = 1.8;
+/// Rows per place: the name on the first, the icon beside it reaching into
+/// the second (where a device's usage bar goes).
+const ITEM_H: u16 = 2;
+/// Icon height in rows, top-aligned in the item.
+pub const ICON_ROWS: f32 = 1.4;
 
 /// Places panel in Dolphin's layout: muted section headers, a theme icon
 /// per row, and a usage bar under each device.
@@ -123,7 +124,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let text_x = inner.x + 1 + icon_w + 1;
             let text_w = (inner.x + width).saturating_sub(text_x + 1);
             let name: String = row.name.chars().take(text_w as usize).collect();
-            let name_y = if row.usage.is_some() { y + (h - 1) / 2 } else { y + h / 2 };
+            let name_y = y;
             f.render_widget(Paragraph::new(Span::styled(name, Style::default().fg(fg))), Rect { x: text_x, y: name_y, width: text_w, height: 1 });
 
             if let Some(usage) = row.usage {

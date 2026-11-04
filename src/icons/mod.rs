@@ -30,7 +30,7 @@ struct IconRequest {
 /// Overlay the theme's symlink emblem on the bottom-left corner, as Dolphin
 /// marks links.
 fn add_link_emblem(img: &mut image::DynamicImage) {
-    let size = (img.width().min(img.height()) * 2 / 5).max(8);
+    let size = (img.width().min(img.height()) / 4).max(8);
     let Some((path, is_svg)) = theme::lookup("emblem-symbolic-link") else { return; };
     let Ok(emblem) = raster::load_icon(&path, is_svg, size) else { return; };
     let emblem = emblem.resize(size, size, image::imageops::FilterType::Triangle);
@@ -45,12 +45,18 @@ pub struct Fit {
     pub max_h: f32,
     /// Cap on the image height in terminal rows (0 = none).
     pub max_rows: f32,
-    /// Center vertically instead of resting on the bottom edge.
-    pub center: bool,
+    pub valign: VAlign,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VAlign {
+    Top,
+    /// Resting on the bottom edge (right above a label).
+    Bottom,
 }
 
 /// Grid items: a small margin above, resting on the label.
-pub const GRID_FIT: Fit = Fit { max_h: 0.88, max_rows: 0.0, center: false };
+pub const GRID_FIT: Fit = Fit { max_h: 0.88, max_rows: 0.0, valign: VAlign::Bottom };
 
 /// Fit `img` into a box of `cols`×`rows` terminal cells and pad it to exactly
 /// that box, centered horizontally and resting on the bottom edge (right
@@ -84,7 +90,10 @@ pub fn fit_to_cells(
     };
     let mut canvas = image::RgbaImage::from_pixel(box_w, box_h, fill);
     let x = (box_w - fitted.width()) / 2;
-    let y = if fit.center { (box_h - fitted.height()) / 2 } else { box_h - fitted.height() };
+    let y = match fit.valign {
+        VAlign::Top => 0,
+        VAlign::Bottom => box_h - fitted.height(),
+    };
     image::imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);
     image::DynamicImage::ImageRgba8(canvas)
 }

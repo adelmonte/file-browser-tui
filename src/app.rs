@@ -277,7 +277,11 @@ impl App {
             kdeconnect_mounts: HashMap::new(),
             kdeconnect_mount_rx: None,
             sidebar_icons: IconCache::new(false)
-                .with_fit(crate::icons::Fit { max_h: 0.95, max_rows: crate::ui::sidebar::ICON_ROWS, center: true }),
+                .with_fit(crate::icons::Fit {
+                    max_h: 1.0,
+                    max_rows: crate::ui::sidebar::ICON_ROWS,
+                    valign: crate::icons::VAlign::Top,
+                }),
             mouse_pos: None,
             places,
             devices,
