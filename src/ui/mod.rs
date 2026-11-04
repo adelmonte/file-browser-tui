@@ -1,6 +1,7 @@
 pub mod compact;
 pub mod details;
 pub mod drag_ghost;
+pub mod groups;
 pub mod grid;
 pub mod help;
 pub mod kitty;

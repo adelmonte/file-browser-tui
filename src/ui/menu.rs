@@ -45,6 +45,7 @@ pub enum MenuAction {
     SetAscending(bool),
     ToggleFoldersFirst,
     ToggleShowHidden,
+    ToggleGroups,
     Custom(usize),
     /// (group, action) index into `App::user_actions`.
     UserAction(usize, usize),
@@ -346,11 +347,15 @@ fn action_glyph(icon: Option<&str>) -> &'static str {
 
 /// Topbar "view" dropdown as a menu.
 pub fn build_view_menu(app: &App) -> Vec<MenuItem> {
-    ViewMode::iter().map(|v| {
+    let mut items: Vec<MenuItem> = ViewMode::iter().map(|v| {
         let check = if v == app.view_mode { "\u{f00c} " } else { "  " };
         let icon = view_mode_icon(v);
         MenuItem::new(format!("{check}{icon} {v}"), MenuAction::SetView(v))
-    }).collect()
+    }).collect();
+    items.push(MenuItem::sep());
+    let check = if app.show_groups { "\u{f00c} " } else { "  " };
+    items.push(MenuItem::new(format!("{check}\u{f0c9} Show in Groups"), MenuAction::ToggleGroups));
+    items
 }
 
 pub fn view_mode_icon(v: ViewMode) -> &'static str {

@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::app::{App, SortField};
-use crate::ui::theme;
+use crate::ui::{groups::{self, DRow}, theme};
 
 pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Block::default(), area);
@@ -24,8 +24,13 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     app.grid_area = area;
 
     let searching = app.search.as_ref().is_some_and(|s| s.has_query());
+    app.details_rows = if app.grouped() {
+        groups::rows(&app.listing.entries, app.sort.field)
+    } else {
+        (0..app.listing.entries.len()).map(DRow::Entry).collect()
+    };
     let hovered = if app.menu.is_none() {
-        app.mouse_pos.and_then(|(_, r)| crate::ui::grid::details_row_at_pos(r, area, app.scroll_offset, app.listing.entries.len()))
+        app.mouse_pos.and_then(|(_, r)| crate::ui::grid::details_row_at_pos(r, area, app.scroll_offset, &app.details_rows))
             .filter(|_| app.mouse_pos.is_some_and(|(c, _)| c >= area.x && c < area.right()))
     } else {
         None
@@ -46,10 +51,12 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     // Rows start at scroll_offset so the table, scrolling and click mapping
     // (details_row_at_pos) all agree on which entry is on which line.
     let visible = area.height.saturating_sub(1) as usize;
+    let lines: Vec<DRow> = app.details_rows.iter().skip(app.scroll_offset).take(visible).cloned().collect();
+    let shown: Vec<usize> = lines.iter().filter_map(|l| if let DRow::Entry(i) = l { Some(*i) } else { None }).collect();
 
     // Folder "sizes" are item counts, read for the visible rows only
     let show_hidden = app.show_hidden;
-    for e in app.listing.entries.iter().skip(app.scroll_offset).take(visible).filter(|e| e.is_dir) {
+    for e in shown.iter().map(|&i| &app.listing.entries[i]).filter(|e| e.is_dir) {
         app.dir_counts.entry(e.path.clone()).or_insert_with(|| {
             std::fs::read_dir(&e.path).ok().map(|rd| rd.filter_map(|d| d.ok())
                 .filter(|d| show_hidden || !d.file_name().to_string_lossy().starts_with('.'))
@@ -57,10 +64,10 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         });
     }
 
-    let rows: Vec<Row> = app.listing.entries.iter().enumerate()
-        .skip(app.scroll_offset)
-        .take(visible)
-        .map(|(i, e)| {
+    let rows: Vec<Row> = lines.iter()
+        .map(|line| {
+            let DRow::Entry(i) = *line else { return Row::new(Vec::<Cell>::new()).height(1); };
+            let e = &app.listing.entries[i];
             // indent, expander, icon (drawn as an image below), name
             let expander = match (e.is_dir, app.expanded.contains(&e.path)) {
                 (true, true) => "\u{f107} ",
@@ -132,10 +139,23 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
 
     f.render_widget(table, area);
 
+    // Group headers: the label, then a rule across the row
+    for (row, line) in lines.iter().enumerate() {
+        let DRow::Group(label) = line else { continue; };
+        let y = area.y + 1 + row as u16;
+        let rule = (area.width as usize).saturating_sub(label.chars().count() + 3);
+        f.render_widget(
+            ratatui::widgets::Paragraph::new(Line::from(vec![
+                Span::styled(format!(" {label} "), Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled("\u{2500}".repeat(rule), Style::default().fg(theme::BORDER)),
+            ])),
+            Rect { x: area.x, y, width: area.width, height: 1 },
+        );
+    }
+
     // Real icons/thumbnails, one row tall, after each row's expander
-    let first = app.scroll_offset;
-    let last = (first + visible).min(app.listing.entries.len());
-    for (row, i) in (first..last).enumerate() {
+    for (row, line) in lines.iter().enumerate() {
+        let DRow::Entry(i) = *line else { continue; };
         let depth = app.listing.entries[i].depth;
         let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
         let bg = if is_selected {
@@ -167,3 +187,4 @@ pub fn format_size(size: Option<u64>, is_dir: bool) -> String {
         Some(b) => format!("{:.1} GiB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
     }
 }
+

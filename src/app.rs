@@ -118,6 +118,10 @@ pub struct App {
     pub sort: SortState,
     pub show_hidden: bool,
     pub folders_first: bool,
+    /// Details view groups (per folder).
+    pub show_groups: bool,
+    /// Details lines (headers and entries) as last laid out.
+    pub details_rows: Vec<crate::ui::groups::DRow>,
 
     // Icon zoom (index into ICON_LEVELS) and the grid geometry it implies
     pub icon_size_idx: usize,
@@ -292,6 +296,8 @@ impl App {
             sort,
             show_hidden: config.show_hidden,
             folders_first: config.folders_first,
+            show_groups: config.show_in_groups,
+            details_rows: Vec::new(),
             icon_size_idx,
             img_w,
             cell_w,
@@ -385,6 +391,9 @@ impl App {
 
         if self.view_mode == ViewMode::Details && !self.expanded.is_empty() {
             listing.entries = self.with_expanded(listing.entries, 0);
+        }
+        if self.grouped() {
+            listing.entries = crate::ui::groups::arrange(listing.entries, self.sort.field, self.sort.ascending);
         }
         self.dir_counts.clear();
         self.icons_grace_until = std::time::Instant::now() + std::time::Duration::from_millis(300);
@@ -558,6 +567,7 @@ impl App {
         };
         self.folders_first = state.folders_first.unwrap_or(c.folders_first);
         self.show_hidden = state.show_hidden.unwrap_or(c.show_hidden);
+        self.show_groups = state.groups.unwrap_or(c.show_in_groups);
         // Folders without their own zoom follow the home folder's
         let home_size = dirs::home_dir().and_then(|h| self.dirstates.get(&h)).and_then(|s| s.icon_size_idx);
         let idx = state.icon_size_idx.or(home_size).unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
@@ -628,6 +638,25 @@ impl App {
         self.save_sort_state();
     }
 
+    /// Whether the listing is laid out in groups (Details, not searching).
+    pub fn grouped(&self) -> bool {
+        self.show_groups && self.view_mode == ViewMode::Details
+            && !self.search.as_ref().is_some_and(|s| s.has_query())
+    }
+
+    pub fn toggle_groups(&mut self) {
+        self.show_groups = !self.show_groups;
+        let on = self.show_groups;
+        self.dirstates.update(&self.cwd, |s| s.groups = Some(on));
+        self.reload_dir();
+    }
+
+    /// The Details line showing entry `idx`.
+    pub fn details_line(&self, idx: usize) -> usize {
+        use crate::ui::groups::DRow;
+        self.details_rows.iter().position(|r| *r == DRow::Entry(idx)).unwrap_or(idx)
+    }
+
     pub fn toggle_show_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
         self.save_sort_state();
@@ -637,8 +666,8 @@ impl App {
     pub fn set_view_mode(&mut self, view: ViewMode) {
         if view != self.view_mode {
             self.view_mode = view;
-            // The tree only exists in Details
-            if !self.expanded.is_empty() {
+            // The tree and groups only exist in Details
+            if !self.expanded.is_empty() || self.show_groups {
                 self.reload_dir();
             }
         }
@@ -710,8 +739,16 @@ impl App {
             ViewMode::Details => (1, self.grid_area.height as usize),
             _ => (self.grid_cols.max(1) as usize, (self.grid_area.height / self.cell_h + 2) as usize),
         };
-        let start = self.scroll_offset * cols;
-        let end = ((self.scroll_offset + rows_visible) * cols).min(self.listing.entries.len());
+        let (mut start, mut end) = (self.scroll_offset * cols, ((self.scroll_offset + rows_visible) * cols).min(self.listing.entries.len()));
+        // Details lines include group headers: take the entries they show
+        if self.view_mode == ViewMode::Details && !self.details_rows.is_empty() {
+            use crate::ui::groups::DRow;
+            let shown = || self.details_rows.iter().skip(self.scroll_offset).take(rows_visible)
+                .filter_map(|r| if let DRow::Entry(i) = r { Some(*i) } else { None });
+            if let (Some(a), Some(b)) = (shown().min(), shown().max()) {
+                (start, end) = (a, (b + 1).min(self.listing.entries.len()));
+            }
+        }
         if start >= end { return; }
 
         for i in start..end {
@@ -1012,7 +1049,7 @@ impl App {
         let cols = self.grid_cols.max(1) as usize;
         if let Some(idx) = self.selection {
             let row = match self.view_mode {
-                ViewMode::Details => idx,
+                ViewMode::Details => self.details_line(idx),
                 _ => idx / cols,
             };
             if row < self.scroll_offset {

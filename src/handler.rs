@@ -58,7 +58,7 @@ pub(crate) fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
             cell_at_pos((col, row), app.grid_area, (app.scroll_offset, 0), app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
         }
         ViewMode::Details => {
-            details_row_at_pos(row, app.grid_area, app.scroll_offset, count)
+            details_row_at_pos(row, app.grid_area, app.scroll_offset, &app.details_rows)
         }
     }
 }
@@ -89,7 +89,7 @@ fn visible_rows(app: &App) -> usize {
 fn total_scroll_rows(app: &App) -> usize {
     let n = app.listing.entries.len();
     match app.view_mode {
-        ViewMode::Details => n,
+        ViewMode::Details => app.details_rows.len().max(n),
         ViewMode::Compact | ViewMode::Icons => {
             let cols = app.grid_cols.max(1) as usize;
             n.div_ceil(cols)

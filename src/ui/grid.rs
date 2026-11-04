@@ -42,13 +42,16 @@ pub fn cell_at_pos(
     if idx < entry_count { Some(idx) } else { None }
 }
 
+/// The entry on a Details line (None for headers and empty space).
 pub fn details_row_at_pos(
-    row: u16, grid_area: Rect, scroll_offset: usize, entry_count: usize,
+    row: u16, grid_area: Rect, scroll_offset: usize, rows: &[crate::ui::groups::DRow],
 ) -> Option<usize> {
     if row < grid_area.y + 1 { return None; }
     if row >= grid_area.y + grid_area.height { return None; }
-    let idx = scroll_offset + (row - grid_area.y - 1) as usize;
-    if idx < entry_count { Some(idx) } else { None }
+    match rows.get(scroll_offset + (row - grid_area.y - 1) as usize) {
+        Some(crate::ui::groups::DRow::Entry(i)) => Some(*i),
+        _ => None,
+    }
 }
 
 pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {

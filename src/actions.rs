@@ -99,6 +99,7 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
         MenuAction::SetSortField(f) => app.set_sort_field(f),
         MenuAction::SetAscending(asc) => app.set_sort_ascending(asc),
         MenuAction::ToggleFoldersFirst => app.toggle_folders_first(),
+        MenuAction::ToggleGroups => app.toggle_groups(),
         MenuAction::ToggleShowHidden => app.toggle_show_hidden(),
 
         MenuAction::Custom(idx) => run_custom(app, idx, target),

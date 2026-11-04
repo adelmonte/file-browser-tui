@@ -18,6 +18,9 @@ pub struct Config {
     pub show_hidden: bool,
     #[serde(default = "default_true")]
     pub folders_first: bool,
+    /// Details view: group rows under headers, like Dolphin's Show in Groups.
+    #[serde(default = "default_true")]
+    pub show_in_groups: bool,
     #[serde(default = "default_icon_size")]
     pub icon_size_idx: usize,
     #[serde(default = "default_sidebar_w")]
@@ -126,6 +129,7 @@ impl Default for Config {
             sort: SortConfig::default(),
             show_hidden: false,
             folders_first: true,
+            show_in_groups: true,
             icon_size_idx: default_icon_size(),
             sidebar_w: 18,
             terminal_command: String::new(),
