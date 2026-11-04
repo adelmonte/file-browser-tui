@@ -90,7 +90,7 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
     f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), body);
 
     if app.path_bar_editing {
-        let line = Line::styled(format!("{}\u{2588}", app.path_bar_input), Style::default().fg(Color::White));
+        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(Color::White)));
         f.render_widget(Paragraph::new(line), body);
         return;
     }

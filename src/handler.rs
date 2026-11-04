@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+use crate::lineedit::{self, Edit};
 use crate::{
     search::{SearchMode, SearchScope},
     actions,
@@ -152,11 +153,11 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         match ev.code {
             KeyCode::Esc => { app.rename_state = None; }
             KeyCode::Enter => { app.commit_rename(); }
-            KeyCode::Backspace => { rename.delete_before_cursor(); }
-            KeyCode::Left => { rename.move_left(); }
-            KeyCode::Right => { rename.move_right(); }
-            KeyCode::Char(c) => { rename.insert_char(c); }
-            _ => {}
+            _ => {
+                if lineedit::edit(&mut rename.input, &mut rename.cursor_pos, ev) == Edit::Changed {
+                    rename.invalid = false;
+                }
+            }
         }
         return false;
     }
@@ -179,6 +180,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                 let sel = app.path_completion_sel.unwrap_or(0);
                 if let Some(p) = app.path_completions.get(sel).cloned() {
                     app.path_bar_input = p.to_string_lossy().to_string() + "/";
+                    app.path_bar_cursor = app.path_bar_input.len();
                     app.update_path_completions();
                 }
             }
@@ -196,15 +198,11 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                     Some(s) => Some(s - 1),
                 };
             }
-            KeyCode::Backspace => {
-                app.path_bar_input.pop();
-                app.update_path_completions();
+            _ => {
+                if lineedit::edit(&mut app.path_bar_input, &mut app.path_bar_cursor, ev) == Edit::Changed {
+                    app.update_path_completions();
+                }
             }
-            KeyCode::Char(c) => {
-                app.path_bar_input.push(c);
-                app.update_path_completions();
-            }
-            _ => {}
         }
         return false;
     }
@@ -223,12 +221,11 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
             }
             KeyCode::Tab => { search.toggle_mode(); app.search_changed(); }
             KeyCode::BackTab => { search.toggle_scope(); app.search_changed(); }
-            KeyCode::Backspace => { search.query.pop(); app.search_changed(); }
-            KeyCode::Char(c) if !ev.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
-                search.query.push(c);
-                app.search_changed();
+            _ => {
+                if lineedit::edit(&mut search.query, &mut search.cursor, ev) == Edit::Changed {
+                    app.search_changed();
+                }
             }
-            _ => {}
         }
         return false;
     }

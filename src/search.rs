@@ -38,6 +38,8 @@ enum SearchMsg {
 
 pub struct SearchState {
     pub query: String,
+    /// Cursor byte offset in `query`.
+    pub cursor: usize,
     pub mode: SearchMode,
     pub scope: SearchScope,
     /// Keystrokes go to the query field (vs. the results).
@@ -72,6 +74,7 @@ impl SearchState {
         let (tx, rx) = mpsc::channel();
         Self {
             query: String::new(),
+            cursor: 0,
             mode: SearchMode::Name,
             scope: SearchScope::Here,
             focused: true,

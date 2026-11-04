@@ -168,7 +168,10 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             // Inline rename
             if let Some(ref rename) = app.rename_state
                 && rename.item_idx == entry_idx {
-                    let lines = wrap_label(&rename.input, label_w, label_rows);
+                    // Thin bar marks the cursor inside the wrapped name
+                    let mut shown = rename.input.clone();
+                    shown.insert(rename.cursor_pos.min(shown.len()), '\u{258f}');
+                    let lines = wrap_label(&shown, label_w, label_rows);
                     let bg = if rename.invalid { theme::NORD11 } else { theme::SEL };
                     f.render_widget(
                         Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))

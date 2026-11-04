@@ -65,11 +65,12 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     }
     let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
     search.field_rect = field;
-    let cursor = if search.focused { "\u{2588}" } else { "" };
-    let mut line = vec![
-        Span::styled("\u{f002}  ", Style::default().fg(theme::ACCENT)),
-        Span::styled(format!("{}{cursor}", search.query), Style::default().fg(Color::White)),
-    ];
+    let mut line = vec![Span::styled("\u{f002}  ", Style::default().fg(theme::ACCENT))];
+    if search.focused {
+        line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(Color::White)));
+    } else {
+        line.push(Span::styled(search.query.clone(), Style::default().fg(Color::White)));
+    }
     if search.query.is_empty() && !search.focused {
         line.push(Span::styled("Search\u{2026}", Style::default().fg(theme::MUTED)));
     } else if search.query.is_empty() {

@@ -133,44 +133,4 @@ impl RenameState {
             invalid: false,
         }
     }
-
-    pub fn insert_char(&mut self, c: char) {
-        self.invalid = false;
-        self.input.insert(self.cursor_pos, c);
-        self.cursor_pos += c.len_utf8();
-    }
-
-    pub fn move_left(&mut self) {
-        let mut pos = self.cursor_pos;
-        while pos > 0 {
-            pos -= 1;
-            if self.input.is_char_boundary(pos) { break; }
-        }
-        self.cursor_pos = pos;
-    }
-
-    pub fn move_right(&mut self) {
-        let mut pos = self.cursor_pos;
-        while pos < self.input.len() {
-            pos += 1;
-            if self.input.is_char_boundary(pos) { break; }
-        }
-        self.cursor_pos = pos;
-    }
-
-    pub fn delete_before_cursor(&mut self) {
-        if self.cursor_pos > 0 {
-            self.invalid = false;
-            // Find the previous char boundary
-            let mut pos = self.cursor_pos;
-            loop {
-                pos -= 1;
-                if self.input.is_char_boundary(pos) {
-                    break;
-                }
-            }
-            self.input.drain(pos..self.cursor_pos);
-            self.cursor_pos = pos;
-        }
-    }
 }

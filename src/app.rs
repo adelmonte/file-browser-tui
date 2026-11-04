@@ -168,6 +168,7 @@ pub struct App {
     // Path bar editing
     pub path_bar_editing: bool,
     pub path_bar_input: String,
+    pub path_bar_cursor: usize,
     pub path_completions: Vec<PathBuf>,
     pub path_completion_sel: Option<usize>,
     /// Actual rendered completion dropdown rect (for hit-testing).
@@ -287,6 +288,7 @@ impl App {
             selection_anchor: None,
             path_bar_editing: false,
             path_bar_input: String::new(),
+            path_bar_cursor: 0,
             path_completions: Vec::new(),
             path_completion_sel: None,
             completions_rect: Rect::default(),
@@ -900,6 +902,7 @@ impl App {
     pub fn start_path_edit(&mut self) {
         self.path_bar_editing = true;
         self.path_bar_input = self.cwd.to_string_lossy().to_string();
+        self.path_bar_cursor = self.path_bar_input.len();
         self.path_completions.clear();
         self.path_completion_sel = None;
     }
