@@ -186,11 +186,17 @@ fn run(
                     let new_size = ratatui::layout::Size { width: w, height: h };
                     if new_size != app.last_terminal_size {
                         app.last_terminal_size = new_size;
-                        // Reflowed layout: re-place everything cleanly
-                        app.icon_cache.clear_protocols();
-                        app.sidebar_icons.clear_protocols();
-                        app.thumb_cache.clear_protocols();
-                        app.kitty_delete_all = true;
+                        if is_kitty {
+                            // Placeholder images follow their cells through the
+                            // reflow; only direct placements (underlays) are
+                            // wiped by the screen clear and must be re-placed
+                            app.underlays.clear();
+                        } else {
+                            app.icon_cache.clear_protocols();
+                            app.sidebar_icons.clear_protocols();
+                            app.thumb_cache.clear_protocols();
+                            app.kitty_delete_all = true;
+                        }
                     }
                 }
                 _ => {}
