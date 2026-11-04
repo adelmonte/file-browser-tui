@@ -18,6 +18,9 @@ pub struct DirEntry {
     pub created: Option<SystemTime>,
     pub accessed: Option<SystemTime>,
     pub mime_type: Option<String>,
+    pub is_symlink: bool,
+    /// Nesting level in the Details tree (0 = the folder being viewed).
+    pub depth: u16,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,7 +40,9 @@ pub fn read_dir(path: &PathBuf, show_hidden: bool, folders_first: bool, sort: &S
         if !show_hidden && name.starts_with('.') {
             continue;
         }
-        let meta = entry.metadata().ok();
+        // Follow symlinks (a link to a folder is a folder), but remember them
+        let is_symlink = entry.file_type().is_ok_and(|t| t.is_symlink());
+        let meta = if is_symlink { std::fs::metadata(entry.path()).ok() } else { entry.metadata().ok() };
         let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
         let size = meta.as_ref().and_then(|m| if m.is_file() { Some(m.len()) } else { None });
         let modified = meta.as_ref().and_then(|m| m.modified().ok());
@@ -53,6 +58,8 @@ pub fn read_dir(path: &PathBuf, show_hidden: bool, folders_first: bool, sort: &S
             created,
             accessed,
             mime_type: None,
+            is_symlink,
+            depth: 0,
         });
     }
 

@@ -246,6 +246,8 @@ fn entry_for(path: &Path) -> Option<DirEntry> {
         created: meta.as_ref().and_then(|m| m.created().ok()),
         accessed: meta.as_ref().and_then(|m| m.accessed().ok()),
         mime_type: None,
+        is_symlink: path.symlink_metadata().is_ok_and(|m| m.is_symlink()),
+        depth: 0,
     })
 }
 

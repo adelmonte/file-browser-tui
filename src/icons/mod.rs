@@ -27,6 +27,17 @@ struct IconRequest {
     icon_override: Option<String>,
 }
 
+/// Overlay the theme's symlink emblem on the bottom-left corner, as Dolphin
+/// marks links.
+fn add_link_emblem(img: &mut image::DynamicImage) {
+    let size = (img.width().min(img.height()) * 2 / 5).max(8);
+    let Some((path, is_svg)) = theme::lookup("emblem-symbolic-link") else { return; };
+    let Ok(emblem) = raster::load_icon(&path, is_svg, size) else { return; };
+    let emblem = emblem.resize(size, size, image::imageops::FilterType::Triangle);
+    let y = img.height().saturating_sub(emblem.height());
+    image::imageops::overlay(img, &emblem, 0, y as i64);
+}
+
 /// How an image sits in its cell box.
 #[derive(Clone, Copy)]
 pub struct Fit {
@@ -115,11 +126,15 @@ impl IconCache {
                         icon_names.insert(0, name);
                     }
                     let resolved = resolver::resolve_icon_path(&icon_names, req.is_dir);
-                    let image = resolved.and_then(|(icon_path, is_svg)| {
+                    let is_link = req.path.symlink_metadata().is_ok_and(|m| m.is_symlink());
+                    let mut image = resolved.and_then(|(icon_path, is_svg)| {
                         raster::load_icon(&icon_path, is_svg, req.target_px)
                             .map_err(|e| { tracing::warn!("load_icon {:?}: {e}", icon_path); e })
                             .ok()
                     });
+                    if is_link && let Some(img) = &mut image {
+                        add_link_emblem(img);
+                    }
                     let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
                     let preview_base = if wants_preview { image.clone() } else { None };
 
@@ -128,8 +143,11 @@ impl IconCache {
 
                     // Plain folder shows immediately; the preview replaces it when ready
                     if let Some(base) = preview_base
-                        && let Some(preview) = folder_preview::build(&req.path, &base)
+                        && let Some(mut preview) = folder_preview::build(&req.path, &base)
                     {
+                        if is_link {
+                            add_link_emblem(&mut preview);
+                        }
                         let _ = tx.send(IconImageReady { path: req.path, image: Some(preview), mime_type: mime });
                     }
                 });
