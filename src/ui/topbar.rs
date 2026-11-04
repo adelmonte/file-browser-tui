@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
-use crate::ui::{kitty, theme};
+use crate::ui::{theme, underlay};
 
 const PATH_BG: Color = theme::INPUT_BG;
 
@@ -81,9 +81,10 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         return;
     }
     let body = Rect { x: field.x + 1, width: field.width - 2, ..field };
-    f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), body);
-    kitty::field_cap(f, app, "location", field, false, theme::INPUT);
-    kitty::field_cap(f, app, "location", Rect { x: field.right() - 1, ..field }, true, theme::INPUT);
+    // A rounded box a little taller than the text row (Kitty), else cell bg
+    if !underlay::field(app, 0, field, theme::INPUT) {
+        f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), field);
+    }
 
     if app.path_bar_editing {
         let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(Color::White)));
@@ -95,7 +96,7 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         .or_else(|| App::xdg_folder_icon(&app.cwd))
         .unwrap_or_else(|| "folder".into());
     let icon_rect = Rect { width: 2.min(body.width), ..body };
-    crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, Some(theme::INPUT));
+    crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, None);
 
     let crumbs_area = Rect { x: body.x + 3, width: body.width.saturating_sub(3), ..body };
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());

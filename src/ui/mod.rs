@@ -11,6 +11,7 @@ pub mod sidebar;
 pub mod statusbar;
 pub mod theme;
 pub mod topbar;
+pub mod underlay;
 
 use ratatui::{
     Frame,
@@ -31,7 +32,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(TOPBAR_H),
-            Constraint::Length(u16::from(app.search.is_some())),
+            // Search field row plus room for its box to reach below it
+            Constraint::Length(if app.search.is_some() { 2 } else { 0 }),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
@@ -90,6 +92,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Image uploads lifted out of placeholder cells go out before this
     // frame's cell updates, so the placeholders always have an image.
+    underlay::finish_frame(app);
+
     if !app.kitty_transmits.is_empty() {
         let mut out = std::io::stdout().lock();
         for t in app.kitty_transmits.drain(..) {

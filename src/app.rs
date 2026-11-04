@@ -61,7 +61,7 @@ impl Default for SortState {
 // ---------------------------------------------------------------------------
 
 /// Topbar height in rows (1 padding + 1 content + 1 padding).
-pub const TOPBAR_H: u16 = 4;
+pub const TOPBAR_H: u16 = 3;
 
 /// Icon zoom levels, as icon height in terminal rows: one-row steps at
 /// small and medium sizes, wider jumps at the top end.
@@ -77,7 +77,7 @@ pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16,
     let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
     let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
     let img_w = ((rows as f32 * fh / fw).round() as u16).max(2);
-    let cell_w = (img_w + 3).max(8);
+    let cell_w = (img_w + 2).max(8);
     let icon_rows = rows;
     (cell_w, icon_rows + 2, icon_rows, img_w)
 }
@@ -213,8 +213,9 @@ pub struct App {
     /// Raw output written after ratatui flushes a frame (Kitty multicell
     /// text, which ratatui can't express).
     pub post_draw: Vec<String>,
-    /// Rounded end caps of text fields, keyed by (field, right side).
-    pub field_caps: HashMap<(&'static str, bool), ratatui_image::protocol::StatefulProtocol>,
+    /// Field backgrounds drawn under the text (see ui::underlay), by slot.
+    pub underlays: HashMap<u32, crate::ui::underlay::Placed>,
+    pub underlays_seen: std::collections::HashSet<u32>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -328,7 +329,8 @@ impl App {
             dirstates,
             kitty_transmits: Vec::new(),
             post_draw: Vec::new(),
-            field_caps: HashMap::new(),
+            underlays: HashMap::new(),
+            underlays_seen: std::collections::HashSet::new(),
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
@@ -830,7 +832,8 @@ impl App {
         self.prev_frame_images = std::mem::take(&mut self.frame_images);
 
         if delete_all {
-            self.field_caps.clear();
+            // Deleted along with everything else; re-placed next frame
+            self.underlays.clear();
             self.sidebar_icons.clear_protocols();
             self.icon_cache.clear_protocols();
             self.thumb_cache.clear_protocols();

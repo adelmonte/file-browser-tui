@@ -26,3 +26,4 @@ strum            = { version = "0.27", features = ["derive"] }
 md5 = "0.8.0"
 png = "0.18"
 unicode-width = "0.2"
+base64 = "0.22"

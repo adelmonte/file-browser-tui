@@ -3,12 +3,12 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Paragraph},
 };
 
 use crate::app::App;
 use crate::search::{SearchMode, SearchScope};
-use crate::ui::{kitty, theme};
+use crate::ui::{theme, underlay};
 
 /// One-row search bar under the toolbar:
 ///  <icon> query█             Name  Content  │  This Folder  Home
@@ -76,13 +76,13 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
         line.push(Span::styled(format!(" {hint}  (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::MUTED)));
     }
     let field_style = if search.focused {
-        Style::default().bg(theme::INPUT_BG).add_modifier(Modifier::BOLD)
+        Style::default().add_modifier(Modifier::BOLD)
     } else {
-        Style::default().bg(theme::INPUT_BG)
+        Style::default()
     };
-    f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
-    if outer.width >= 2 {
-        kitty::field_cap(f, app, "search", outer, false, theme::INPUT);
-        kitty::field_cap(f, app, "search", Rect { x: outer.right() - 1, ..outer }, true, theme::INPUT);
+    // A rounded box a little taller than the text row (Kitty), else cell bg
+    if !underlay::field(app, 1, outer, theme::INPUT) {
+        f.render_widget(Block::default().style(Style::default().bg(theme::INPUT_BG)), outer);
     }
+    f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
 }
