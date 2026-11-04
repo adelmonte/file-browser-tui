@@ -249,9 +249,12 @@ pub struct App {
     pub underlays_seen: std::collections::HashSet<u32>,
     /// Underlay slots currently shown under their alternate image id.
     pub underlays_alt: std::collections::HashSet<u32>,
-    /// Rubber band on Kitty: its pieces are uploaded, and where it's shown.
-    pub band_uploaded: bool,
+    /// Rubber band on Kitty: pixel size its pieces were uploaded for, and
+    /// where it's shown.
+    pub band_uploaded: Option<(u32, u32)>,
     pub band_shown: Option<Rect>,
+    /// The encoded band upload for a size, reused by later drags.
+    pub band_upload: Option<((u32, u32), String)>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -385,8 +388,9 @@ impl App {
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
             underlays_alt: std::collections::HashSet::new(),
-            band_uploaded: false,
+            band_uploaded: None,
             band_shown: None,
+            band_upload: None,
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
@@ -935,7 +939,7 @@ impl App {
         if delete_all {
             // Deleted along with everything else; re-placed next frame
             self.underlays.clear();
-            self.band_uploaded = false;
+            self.band_uploaded = None;
             self.band_shown = None;
             self.sidebar_icons.clear_protocols();
             self.icon_cache.clear_protocols();

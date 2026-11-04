@@ -116,73 +116,101 @@ pub fn highlight(app: &mut App, slot: u32, rect: Rect, inset_x: u32, inset_y: u3
 /// Ids of the rubber band's pieces: fill, then top, bottom, left, right edges.
 const BAND_IDS: [u32; 5] = [ID_BASE + 100, ID_BASE + 101, ID_BASE + 102, ID_BASE + 103, ID_BASE + 104];
 
-/// Show the rubber band over `rect`, or hide it with None. Five tiny images
-/// (a translucent pixel, and one-cell edge strips with a 1px line) uploaded
-/// once and stretched over the band by kitty, so dragging only re-places
-/// them instead of uploading a band-sized image per mouse move.
+/// Show the rubber band over `rect`, or hide it with None. Five images (a
+/// translucent fill, and 1px lines for the edges) uploaded once per drag at
+/// the view's size, zlib-compressed so that's cheap, then shown cropped to
+/// the band: dragging only re-places them. Not stretched: kitty samples
+/// scaled images linearly against a transparent border, so a stretched
+/// fill fades toward its edges.
 pub fn selection_band(app: &mut App, rect: Option<Rect>, color: (u8, u8, u8)) -> bool {
     use ratatui_image::picker::ProtocolType;
     if app.picker.protocol_type() != ProtocolType::Kitty {
         return false;
     }
-    if rect == app.band_shown {
+    if rect == app.band_shown && (rect.is_some() || app.band_uploaded.is_none()) {
         return true;
     }
     let mut out = String::new();
     let Some(r) = rect else {
         for id in BAND_IDS {
-            // Lowercase: drop the placement, keep the image for next time
-            let _ = write!(out, "\x1b_Ga=d,d=i,i={id},q=2\x1b\\");
+            // Frees the view-sized fill until the next drag
+            let _ = write!(out, "\x1b_Ga=d,d=I,i={id},q=2\x1b\\");
         }
         app.post_draw.push(out);
         app.band_shown = None;
+        app.band_uploaded = None;
         return true;
     };
     let (cw, ch) = cell(app);
-    if !app.band_uploaded {
-        let (c, o) = ([color.0, color.1, color.2, 70], [color.0, color.1, color.2, 255]);
-        let edge = |on: &dyn Fn(u32, u32) -> bool| -> Vec<u8> {
-            (0..ch).flat_map(|y| (0..cw).flat_map(move |x| if on(x, y) { o } else { [0; 4] })).collect()
-        };
-        let images: [(u32, u32, Vec<u8>); 5] = [
-            (1, 1, c.to_vec()),
-            (cw, ch, edge(&|_, y| y == 0)),
-            (cw, ch, edge(&|_, y| y == ch - 1)),
-            (cw, ch, edge(&|x, _| x == 0)),
-            (cw, ch, edge(&|x, _| x == cw - 1)),
-        ];
-        for (id, (w, h, rgba)) in BAND_IDS.iter().zip(images) {
-            let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
-            let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
-            for (i, chunk) in chunks.iter().enumerate() {
-                let more = u8::from(i + 1 < chunks.len());
-                if i == 0 {
-                    let _ = write!(out, "\x1b_Ga=t,f=32,s={w},v={h},i={id},q=2,m={more};");
-                } else {
-                    let _ = write!(out, "\x1b_Gm={more};");
-                }
-                out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
-                out.push_str("\x1b\\");
-            }
+    let (w, h) = (r.width as u32 * cw, r.height as u32 * ch);
+    if app.band_uploaded.is_none_or(|(uw, uh)| w > uw || h > uh) {
+        let area = app.grid_area;
+        let (uw, uh) = ((area.width as u32 * cw).max(w), (area.height as u32 * ch).max(h));
+        if let Some((size, data)) = &app.band_upload
+            && *size == (uw, uh)
+        {
+            out.push_str(data);
+            app.band_uploaded = Some((uw, uh));
         }
-        app.band_uploaded = true;
+    }
+    if app.band_uploaded.is_none_or(|(uw, uh)| w > uw || h > uh) {
+        let area = app.grid_area;
+        let (uw, uh) = ((area.width as u32 * cw).max(w), (area.height as u32 * ch).max(h));
+        let mut data = String::new();
+        let fill = [color.0, color.1, color.2, 70];
+        let line = [color.0, color.1, color.2, 255];
+        let images: [(u32, u32, [u8; 4]); 5] = [
+            (uw, uh, fill),
+            (uw, 1, line),
+            (uw, 1, line),
+            (1, uh, line),
+            (1, uh, line),
+        ];
+        for (id, (iw, ih, px)) in BAND_IDS.iter().zip(images) {
+            upload_uniform(&mut data, *id, iw, ih, px);
+        }
+        out.push_str(&data);
+        app.band_upload = Some(((uw, uh), data));
+        app.band_uploaded = Some((uw, uh));
     }
     let (right, bottom) = (r.right() - 1, r.bottom() - 1);
     let places = [
-        (BAND_IDS[0], r.x, r.y, r.width, r.height),
-        (BAND_IDS[1], r.x, r.y, r.width, 1),
-        (BAND_IDS[2], r.x, bottom, r.width, 1),
-        (BAND_IDS[3], r.x, r.y, 1, r.height),
-        (BAND_IDS[4], right, r.y, 1, r.height),
+        (BAND_IDS[0], r.x, r.y, 0, 0, w, h),
+        (BAND_IDS[1], r.x, r.y, 0, 0, w, 1),
+        (BAND_IDS[2], r.x, bottom, 0, ch - 1, w, 1),
+        (BAND_IDS[3], r.x, r.y, 0, 0, 1, h),
+        (BAND_IDS[4], right, r.y, cw - 1, 0, 1, h),
     ];
     out.push_str("\x1b7");
-    for (id, x, y, c, rows) in places {
-        let _ = write!(out, "\x1b[{};{}H\x1b_Ga=p,i={id},p=1,c={c},r={rows},z={Z_FIELD},C=1,q=2\x1b\\", y + 1, x + 1);
+    for (id, x, y, xo, yo, sw, sh) in places {
+        let _ = write!(out, "\x1b[{};{}H\x1b_Ga=p,i={id},p=1,w={sw},h={sh},X={xo},Y={yo},z={Z_FIELD},C=1,q=2\x1b\\", y + 1, x + 1);
     }
     out.push_str("\x1b8");
     app.post_draw.push(out);
     app.band_shown = rect;
     true
+}
+
+/// Transmit (without placing) a `w`×`h` image of one color, zlib-compressed.
+fn upload_uniform(out: &mut String, id: u32, w: u32, h: u32, px: [u8; 4]) {
+    use std::io::Write as _;
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let row: Vec<u8> = px.iter().copied().cycle().take(w as usize * 4).collect();
+    for _ in 0..h {
+        let _ = z.write_all(&row);
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(z.finish().unwrap_or_default());
+    let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let more = u8::from(i + 1 < chunks.len());
+        if i == 0 {
+            let _ = write!(out, "\x1b_Ga=t,f=32,o=z,s={w},v={h},i={id},q=2,m={more};");
+        } else {
+            let _ = write!(out, "\x1b_Gm={more};");
+        }
+        out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
+        out.push_str("\x1b\\");
+    }
 }
 
 /// A rounded bar at pixel geometry (x, y, w, h), under the text.
@@ -282,5 +310,7 @@ fn rounded_alpha(x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     let d = (dx * dx + dy * dy).sqrt();
     (r - d + 0.5).clamp(0.0, 1.0)
 }
+
+
 
 
