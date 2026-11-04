@@ -135,6 +135,13 @@ fn run(
 
         // Render frame
         terminal.draw(|f| ui::render(f, app))?;
+        if !app.post_draw.is_empty() {
+            let mut out = std::io::stdout().lock();
+            for s in app.post_draw.drain(..) {
+                let _ = out.write_all(s.as_bytes());
+            }
+            let _ = out.flush();
+        }
 
         // Clean up Kitty placements for images that vanished or changed
         // this frame (occluded by overlays, scrolled away, dir changed, ...)

@@ -17,6 +17,41 @@ pub fn delete_at(out: &mut impl Write, rects: &[Rect]) -> std::io::Result<()> {
 }
 
 /// Delete every visible placement (bulk changes: navigation, view switch, resize).
+/// Kitty text sizing protocol (OSC 66): write `text` at normal size,
+/// vertically centered in a block `rows` tall, at cell (`x`, `y`). Returns
+/// the escape sequence (cursor move, colors, text) and the columns used;
+/// the caller marks those cells as skipped so ratatui leaves them alone.
+/// Each block holds at most 7*rows columns, so long text is chunked.
+pub fn centered_text(
+    x: u16, y: u16, rows: u16, max_w: u16, text: &str,
+    fg: (u8, u8, u8), bg: Option<(u8, u8, u8)>,
+) -> (String, u16) {
+    use std::fmt::Write;
+    let rows = rows.clamp(1, 7);
+    let mut out = format!("\x1b[{};{}H\x1b[38;2;{};{};{}m", y + 1, x + 1, fg.0, fg.1, fg.2);
+    match bg {
+        Some((r, g, b)) => { let _ = write!(out, "\x1b[48;2;{r};{g};{b}m"); }
+        None => out.push_str("\x1b[49m"),
+    }
+    let mut chars: &[char] = &text.chars().filter(|c| !c.is_control()).collect::<Vec<_>>();
+    let mut used = 0u16;
+    while !chars.is_empty() {
+        // Block width is rows * w columns: take what fits, rounding up
+        let room = ((max_w - used) / rows).min(7) as usize * rows as usize;
+        let n = chars.len().min(room);
+        if n == 0 {
+            break;
+        }
+        let w = (n as u16).div_ceil(rows);
+        let chunk: String = chars[..n].iter().collect();
+        let _ = write!(out, "\x1b]66;s={rows}:w={w}:n=1:d={rows}:v=2;{chunk}\x07");
+        used += w * rows;
+        chars = &chars[n..];
+    }
+    out.push_str("\x1b[0m");
+    (out, used)
+}
+
 pub fn delete_all(out: &mut impl Write) -> std::io::Result<()> {
     write!(out, "\x1b_Ga=d\x1b\\")?;
     out.flush()
@@ -104,3 +139,17 @@ static DIACRITICS: [char; 297] = [
     '\u{1D244}',
 ];
 
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn centered_text_chunks_to_fit() {
+        let (s, used) = super::centered_text(0, 0, 2, 20, "A very long place name", (0, 0, 0), None);
+        assert_eq!(used, 20);
+        assert!(s.contains("w=7:n=1:d=2:v=2;A very long pl\x07"));
+        assert!(s.contains("w=3:n=1:d=2:v=2;ace na\x07"));
+        let (_, used) = super::centered_text(0, 0, 2, 20, "Home", (0, 0, 0), None);
+        assert_eq!(used, 4);
+    }
+}

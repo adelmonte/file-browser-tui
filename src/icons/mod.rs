@@ -50,7 +50,7 @@ pub struct Fit {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum VAlign {
-    Top,
+    Center,
     /// Resting on the bottom edge (right above a label).
     Bottom,
 }
@@ -91,7 +91,7 @@ pub fn fit_to_cells(
     let mut canvas = image::RgbaImage::from_pixel(box_w, box_h, fill);
     let x = (box_w - fitted.width()) / 2;
     let y = match fit.valign {
-        VAlign::Top => 0,
+        VAlign::Center => (box_h - fitted.height()) / 2,
         VAlign::Bottom => box_h - fitted.height(),
     };
     image::imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);

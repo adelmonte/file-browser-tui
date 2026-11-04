@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    buffer::CellDiffOption,
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -13,10 +14,11 @@ use crate::app::App;
 use crate::events::SidebarTarget;
 use crate::ui::{kitty, theme};
 
-/// Rows per place: the name on the first, the icon beside it reaching into
-/// the second (where a device's usage bar goes).
+/// Rows per place. On Kitty the name is centered across both (text sizing
+/// protocol); elsewhere it sits on the first. A device's usage bar goes on
+/// the second, under its name.
 const ITEM_H: u16 = 2;
-/// Icon height in rows, top-aligned in the item.
+/// Icon height in rows, centered in the item.
 pub const ICON_ROWS: f32 = 1.4;
 
 /// Places panel in Dolphin's layout: muted section headers, a theme icon
@@ -77,6 +79,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let font = app.picker.font_size();
+    let kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let icon_w = (ICON_ROWS * font.height as f32 / font.width.max(1) as f32).ceil() as u16;
     // Roomy rows when they fit, tighter ones on short terminals
     let fixed: u16 = sections.iter().map(|(_, r)| r.iter().filter(|r| r.usage.is_some()).count() as u16).sum::<u16>()
@@ -118,14 +121,29 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             if let Some(c) = bg {
                 f.render_widget(Block::default().style(Style::default().bg(theme::rgb(c))), rect);
             }
-            let fg = if row.dim { theme::MUTED } else if row.current { Color::White } else { theme::TEXT };
+            let fg = if row.dim { theme::MUTED_RGB } else if row.current { (255, 255, 255) } else { theme::TEXT_RGB };
 
             draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: icon_w, height: h }, bg);
             let text_x = inner.x + 1 + icon_w + 1;
             let text_w = (inner.x + width).saturating_sub(text_x + 1);
             let name: String = row.name.chars().take(text_w as usize).collect();
             let name_y = y;
-            f.render_widget(Paragraph::new(Span::styled(name, Style::default().fg(fg))), Rect { x: text_x, y: name_y, width: text_w, height: 1 });
+            if kitty && h > 1 && row.usage.is_none() {
+                // Kitty can center normal-size text across both rows
+                let (seq, used) = kitty::centered_text(text_x, y, h, text_w, &name, fg, bg);
+                let buf = f.buffer_mut();
+                for cy in y..y + h {
+                    for cx in text_x..text_x + used {
+                        buf[(cx, cy)].set_symbol(" ").set_diff_option(CellDiffOption::Skip);
+                    }
+                }
+                app.post_draw.push(seq);
+            } else {
+                f.render_widget(
+                    Paragraph::new(Span::styled(name, Style::default().fg(theme::rgb(fg)))),
+                    Rect { x: text_x, y: name_y, width: text_w, height: 1 },
+                );
+            }
 
             if let Some(usage) = row.usage {
                 f.render_widget(Paragraph::new(usage_bar(usage, text_w)), Rect { x: text_x, y: name_y + 1, width: text_w, height: 1 });

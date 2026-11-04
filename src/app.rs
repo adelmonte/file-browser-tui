@@ -207,6 +207,9 @@ pub struct App {
     // Kitty graphics bookkeeping
     /// Image uploads lifted out of placeholder cells, written before the frame.
     pub kitty_transmits: Vec<String>,
+    /// Raw output written after ratatui flushes a frame (Kitty multicell
+    /// text, which ratatui can't express).
+    pub post_draw: Vec<String>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -280,7 +283,7 @@ impl App {
                 .with_fit(crate::icons::Fit {
                     max_h: 1.0,
                     max_rows: crate::ui::sidebar::ICON_ROWS,
-                    valign: crate::icons::VAlign::Top,
+                    valign: crate::icons::VAlign::Center,
                 }),
             mouse_pos: None,
             places,
@@ -317,6 +320,7 @@ impl App {
             config,
             dirstates,
             kitty_transmits: Vec::new(),
+            post_draw: Vec::new(),
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,

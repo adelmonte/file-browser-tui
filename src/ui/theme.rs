@@ -27,10 +27,12 @@ pub const INPUT_BG: Color = rgb(INPUT);
 pub const BORDER: Color = rgb(NORD3);
 /// Secondary text: dimmer than the body text but readable on dark and
 /// translucent terminal backgrounds (nord3 is too dark for text).
-pub const MUTED: Color = Color::Rgb(150, 160, 180);
+pub const MUTED_RGB: (u8, u8, u8) = (150, 160, 180);
+pub const MUTED: Color = rgb(MUTED_RGB);
 /// Section headers and column titles.
 pub const ACCENT: Color = rgb(NORD8);
 pub const SEL_BG: Color = rgb(SEL);
 pub const HOVER_BG: Color = rgb(HOVER);
 /// Body text (nord4).
-pub const TEXT: Color = Color::Rgb(216, 222, 233);
+pub const TEXT_RGB: (u8, u8, u8) = (216, 222, 233);
+pub const TEXT: Color = rgb(TEXT_RGB);
