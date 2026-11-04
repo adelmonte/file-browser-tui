@@ -241,7 +241,7 @@ pub(crate) fn render_cell_image(
 
     if drew {
         app.frame_images.insert(entry_path, (icon_rect, bg));
-    } else {
+    } else if std::time::Instant::now() >= app.icons_grace_until {
         // Placeholder nerd font icon, centered in the cell
         let entry = &app.listing.entries[entry_idx];
         let placeholder = if entry.is_dir {

@@ -225,6 +225,9 @@ pub struct App {
     prev_frame_images: HashMap<PathBuf, FrameImage>,
     /// Request a bulk placement wipe after the next draw.
     pub kitty_delete_all: bool,
+    /// Until then, icons still loading show nothing rather than a glyph
+    /// that would flash for a few frames.
+    pub icons_grace_until: std::time::Instant,
 }
 
 impl App {
@@ -339,6 +342,7 @@ impl App {
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
+            icons_grace_until: std::time::Instant::now(),
         };
         app.apply_dir_state();
         app.reload_dir();
@@ -363,6 +367,7 @@ impl App {
             listing.entries = self.with_expanded(listing.entries, 0);
         }
         self.dir_counts.clear();
+        self.icons_grace_until = std::time::Instant::now() + std::time::Duration::from_millis(300);
 
         // Mime types are only resolved once per path; restore them so media
         // entries keep showing thumbnails instead of generic icons.
