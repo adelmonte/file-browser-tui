@@ -101,6 +101,11 @@ pub fn highlight(app: &mut App, slot: u32, rect: Rect, inset_x: u32, inset_y: u3
     })
 }
 
+/// A rounded bar at pixel geometry (x, y, w, h), under the text.
+pub fn bar(app: &mut App, slot: u32, (x, y, w, h): (u32, u32, u32, u32), color: (u8, u8, u8)) -> bool {
+    place(app, slot, Placed { x, y, w, h, radius: w / 2, fill: color, border: None, z: -1 })
+}
+
 fn place(app: &mut App, slot: u32, want: Placed) -> bool {
     use ratatui_image::picker::ProtocolType;
     if app.picker.protocol_type() != ProtocolType::Kitty || want.w == 0 || want.h == 0 {

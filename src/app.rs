@@ -122,6 +122,8 @@ pub struct App {
     pub show_groups: bool,
     /// Details lines (headers and entries) as last laid out.
     pub details_rows: Vec<crate::ui::groups::DRow>,
+    pub scrollbar: Option<crate::ui::scrollbar::Geom>,
+    pub scrollbar_dragging: bool,
 
     // Icon zoom (index into ICON_LEVELS) and the grid geometry it implies
     pub icon_size_idx: usize,
@@ -298,6 +300,8 @@ impl App {
             folders_first: config.folders_first,
             show_groups: config.show_in_groups,
             details_rows: Vec::new(),
+            scrollbar: None,
+            scrollbar_dragging: false,
             icon_size_idx,
             img_w,
             cell_w,

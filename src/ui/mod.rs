@@ -2,6 +2,7 @@ pub mod compact;
 pub mod details;
 pub mod drag_ghost;
 pub mod groups;
+pub mod scrollbar;
 pub mod grid;
 pub mod help;
 pub mod kitty;
@@ -69,6 +70,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ViewMode::Compact => compact::render_compact(f, app, main_area),
         ViewMode::Details => details::render_details(f, app, main_area),
     }
+    scrollbar::render(f, app, main_area);
 
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {

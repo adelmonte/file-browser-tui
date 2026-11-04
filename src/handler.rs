@@ -360,6 +360,12 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 return;
             }
 
+            if app.menu.is_none() && crate::ui::scrollbar::hit(app, col, row) {
+                app.scrollbar_dragging = true;
+                crate::ui::scrollbar::scroll_to(app, row);
+                return;
+            }
+
             // Open menu consumes all clicks (outside click just closes it)
             if app.menu.is_some() {
                 let mut m = app.menu.take().unwrap();
@@ -485,6 +491,11 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
         }
 
         MouseEventKind::Drag(MouseButton::Left) => {
+            if app.scrollbar_dragging {
+                crate::ui::scrollbar::scroll_to(app, row);
+                return;
+            }
+
             // Sidebar resize drag
             if app.sidebar_dragging {
                 app.sidebar_w = col.clamp(8, 50) + 1;
@@ -535,6 +546,9 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::Up(MouseButton::Left) => {
             app.sidebar_dragging = false;
+            if std::mem::take(&mut app.scrollbar_dragging) {
+                return;
+            }
             if let Some(drag) = app.place_drag.take() {
                 if !drag.active {
                     if let Some(p) = app.places.get(drag.from).map(|p| std::path::PathBuf::from(&p.path))
