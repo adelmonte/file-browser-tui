@@ -27,3 +27,4 @@ md5 = "0.8.0"
 png = "0.18"
 unicode-width = "0.2"
 base64 = "0.22"
+zip = { version = "9.3.0", default-features = false, features = ["deflate"] }

@@ -235,8 +235,8 @@ pub(crate) fn render_cell_image(
 
     let entry_path = app.listing.entries[entry_idx].path.clone();
     let is_media = app.listing.entries[entry_idx].mime_type.as_deref()
-        .map(|m| m.starts_with("image/") || m.starts_with("video/"))
-        .unwrap_or(false);
+        .is_some_and(|m| app.previews.covers(m))
+        && !app.thumb_cache.failed(&entry_path);
 
     let (cols, rows) = (icon_rect.width, icon_rect.height);
 

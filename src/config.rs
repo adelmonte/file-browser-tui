@@ -33,6 +33,14 @@ pub struct Config {
     /// Show previews of a folder's images/videos on its icon, Dolphin-style.
     #[serde(default = "default_true")]
     pub folder_previews: bool,
+    /// Which file types show a preview of their content, by Dolphin's
+    /// thumbnailer plugin names: imagethumbnail, jpegthumbnail,
+    /// svgthumbnail, ffmpegthumbs (video), audiothumbnail (album art),
+    /// ebookthumbnail (EPUB covers), opendocumentthumbnail,
+    /// comicbookthumbnail (CBZ), gsthumbnail (PDF first page, needs
+    /// pdftoppm). Unset: follow Dolphin's own setting, or its defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_plugins: Option<Vec<String>>,
     /// Set when the on-disk config failed to parse, so we never overwrite it.
     #[serde(skip)]
     read_only: bool,
@@ -124,6 +132,7 @@ impl Default for Config {
             folder_icons: HashMap::new(),
             context_menu: ContextMenuConfig::default(),
             folder_previews: true,
+            preview_plugins: None,
             read_only: false,
         }
     }

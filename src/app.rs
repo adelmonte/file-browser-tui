@@ -133,6 +133,7 @@ pub struct App {
     pub picker: Picker,
     pub icon_cache: IconCache,
     pub thumb_cache: ThumbCache,
+    pub previews: crate::thumbs::Previews,
 
     // Background event channels
     pub dir_event_rx: mpsc::Receiver<DirEvent>,
@@ -298,6 +299,7 @@ impl App {
             picker,
             icon_cache: IconCache::new(config.folder_previews),
             thumb_cache: ThumbCache::new(),
+            previews: crate::thumbs::Previews::new(&config),
             dir_event_rx,
             mount_event_rx,
             kdeconnect_rx,
@@ -708,9 +710,8 @@ impl App {
         for i in start..end {
             let entry = &self.listing.entries[i];
             let mime = entry.mime_type.clone();
-            let is_media = mime.as_deref()
-                .map(|m| m.starts_with("image/") || m.starts_with("video/"))
-                .unwrap_or(false);
+            let is_media = mime.as_deref().is_some_and(|m| self.previews.covers(m))
+                && !self.thumb_cache.failed(&entry.path);
 
             if is_media {
                 if let Some(ref mime_type) = mime {

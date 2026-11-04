@@ -14,7 +14,8 @@ use crate::icons::{GRID_FIT, fit_to_cells};
 
 pub struct ThumbReady {
     pub path: PathBuf,
-    pub image: image::DynamicImage,
+    /// None when no thumbnail could be made (the file shows its icon).
+    pub image: Option<image::DynamicImage>,
 }
 
 struct ThumbRequest {
@@ -30,6 +31,7 @@ pub struct ThumbCache {
     tx_work: mpsc::SyncSender<ThumbRequest>,
     rx_image: mpsc::Receiver<ThumbReady>,
     pending: HashSet<PathBuf>,
+    failed: HashSet<PathBuf>,
 }
 
 impl ThumbCache {
@@ -41,10 +43,10 @@ impl ThumbCache {
             while let Ok(req) = rx_work.recv() {
                 let tx = tx_image.clone();
                 rayon::spawn(move || {
-                    match generate_or_load_thumb(&req.path, &req.mime_type) {
-                        Ok(img) => { let _ = tx.send(ThumbReady { path: req.path, image: img }); }
-                        Err(e) => tracing::debug!("thumb {:?}: {e}", req.path),
-                    }
+                    let image = generate_or_load_thumb(&req.path, &req.mime_type)
+                        .map_err(|e| tracing::debug!("thumb {:?}: {e}", req.path))
+                        .ok();
+                    let _ = tx.send(ThumbReady { path: req.path, image });
                 });
             }
         });
@@ -55,11 +57,17 @@ impl ThumbCache {
             tx_work,
             rx_image,
             pending: HashSet::new(),
+            failed: HashSet::new(),
         }
     }
 
+    /// Whether making a thumbnail for this path already failed.
+    pub fn failed(&self, path: &Path) -> bool {
+        self.failed.contains(path)
+    }
+
     pub fn request(&mut self, path: &Path, mime_type: &str) {
-        if self.images.contains(path) || self.pending.contains(path) {
+        if self.images.contains(path) || self.pending.contains(path) || self.failed.contains(path) {
             return;
         }
         let req = ThumbRequest { path: path.to_path_buf(), mime_type: mime_type.to_string() };
@@ -72,7 +80,10 @@ impl ThumbCache {
     pub fn drain_ready(&mut self) {
         while let Ok(ready) = self.rx_image.try_recv() {
             self.pending.remove(&ready.path);
-            self.images.put(ready.path, ready.image);
+            match ready.image {
+                Some(img) => { self.images.put(ready.path, img); }
+                None => { self.failed.insert(ready.path); }
+            }
         }
     }
 
@@ -167,6 +178,58 @@ fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u6
     Ok(())
 }
 
+/// Enabled preview plugins (Dolphin's names, see `Config::preview_plugins`).
+pub struct Previews(HashSet<String>);
+
+/// Dolphin's defaults when it has never been configured.
+const DEFAULT_PLUGINS: &[&str] = &[
+    "imagethumbnail", "jpegthumbnail", "svgthumbnail", "ffmpegthumbs",
+    "audiothumbnail", "ebookthumbnail", "opendocumentthumbnail", "comicbookthumbnail",
+];
+
+impl Previews {
+    pub fn new(config: &crate::config::Config) -> Self {
+        let names: Vec<String> = config.preview_plugins.clone()
+            .or_else(dolphin_plugins)
+            .unwrap_or_else(|| DEFAULT_PLUGINS.iter().map(|s| s.to_string()).collect());
+        Self(names.into_iter().collect())
+    }
+
+    fn on(&self, plugin: &str) -> bool {
+        self.0.contains(plugin)
+    }
+
+    /// Whether files of this type are shown as a thumbnail of their content.
+    pub fn covers(&self, mime: &str) -> bool {
+        match mime {
+            "image/svg+xml" | "image/svg+xml-compressed" => self.on("svgthumbnail"),
+            "image/jpeg" => self.on("jpegthumbnail") || self.on("imagethumbnail"),
+            "application/epub+zip" => self.on("ebookthumbnail"),
+            "application/pdf" => self.on("gsthumbnail"),
+            "application/vnd.comicbook+zip" => self.on("comicbookthumbnail"),
+            m if m.starts_with("image/") => self.on("imagethumbnail"),
+            m if m.starts_with("video/") => self.on("ffmpegthumbs"),
+            m if m.starts_with("audio/") => self.on("audiothumbnail"),
+            m if m.starts_with("application/vnd.oasis.opendocument.") => self.on("opendocumentthumbnail"),
+            _ => false,
+        }
+    }
+}
+
+/// `[PreviewSettings] Plugins=` from dolphinrc, if Dolphin was configured.
+fn dolphin_plugins() -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(dirs::config_dir()?.join("dolphinrc")).ok()?;
+    let mut in_section = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_section = line == "[PreviewSettings]";
+        } else if in_section && let Some(v) = line.strip_prefix("Plugins=") {
+            return Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+        }
+    }
+    None
+}
+
 pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
     let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let uri = file_uri(&abs);
@@ -194,8 +257,20 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
 
     let img = if mime_type.starts_with("video/") {
         generator::video_thumb(&abs, &tmp)?
+    } else if mime_type.starts_with("image/svg") {
+        crate::icons::raster::load_icon(&abs, true, 256)?
     } else if mime_type.starts_with("image/") {
         generator::image_thumb(&abs)?
+    } else if mime_type.starts_with("audio/") {
+        generator::audio_thumb(&abs, &tmp)?
+    } else if mime_type == "application/epub+zip" {
+        generator::epub_thumb(&abs)?
+    } else if mime_type == "application/pdf" {
+        generator::pdf_thumb(&abs, &tmp)?
+    } else if mime_type == "application/vnd.comicbook+zip" {
+        generator::comic_thumb(&abs)?
+    } else if mime_type.starts_with("application/vnd.oasis.opendocument.") {
+        generator::opendocument_thumb(&abs)?
     } else {
         anyhow::bail!("no thumbnailer for {mime_type}");
     };
@@ -204,4 +279,5 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
     std::fs::rename(&tmp, &thumb_path)?;
     Ok(img)
 }
+
 
