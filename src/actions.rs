@@ -222,9 +222,26 @@ pub fn selected_paths(app: &App) -> Vec<PathBuf> {
 
 pub fn clip_selection(app: &mut App, op: ClipOp) {
     let paths = selected_paths(app);
-    if !paths.is_empty() {
-        app.clipboard = Some(Clipboard { paths, op });
+    if paths.is_empty() {
+        return;
     }
+    // Also on the system clipboard, so other apps can paste the files
+    let list: String = paths.iter().map(|p| crate::thumbs::file_uri(p) + "\r\n").collect();
+    if let Ok(mut child) = Command::new("wl-copy")
+        .args(["-t", "text/uri-list"])
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
+        .spawn()
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        let _ = stdin.write_all(list.as_bytes());
+    }
+    let n = paths.len();
+    let what = if n == 1 { "1 item".to_string() } else { format!("{n} items") };
+    app.notify(match op {
+        ClipOp::Copy => format!("Copied {what}"),
+        ClipOp::Cut => format!("Cut {what}"),
+    });
+    app.clipboard = Some(Clipboard { paths, op });
 }
 
 /// The system clipboard's MIME types (empty when there's nothing or no
@@ -248,7 +265,17 @@ fn wl_paste(args: &[&str]) -> Option<Vec<u8>> {
 /// files, else its image or text after asking for a file name (Dolphin's
 /// "Paste Clipboard Contents").
 pub fn paste_clipboard(app: &mut App, dest: &Path) {
-    if app.clipboard.is_none() {
+    // Ours only while the system clipboard still holds it (or can't be
+    // read): something copied elsewhere since then wins
+    let ours = app.clipboard.as_ref().is_some_and(|clip| {
+        let types = system_clipboard_types();
+        types.is_empty()
+            || wl_paste(&["-t", "text/uri-list"])
+                .map(|l| crate::dnd::parse_uri_list(&String::from_utf8_lossy(&l)))
+                .is_some_and(|paths| paths == clip.paths)
+    });
+    if !ours {
+        app.clipboard = None;
         paste_system(app, dest);
         return;
     }
@@ -541,5 +568,6 @@ fn spawn_detached(bin: &str, args: &[&std::ffi::OsStr]) {
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn();
 }
+
 
 

@@ -99,9 +99,7 @@ fn total_scroll_rows(app: &App) -> usize {
 
 pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     // Global quit — works regardless of any modal state
-    if ev.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(ev.code, KeyCode::Char('c') | KeyCode::Char('q'))
-    {
+    if ev.modifiers.contains(KeyModifiers::CONTROL) && ev.code == KeyCode::Char('q') {
         return true;
     }
 
