@@ -76,7 +76,9 @@ pub const DEFAULT_ICON_LEVEL: usize = 3;
 pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16, u16) {
     let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
     let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
-    let img_w = ((rows as f32 * fh / fw).round() as u16).max(2);
+    // Only as wide as the image actually drawn (GRID_FIT shrinks it to
+    // leave a gap above), or every cell carries invisible width
+    let img_w = ((rows as f32 * fh / fw * crate::icons::GRID_FIT.max_h).round() as u16).max(2);
     let cell_w = (img_w + 2).max(8);
     let icon_rows = rows;
     (cell_w, icon_rows + 2, icon_rows, img_w)
@@ -1044,4 +1046,5 @@ fn free_space(path: &std::path::Path) -> Option<u64> {
     let st = nix::sys::statvfs::statvfs(path).ok()?;
     Some(st.blocks_available() as u64 * st.fragment_size() as u64)
 }
+
 
