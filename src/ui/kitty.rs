@@ -54,6 +54,16 @@ pub fn centered_text(
     (out, used)
 }
 
+/// Columns `centered_text` needs for `chars` characters at `rows` tall
+/// (each chunk keeps a spare column).
+pub fn centered_width(chars: usize, rows: u16) -> u16 {
+    let rows = rows.clamp(1, 7);
+    let per = (7 * rows - 1) as usize;
+    let (full, rest) = (chars / per, chars % per);
+    let last = if rest == 0 { 0 } else { (rest as u16 + 1).div_ceil(rows) * rows };
+    full as u16 * 7 * rows + last
+}
+
 pub fn delete_all(out: &mut impl Write) -> std::io::Result<()> {
     write!(out, "\x1b_Ga=d\x1b\\")?;
     out.flush()

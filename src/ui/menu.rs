@@ -410,11 +410,20 @@ fn item_rows(rect: Rect, items: &[MenuItem], tall: bool) -> Vec<(u16, u16)> {
 
 fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
-        .map(|i| i.label.chars().count() + if i.submenu.is_empty() { 0 } else { 2 })
+        .map(|i| {
+            let arrow = if i.submenu.is_empty() { 0 } else { 2 };
+            if tall {
+                // Centered text: leading (icon) spaces, then the chunks
+                // kitty::centered_text lays out, each with a spare column
+                let label = i.label.trim_start();
+                let lead = (i.label.chars().count() - label.chars().count()) as u16;
+                lead + kitty::centered_width(label.chars().count(), item_h(i, tall)) + arrow
+            } else {
+                i.label.chars().count() as u16 + arrow
+            }
+        })
         .max()
-        .unwrap_or(8) as u16 + 4
-        // Centered text fills two columns at a time and keeps one spare
-        + if tall { 2 } else { 0 };
+        .unwrap_or(8) + 4;
     let h = items.iter().map(|i| item_h(i, tall)).sum::<u16>() + 2 * top(tall);
     (w, h)
 }
@@ -715,17 +724,25 @@ pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcom
 pub fn handle_menu_hover(menu: &mut MenuState, col: u16, row: u16) {
     if menu.submenu_open {
         let sub = &menu.items[menu.selected].submenu;
-        if let Some(idx) = item_at(menu.submenu_rect, sub, menu.tall, col, row)
-            && sub[idx].selectable() {
+        if let Some(idx) = item_at(menu.submenu_rect, sub, menu.tall, col, row) {
+            if sub[idx].selectable() {
                 menu.submenu_selected = idx;
             }
+            return;
+        }
+    }
+    // Over the parent: like Qt, a submenu item opens its submenu and any
+    // other item closes it
+    let Some(idx) = item_at(menu.rect, &menu.items, menu.tall, col, row) else { return; };
+    if !menu.items[idx].selectable() || (menu.submenu_open && idx == menu.selected) {
         return;
     }
-    let items = menu.items.clone();
-    if let Some(idx) = item_at(menu.rect, &items, menu.tall, col, row)
-        && items[idx].selectable() {
-            menu.selected = idx;
-        }
+    menu.selected = idx;
+    if menu.items[idx].submenu.is_empty() {
+        menu.submenu_open = false;
+    } else {
+        open_submenu(menu);
+    }
 }
 
 #[cfg(test)]
@@ -745,5 +762,22 @@ mod tests {
         assert_eq!(hits, vec![Some(0), Some(0), Some(1), Some(2), Some(2)]);
         assert_eq!(item_at(rect, &items, false, 12, 5), None);
         assert_eq!(item_at(rect, &items, false, 12, 6), Some(0));
+    }
+
+    #[test]
+    fn tall_width_fits_label() {
+        let label = "Set as Wallpaper (swaybg)";
+        let items = vec![MenuItem::new(label, MenuAction::None)];
+        let (w, _) = menu_size(&items, true);
+        let rect = Rect { x: 0, y: 0, width: w, height: 2 };
+        let avail = rect.right() - 2 - (rect.x + 2);
+        let (_, used) = kitty::centered_text(2, 0, 2, avail, label, (0, 0, 0), None);
+        let (_, all) = kitty::centered_text(2, 0, 2, 200, label, (0, 0, 0), None);
+        assert_eq!(used, all);
+        assert_eq!(kitty::centered_width(label.chars().count(), 2), all);
+        for n in 1..60 {
+            let text: String = "x".repeat(n);
+            assert_eq!(kitty::centered_width(n, 2), kitty::centered_text(0, 0, 2, 500, &text, (0, 0, 0), None).1, "{n}");
+        }
     }
 }
