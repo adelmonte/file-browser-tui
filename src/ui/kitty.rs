@@ -36,13 +36,14 @@ pub fn centered_text(
     let mut chars: &[char] = &text.chars().filter(|c| !c.is_control()).collect::<Vec<_>>();
     let mut used = 0u16;
     while !chars.is_empty() {
-        // Block width is rows * w columns: take what fits, rounding up
-        let room = ((max_w - used) / rows).min(7) as usize * rows as usize;
+        // Block width is rows * w columns. Kitty sets the text a hair wider
+        // than normal cells, so keep a spare column or the last glyph clips
+        let room = (((max_w - used) / rows).min(7) * rows).saturating_sub(1) as usize;
         let n = chars.len().min(room);
         if n == 0 {
             break;
         }
-        let w = (n as u16).div_ceil(rows);
+        let w = (n as u16 + 1).div_ceil(rows);
         let chunk: String = chars[..n].iter().collect();
         let _ = write!(out, "\x1b]66;s={rows}:w={w}:n=1:d={rows}:v=2;{chunk}\x07");
         used += w * rows;
@@ -50,45 +51,6 @@ pub fn centered_text(
     }
     out.push_str("\x1b[0m");
     (out, used)
-}
-
-/// Draw one end cell of a text field as an image: the field color with
-/// slightly rounded outer corners (a glyph can only do a full half-circle).
-/// Without Kitty graphics the cell is just filled with the color.
-pub fn field_cap(
-    f: &mut ratatui::Frame, app: &mut crate::app::App,
-    key: &'static str, rect: ratatui::layout::Rect, right: bool, color: (u8, u8, u8),
-) {
-    use ratatui::{style::Style, widgets::{Block, Clear}};
-    use ratatui_image::{StatefulImage, picker::ProtocolType};
-
-    let rect = ratatui::layout::Rect { width: 1, height: 1, ..rect };
-    if app.picker.protocol_type() != ProtocolType::Kitty {
-        f.render_widget(Block::default().style(Style::default().bg(crate::ui::theme::rgb(color))), rect);
-        return;
-    }
-    if !app.field_caps.contains_key(&(key, right)) {
-        let font = app.picker.font_size();
-        let (w, h) = (font.width.max(1) as u32, font.height.max(1) as u32);
-        let radius = (h as f32 * 0.22).max(2.0);
-        let img = image::RgbaImage::from_fn(w, h, |x, y| {
-            // Distance into the rounded corner region on the outer side
-            let px = x as f32 + 0.5;
-            let py = y as f32 + 0.5;
-            let cx = if right { w as f32 - radius } else { radius };
-            let dx = if right { (px - cx).max(0.0) } else { (cx - px).max(0.0) };
-            let dy = if py < radius { radius - py } else if py > h as f32 - radius { py - (h as f32 - radius) } else { 0.0 };
-            let d = (dx * dx + dy * dy).sqrt();
-            let alpha = (radius - d + 0.5).clamp(0.0, 1.0);
-            image::Rgba([color.0, color.1, color.2, (alpha * 255.0) as u8])
-        });
-        let proto = app.picker.new_resize_protocol(image::DynamicImage::ImageRgba8(img));
-        app.field_caps.insert((key, right), proto);
-    }
-    let Some(proto) = app.field_caps.get_mut(&(key, right)) else { return; };
-    f.render_widget(Clear, rect);
-    f.render_stateful_widget(StatefulImage::new(), rect, proto);
-    split_placeholder_rows(f.buffer_mut(), rect, &mut app.kitty_transmits);
 }
 
 pub fn delete_all(out: &mut impl Write) -> std::io::Result<()> {
@@ -183,12 +145,12 @@ static DIACRITICS: [char; 297] = [
 #[cfg(test)]
 mod tests {
     #[test]
-    fn centered_text_chunks_to_fit() {
+    fn centered_text_keeps_a_spare_column() {
         let (s, used) = super::centered_text(0, 0, 2, 20, "A very long place name", (0, 0, 0), None);
         assert_eq!(used, 20);
-        assert!(s.contains("w=7:n=1:d=2:v=2;A very long pl\x07"));
-        assert!(s.contains("w=3:n=1:d=2:v=2;ace na\x07"));
-        let (_, used) = super::centered_text(0, 0, 2, 20, "Home", (0, 0, 0), None);
-        assert_eq!(used, 4);
+        assert!(s.contains("w=7:n=1:d=2:v=2;A very long p\x07"));
+        assert!(s.contains("w=3:n=1:d=2:v=2;lace \x07"));
+        let (_, used) = super::centered_text(0, 0, 2, 20, "Pictures", (0, 0, 0), None);
+        assert_eq!(used, 10);
     }
 }
