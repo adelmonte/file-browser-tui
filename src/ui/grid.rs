@@ -78,8 +78,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Square-in-pixels icon box (see app::icon_dims), below one padding row
-    let img_h_cells = icon_rows.saturating_sub(1);
+    // Square-in-pixels icon box (see app::icon_dims)
+    let img_h_cells = icon_rows;
     let img_w_cells = app.img_w.min(cell_w);
     let img_x_off = (cell_w.saturating_sub(img_w_cells)) / 2;
 
@@ -105,10 +105,10 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
             let cell_rect = Rect { x: cell_x, y: cell_y, width: cell_w, height: cell_h };
 
-            // Centered, square-ish image rect (1 row top-padding, padded horizontally)
+            // Centered, square-ish image rect
             let icon_rect = Rect {
                 x: cell_x + img_x_off,
-                y: cell_y + 1,
+                y: cell_y,
                 width: img_w_cells,
                 height: img_h_cells,
             };

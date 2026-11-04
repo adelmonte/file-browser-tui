@@ -27,6 +27,18 @@ struct IconRequest {
     icon_override: Option<String>,
 }
 
+/// How an image sits in its cell box.
+#[derive(Clone, Copy)]
+pub struct Fit {
+    /// Largest image height as a fraction of the box (the rest is margin).
+    pub max_h: f32,
+    /// Center vertically instead of resting on the bottom edge.
+    pub center: bool,
+}
+
+/// Grid items: a small margin above, resting on the label.
+pub const GRID_FIT: Fit = Fit { max_h: 0.88, center: false };
+
 /// Fit `img` into a box of `cols`×`rows` terminal cells and pad it to exactly
 /// that box, centered horizontally and resting on the bottom edge (right
 /// above the label). Image protocols pin a fitted image to the top-left, so
@@ -40,20 +52,22 @@ pub fn fit_to_cells(
     cols: u16,
     rows: u16,
     bg: Option<(u8, u8, u8)>,
+    fit: Fit,
 ) -> image::DynamicImage {
     let font = picker.font_size();
     let (box_w, box_h) = (
         (cols as u32 * font.width as u32).max(1),
         (rows as u32 * font.height as u32).max(1),
     );
-    let fitted = img.resize(box_w, box_h, image::imageops::FilterType::Triangle).to_rgba8();
+    let max_h = ((box_h as f32 * fit.max_h) as u32).max(1);
+    let fitted = img.resize(box_w, max_h, image::imageops::FilterType::Triangle).to_rgba8();
     let fill = match bg {
         Some((r, g, b)) => image::Rgba([r, g, b, 255]),
         None => image::Rgba([0, 0, 0, 0]),
     };
     let mut canvas = image::RgbaImage::from_pixel(box_w, box_h, fill);
     let x = (box_w - fitted.width()) / 2;
-    let y = box_h - fitted.height();
+    let y = if fit.center { (box_h - fitted.height()) / 2 } else { box_h - fitted.height() };
     image::imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);
     image::DynamicImage::ImageRgba8(canvas)
 }
@@ -72,6 +86,7 @@ pub struct IconCache {
     rx_image: mpsc::Receiver<IconImageReady>,
     /// Paths for which a request is already in-flight
     pending: HashSet<PathBuf>,
+    fit: Fit,
 }
 
 impl IconCache {
@@ -122,7 +137,14 @@ impl IconCache {
             tx_work,
             rx_image,
             pending: HashSet::new(),
+            fit: GRID_FIT,
         }
+    }
+
+    /// Use a different placement for this cache's images.
+    pub fn with_fit(mut self, fit: Fit) -> Self {
+        self.fit = fit;
+        self
     }
 
     /// Queue an icon load if not already loaded or pending.
@@ -170,7 +192,7 @@ impl IconCache {
         let key = (path.to_path_buf(), cols, rows, bg);
         if !self.protocols.contains(&key) {
             let img = self.images.get(path)?.as_ref()?;
-            let img = fit_to_cells(img, picker, cols, rows, bg);
+            let img = fit_to_cells(img, picker, cols, rows, bg, self.fit);
             self.protocols.put(key.clone(), picker.new_resize_protocol(img));
         }
         self.protocols.get_mut(&key)

@@ -71,14 +71,14 @@ pub const DEFAULT_ICON_LEVEL: usize = 3;
 /// Grid geometry for a zoom level: (cell_w, cell_h, icon_rows, img_w).
 /// The image is square in pixels, so its width in columns follows the font's
 /// aspect; the cell adds a small margin for labels so neighbours sit close
-/// together, Dolphin-style. icon_rows includes one row of top padding and
-/// two label rows sit below it.
+/// together, Dolphin-style. Two label rows sit below the icon; the gap
+/// above it is a margin inside the image box (see icons::GRID_FIT).
 pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16, u16) {
     let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
     let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
     let img_w = ((rows as f32 * fh / fw).round() as u16).max(2);
     let cell_w = (img_w + 3).max(8);
-    let icon_rows = rows + 1;
+    let icon_rows = rows;
     (cell_w, icon_rows + 2, icon_rows, img_w)
 }
 
@@ -529,7 +529,7 @@ impl App {
     /// Pixel size to render icons at.
     pub fn icon_target_px(&self) -> u32 {
         let fs = self.picker.font_size();
-        let px = fs.height as u32 * (self.icon_rows as u32 - 1);
+        let px = fs.height as u32 * self.icon_rows as u32;
         px.clamp(32, 512)
     }
 

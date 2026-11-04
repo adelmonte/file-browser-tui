@@ -10,7 +10,7 @@ use std::{
 use lru::LruCache;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
-use crate::icons::fit_to_cells;
+use crate::icons::{GRID_FIT, fit_to_cells};
 
 pub struct ThumbReady {
     pub path: PathBuf,
@@ -87,7 +87,7 @@ impl ThumbCache {
         let key = (path.to_path_buf(), cols, rows, bg);
         if !self.protocols.contains(&key) {
             let img = self.images.get(path)?;
-            let img = fit_to_cells(img, picker, cols, rows, bg);
+            let img = fit_to_cells(img, picker, cols, rows, bg, GRID_FIT);
             self.protocols.put(key.clone(), picker.new_resize_protocol(img));
         }
         self.protocols.get_mut(&key)
