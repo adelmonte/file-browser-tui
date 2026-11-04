@@ -137,12 +137,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
 /// The rubber-band rectangle: a translucent box on Kitty, an outline elsewhere.
 fn render_band(f: &mut Frame, app: &mut App) {
-    let Some(((ax, ay), (bx, by), _)) = app.band else { return; };
-    let r = band_rect((ax, ay), (bx, by)).intersection(app.grid_area);
-    if r.width == 0 || r.height == 0 {
-        return;
-    }
-    if !underlay::selection_box(app, 7, r, theme::NORD9) {
+    let r = app.band.as_ref()
+        .map(|&(a, b, _)| band_rect(a, b).intersection(app.grid_area))
+        .filter(|r| r.width > 0 && r.height > 0);
+    if !underlay::selection_band(app, r, theme::NORD9) && let Some(r) = r {
         f.render_widget(
             Block::default().borders(ratatui::widgets::Borders::ALL).border_style(Style::default().fg(theme::rgb(theme::NORD9))),
             r,

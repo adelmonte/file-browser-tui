@@ -249,6 +249,9 @@ pub struct App {
     pub underlays_seen: std::collections::HashSet<u32>,
     /// Underlay slots currently shown under their alternate image id.
     pub underlays_alt: std::collections::HashSet<u32>,
+    /// Rubber band on Kitty: its pieces are uploaded, and where it's shown.
+    pub band_uploaded: bool,
+    pub band_shown: Option<Rect>,
     /// Images rendered this frame, keyed by path.
     pub frame_images: HashMap<PathBuf, FrameImage>,
     prev_frame_images: HashMap<PathBuf, FrameImage>,
@@ -382,6 +385,8 @@ impl App {
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
             underlays_alt: std::collections::HashSet::new(),
+            band_uploaded: false,
+            band_shown: None,
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
@@ -930,6 +935,8 @@ impl App {
         if delete_all {
             // Deleted along with everything else; re-placed next frame
             self.underlays.clear();
+            self.band_uploaded = false;
+            self.band_shown = None;
             self.sidebar_icons.clear_protocols();
             self.icon_cache.clear_protocols();
             self.thumb_cache.clear_protocols();

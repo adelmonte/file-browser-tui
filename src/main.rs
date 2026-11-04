@@ -213,6 +213,7 @@ fn run(
                             // reflow; only direct placements (underlays) are
                             // wiped by the screen clear and must be re-placed
                             app.underlays.clear();
+                            app.band_shown = None;
                         } else {
                             app.icon_cache.clear_protocols();
                             app.sidebar_icons.clear_protocols();
