@@ -8,6 +8,7 @@ pub const NORD8: (u8, u8, u8) = (136, 192, 208);
 pub const NORD9: (u8, u8, u8) = (129, 161, 193);
 pub const NORD11: (u8, u8, u8) = (191, 97, 106);
 pub const NORD14: (u8, u8, u8) = (163, 190, 140);
+pub const NORD13: (u8, u8, u8) = (235, 203, 139);
 /// Selection highlight: 50% blend of nord9 with nord0.
 pub const SEL: (u8, u8, u8) = (88, 107, 128);
 /// Hover highlight: a faint lift, clearly weaker than the selection.

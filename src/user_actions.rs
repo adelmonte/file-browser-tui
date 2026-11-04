@@ -293,7 +293,8 @@ pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice
 
 /// Mount a device's storage over KDE Connect's SFTP plugin and return the
 /// mount point (blocks for up to a few seconds).
-pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Option<PathBuf> {
+/// Mount the phone's storage; Err carries KDE Connect's reason.
+pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
     let object = format!("/modules/kdeconnect/devices/{}/sftp", device.id);
     let call = |method: &str| {
         Command::new("gdbus")
@@ -303,12 +304,15 @@ pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Option<PathBuf> {
             .output().ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     };
-    call("mountAndWait")?;
-    // Reply looks like ('/run/user/1000/<id>',)
-    let out = call("mountPoint")?;
-    let path = out.split('\'').nth(1)?;
-    let path = PathBuf::from(path);
-    path.is_dir().then_some(path)
+    // Replies look like (true,) / ('text',)
+    let text = |out: Option<String>| out.and_then(|o| o.split('\'').nth(1).map(String::from));
+    let mounted = call("mountAndWait").is_some_and(|o| o.contains("true"));
+    if !mounted {
+        let why = text(call("getMountError")).filter(|e| !e.is_empty());
+        return Err(why.unwrap_or_else(|| "couldn't mount the phone".into()));
+    }
+    let path = text(call("mountPoint")).map(PathBuf::from).filter(|p| p.is_dir());
+    path.ok_or_else(|| "phone mounted, but its folder isn't there".into())
 }
 
 pub fn kdeconnect_share(device: &KdeConnectDevice, paths: &[PathBuf]) {

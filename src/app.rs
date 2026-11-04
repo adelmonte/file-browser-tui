@@ -150,7 +150,9 @@ pub struct App {
     pub kdeconnect_devices: Vec<KdeConnectDevice>,
     /// Mount points of phones opened from the sidebar, by device id.
     pub kdeconnect_mounts: HashMap<String, PathBuf>,
-    kdeconnect_mount_rx: Option<mpsc::Receiver<(String, Option<PathBuf>)>>,
+    kdeconnect_mount_rx: Option<mpsc::Receiver<(String, Result<PathBuf, String>)>>,
+    /// A message shown in the status bar until it expires.
+    pub notice: Option<(String, std::time::Instant)>,
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
     pub place_drag: Option<crate::events::PlaceDrag>,
@@ -309,6 +311,7 @@ impl App {
             kdeconnect_devices: Vec::new(),
             kdeconnect_mounts: HashMap::new(),
             kdeconnect_mount_rx: None,
+            notice: None,
             sidebar_icons: IconCache::new(false)
                 .with_fit(crate::icons::Fit {
                     max_h: 1.0,
@@ -577,6 +580,10 @@ impl App {
 
     /// Open a KDE Connect device's storage, mounting it in the background
     /// first (takes a few seconds).
+    pub fn notify(&mut self, text: String) {
+        self.notice = Some((text, std::time::Instant::now() + std::time::Duration::from_secs(8)));
+    }
+
     pub fn open_phone(&mut self, i: usize) {
         let Some(device) = self.kdeconnect_devices.get(i).cloned() else { return; };
         if !device.reachable {
@@ -766,9 +773,12 @@ impl App {
             && let Ok((id, mount)) = rx.try_recv()
         {
             self.kdeconnect_mount_rx = None;
-            if let Some(path) = mount {
-                self.kdeconnect_mounts.insert(id, path.clone());
-                self.navigate_to(path);
+            match mount {
+                Ok(path) => {
+                    self.kdeconnect_mounts.insert(id, path.clone());
+                    self.navigate_to(path);
+                }
+                Err(why) => self.notify(format!("Can't browse the phone: {why}")),
             }
         }
 

@@ -71,6 +71,12 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    if let Some((text, until)) = &app.notice
+        && std::time::Instant::now() < *until
+    {
+        left = vec![Span::raw(" "), Span::styled(text.clone(), Style::default().fg(theme::rgb(theme::NORD13)))];
+    }
+
     let mut right: Vec<Span> = Vec::new();
     if app.show_hidden {
         right.push(Span::styled("hidden files shown", muted));
