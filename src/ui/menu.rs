@@ -407,7 +407,9 @@ fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
         .map(|i| i.label.chars().count() + if i.submenu.is_empty() { 0 } else { 2 })
         .max()
-        .unwrap_or(8) as u16 + 4;
+        .unwrap_or(8) as u16 + 4
+        // Centered text fills two columns at a time and keeps one spare
+        + if tall { 2 } else { 0 };
     let h = items.iter().map(|i| item_h(i, tall)).sum::<u16>() + 2 * top(tall);
     (w, h)
 }
