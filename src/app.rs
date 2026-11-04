@@ -533,7 +533,9 @@ impl App {
         };
         self.folders_first = state.folders_first.unwrap_or(c.folders_first);
         self.show_hidden = state.show_hidden.unwrap_or(c.show_hidden);
-        let idx = state.icon_size_idx.unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
+        // Folders without their own zoom follow the home folder's
+        let home_size = dirs::home_dir().and_then(|h| self.dirstates.get(&h)).and_then(|s| s.icon_size_idx);
+        let idx = state.icon_size_idx.or(home_size).unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
         self.set_icon_size(idx);
     }
 
