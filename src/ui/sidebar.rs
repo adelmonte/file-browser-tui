@@ -19,12 +19,12 @@ use crate::ui::{kitty, theme};
 /// the second, under its name.
 const ITEM_H: u16 = 2;
 /// Icon height in rows, centered in the item.
-pub const ICON_ROWS: f32 = 1.4;
+pub const ICON_ROWS: f32 = 1.65;
 
 /// Places panel in Dolphin's layout: muted section headers, a theme icon
 /// per row, and a usage bar under each device.
 pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
-    let inner = Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(1) };
+    let inner = Rect { x: area.x + 1, y: area.y, width: area.width.saturating_sub(2), height: area.height };
     app.sidebar_area = inner;
 
     // Resize handle: a short grabber mid-height (the whole edge column
