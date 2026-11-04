@@ -233,6 +233,13 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     // Normal navigation. Modifier combos must precede their plain-key arms.
     match ev.code {
         KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::CONTROL) => app.open_search(),
+        KeyCode::Char('a') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
+            let n = app.listing.entries.len();
+            if n > 0 {
+                app.multi_selection = (0..n).collect();
+                app.selection = Some(app.selection.unwrap_or(0).min(n - 1));
+            }
+        }
         KeyCode::Esc if app.search.is_some() => app.close_search(),
         KeyCode::Char('q') | KeyCode::Char('Q')
             if ev.modifiers.difference(KeyModifiers::SHIFT).is_empty() =>
@@ -241,6 +248,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         }
         KeyCode::Esc => {
             app.selection = None;
+            app.multi_selection.clear();
             app.drag_state = DragState::Idle;
         }
 
