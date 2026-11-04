@@ -26,12 +26,14 @@ pub struct Placed {
     fill: (u8, u8, u8),
     border: Option<(u8, u8, u8)>,
     z: i32,
+    /// Fill opacity (the border stays opaque).
+    alpha: u8,
 }
 
 impl Placed {
     /// Same image, possibly elsewhere: only the placement needs moving.
     fn same_image(&self, o: &Placed) -> bool {
-        (self.w, self.h, self.radius, self.fill, self.border, self.z) == (o.w, o.h, o.radius, o.fill, o.border, o.z)
+        (self.w, self.h, self.radius, self.fill, self.border, self.z, self.alpha) == (o.w, o.h, o.radius, o.fill, o.border, o.z, o.alpha)
     }
 }
 
@@ -65,7 +67,7 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
     place(app, slot, Placed {
         x: rect.x as u32 * cw, y: rect.y as u32 * ch - pad,
         w: rect.width as u32 * cw, h: rect.height as u32 * ch + 2 * pad,
-        radius, fill: color, border: None, z: Z_FIELD,
+        radius, fill: color, border: None, z: Z_FIELD, alpha: 255,
     })
 }
 
@@ -79,7 +81,7 @@ pub fn panel(app: &mut App, slot: u32, rect: Rect, fill: (u8, u8, u8), border: (
     place(app, slot, Placed {
         x: rect.x as u32 * cw, y: rect.y as u32 * ch,
         w: rect.width as u32 * cw, h: rect.height as u32 * ch,
-        radius, fill, border: Some(border), z: Z_PANEL,
+        radius, fill, border: Some(border), z: Z_PANEL, alpha: 255,
     })
 }
 
@@ -100,13 +102,23 @@ pub fn highlight(app: &mut App, slot: u32, rect: Rect, inset_x: u32, inset_y: u3
     place(app, slot, Placed {
         x: rect.x as u32 * cw + inset_x, y: rect.y as u32 * ch + inset_y,
         w: w - 2 * inset_x, h: h - 2 * inset_y,
-        radius, fill: color, border: None, z: Z_HIGHLIGHT,
+        radius, fill: color, border: None, z: Z_HIGHLIGHT, alpha: 255,
+    })
+}
+
+/// A translucent selection rectangle with an outline (rubber band).
+pub fn selection_box(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
+    let (cw, ch) = cell(app);
+    place(app, slot, Placed {
+        x: rect.x as u32 * cw, y: rect.y as u32 * ch,
+        w: rect.width as u32 * cw, h: rect.height as u32 * ch,
+        radius: 2, fill: color, border: Some(color), z: Z_FIELD, alpha: 70,
     })
 }
 
 /// A rounded bar at pixel geometry (x, y, w, h), under the text.
 pub fn bar(app: &mut App, slot: u32, (x, y, w, h): (u32, u32, u32, u32), color: (u8, u8, u8)) -> bool {
-    place(app, slot, Placed { x, y, w, h, radius: w / 2, fill: color, border: None, z: -1 })
+    place(app, slot, Placed { x, y, w, h, radius: w / 2, fill: color, border: None, z: -1, alpha: 255 })
 }
 
 fn place(app: &mut App, slot: u32, want: Placed) -> bool {
@@ -121,7 +133,7 @@ fn place(app: &mut App, slot: u32, want: Placed) -> bool {
     }
 
     let (cw, ch) = cell(app);
-    let Placed { x, y, w, h, radius, fill, border, z } = want;
+    let Placed { x, y, w, h, radius, fill, border, z, alpha } = want;
     let id = ID_BASE + slot;
     let (col, row, x_off, y_off) = (x / cw, y / ch, x % cw, y % ch);
     let mut out = format!("\x1b7\x1b[{};{}H", row + 1, col + 1);
@@ -135,16 +147,17 @@ fn place(app: &mut App, slot: u32, want: Placed) -> bool {
         for py in 0..h {
             for px in 0..w {
                 let a = rounded_alpha(px as f32, py as f32, w as f32, h as f32, radius);
-                let c = match border {
+                let (c, fa) = match border {
                     // Fill inside a 1px-inset rounded rect, outline around it
                     Some(b) if w > 2 && h > 2 => {
                         let t = rounded_alpha(px as f32 - 1.0, py as f32 - 1.0, w as f32 - 2.0, h as f32 - 2.0, radius - 1.0);
                         let mix = |o: u8, i: u8| (o as f32 + (i as f32 - o as f32) * t).round() as u8;
-                        [mix(b.0, fill.0), mix(b.1, fill.1), mix(b.2, fill.2)]
+                        let fa = 1.0 + (alpha as f32 / 255.0 - 1.0) * t;
+                        ([mix(b.0, fill.0), mix(b.1, fill.1), mix(b.2, fill.2)], fa)
                     }
-                    _ => [fill.0, fill.1, fill.2],
+                    _ => ([fill.0, fill.1, fill.2], alpha as f32 / 255.0),
                 };
-                rgba.extend_from_slice(&[c[0], c[1], c[2], (a * 255.0) as u8]);
+                rgba.extend_from_slice(&[c[0], c[1], c[2], (a * fa * 255.0) as u8]);
             }
         }
         let data = base64::engine::general_purpose::STANDARD.encode(&rgba);

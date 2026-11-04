@@ -110,6 +110,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             if entry_idx >= entries_len { break; }
             let cell_x = area.x + col_idx as u16 * pitch + item_off;
 
+            let top = y.max(area.y as i32) as u16;
+            let bottom = (y + cell_h as i32).min(area.bottom() as i32) as u16;
+            app.item_rects.push((entry_idx, Rect { x: cell_x, y: top, width: cell_w, height: bottom.saturating_sub(top) }));
             if y >= area.y as i32 && y + cell_h as i32 <= area.bottom() as i32 {
                 let cell_rect = Rect { x: cell_x, y: y as u16, width: cell_w, height: cell_h };
                 draw_cell(f.buffer_mut(), app, entry_idx, cell_rect, hovered, &geo);

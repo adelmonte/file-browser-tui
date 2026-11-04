@@ -32,6 +32,7 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             let cell_y = area.y + row_idx as u16 * COMPACT_CELL_H;
             if cell_y >= area.y + area.height { break; }
 
+            app.item_rects.push((entry_idx, Rect { x: cell_x + 1, y: cell_y, width: COMPACT_CELL_W - 1, height: 1 }));
             let entry = &app.listing.entries[entry_idx];
             let is_selected = app.selection == Some(entry_idx)
                 || app.multi_selection.contains(&entry_idx);

@@ -156,6 +156,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     // Real icons/thumbnails, one row tall, after each row's expander
     for (row, line) in lines.iter().enumerate() {
         let DRow::Entry(i) = *line else { continue; };
+        app.item_rects.push((i, Rect { x: area.x, y: area.y + 1 + row as u16, width: area.width, height: 1 }));
         let depth = app.listing.entries[i].depth;
         let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
         let bg = if is_selected {

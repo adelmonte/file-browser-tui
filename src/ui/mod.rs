@@ -65,12 +65,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
     statusbar::render_statusbar(f, app, status_area);
     searchbar::render_searchbar(f, app, search_area);
 
+    app.item_rects.clear();
     match app.view_mode {
         ViewMode::Icons   => grid::render_grid(f, app, main_area),
         ViewMode::Compact => compact::render_compact(f, app, main_area),
         ViewMode::Details => details::render_details(f, app, main_area),
     }
     scrollbar::render(f, app, main_area);
+    render_band(f, app);
 
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {
@@ -131,6 +133,25 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         let _ = out.flush();
     }
+}
+
+/// The rubber-band rectangle: a translucent box on Kitty, an outline elsewhere.
+fn render_band(f: &mut Frame, app: &mut App) {
+    let Some(((ax, ay), (bx, by), _)) = app.band else { return; };
+    let r = band_rect((ax, ay), (bx, by)).intersection(app.grid_area);
+    if r.width == 0 || r.height == 0 {
+        return;
+    }
+    if !underlay::selection_box(app, 7, r, theme::NORD9) {
+        f.render_widget(
+            Block::default().borders(ratatui::widgets::Borders::ALL).border_style(Style::default().fg(theme::rgb(theme::NORD9))),
+            r,
+        );
+    }
+}
+
+pub fn band_rect((ax, ay): (u16, u16), (bx, by): (u16, u16)) -> Rect {
+    Rect { x: ax.min(bx), y: ay.min(by), width: ax.abs_diff(bx) + 1, height: ay.abs_diff(by) + 1 }
 }
 
 fn confirm_delete_rect(term: Rect) -> Rect {

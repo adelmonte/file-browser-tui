@@ -91,6 +91,10 @@ pub type FrameImage = (Rect, Option<(u8, u8, u8)>);
 // App state
 // ---------------------------------------------------------------------------
 
+/// Rubber band: anchor cell, current cell, and the selection it adds to
+/// (Ctrl held).
+pub type Band = ((u16, u16), (u16, u16), std::collections::HashSet<usize>);
+
 pub struct App {
     // Navigation
     pub cwd: PathBuf,
@@ -124,6 +128,10 @@ pub struct App {
     pub details_rows: Vec<crate::ui::groups::DRow>,
     pub scrollbar: Option<crate::ui::scrollbar::Geom>,
     pub scrollbar_dragging: bool,
+    /// Where each visible entry was drawn this frame (for rubber-band selection).
+    pub item_rects: Vec<(usize, Rect)>,
+    /// Rubber-band selection in progress.
+    pub band: Option<Band>,
 
     // Icon zoom (index into ICON_LEVELS) and the grid geometry it implies
     pub icon_size_idx: usize,
@@ -302,6 +310,8 @@ impl App {
             details_rows: Vec::new(),
             scrollbar: None,
             scrollbar_dragging: false,
+            item_rects: Vec::new(),
+            band: None,
             icon_size_idx,
             img_w,
             cell_w,

@@ -451,8 +451,27 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
             // Grid
             if let Some(idx) = hit_test(app, col, row) {
+                let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
+                // Shift+Click selects the range from the anchor; with Ctrl
+                // it's added to the selection
+                if ev.modifiers.contains(KeyModifiers::SHIFT) {
+                    let anchor = app.selection_anchor.or(app.selection).unwrap_or(idx);
+                    if !ctrl {
+                        app.multi_selection.clear();
+                    }
+                    app.multi_selection.extend(anchor.min(idx)..=anchor.max(idx));
+                    app.selection = Some(idx);
+                    app.selection_anchor = Some(anchor);
+                    return;
+                }
                 // Ctrl+Click toggles individual items in multi-selection
-                if ev.modifiers.contains(KeyModifiers::CONTROL) {
+                if ctrl {
+                    // The single selection so far becomes part of the set
+                    if app.multi_selection.is_empty()
+                        && let Some(s) = app.selection.filter(|&s| s != idx)
+                    {
+                        app.multi_selection.insert(s);
+                    }
                     if app.multi_selection.contains(&idx) {
                         app.multi_selection.remove(&idx);
                     } else {
@@ -483,16 +502,32 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                     }
                 }
             } else {
-                app.selection = None;
-                app.multi_selection.clear();
-                app.selection_anchor = None;
+                // Empty space: start a rubber band (Ctrl adds to the selection)
+                let keep = ev.modifiers.contains(KeyModifiers::CONTROL);
+                let base = if keep {
+                    let mut b = app.multi_selection.clone();
+                    b.extend(app.selection);
+                    b
+                } else {
+                    app.selection = None;
+                    app.multi_selection.clear();
+                    app.selection_anchor = None;
+                    Default::default()
+                };
                 app.drag_state = DragState::Idle;
+                if app.main_area.contains(ratatui::layout::Position { x: col, y: row }) {
+                    app.band = Some(((col, row), (col, row), base));
+                }
             }
         }
 
         MouseEventKind::Drag(MouseButton::Left) => {
             if app.scrollbar_dragging {
                 crate::ui::scrollbar::scroll_to(app, row);
+                return;
+            }
+            if app.band.is_some() {
+                update_band(app, col, row);
                 return;
             }
 
@@ -546,7 +581,7 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
         MouseEventKind::Up(MouseButton::Left) => {
             app.sidebar_dragging = false;
-            if std::mem::take(&mut app.scrollbar_dragging) {
+            if std::mem::take(&mut app.scrollbar_dragging) || app.band.take().is_some() {
                 return;
             }
             if let Some(drag) = app.place_drag.take() {
@@ -633,6 +668,25 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     }
 }
 
+/// Move the rubber band's corner and select what it touches.
+fn update_band(app: &mut App, col: u16, row: u16) {
+    let Some((anchor, _, base)) = app.band.take() else { return; };
+    let area = app.grid_area;
+    let cur = (col.clamp(area.x, area.right().saturating_sub(1)), row.clamp(area.y, area.bottom().saturating_sub(1)));
+    let r = crate::ui::band_rect(anchor, cur);
+    let hits: Vec<usize> = app.item_rects.iter()
+        .filter(|(_, ir)| ir.intersects(r))
+        .map(|(i, _)| *i)
+        .collect();
+    app.multi_selection = base.iter().copied().chain(hits.iter().copied()).collect();
+    app.selection = hits.last().copied().or(app.selection.filter(|s| base.contains(s)));
+    if app.multi_selection.len() == 1 {
+        // A single item is a plain selection
+        app.multi_selection.clear();
+    }
+    app.band = Some((anchor, cur, base));
+}
+
 /// What a right-click at this position should open a menu for.
 fn context_target_at(app: &App, col: u16, row: u16) -> Option<MenuTarget> {
     if row < TOPBAR_H {
@@ -683,3 +737,4 @@ fn handle_topbar_click(app: &mut App, col: u16, row: u16) {
         app.start_path_edit();
     }
 }
+
