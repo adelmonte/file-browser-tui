@@ -311,7 +311,7 @@ fn drag_event(app: &mut App, x: i64, y: i64) {
     }
 }
 
-fn parse_uri_list(text: &str) -> Vec<PathBuf> {
+pub fn parse_uri_list(text: &str) -> Vec<PathBuf> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))

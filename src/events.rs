@@ -126,6 +126,16 @@ impl ClickTracker {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
+/// Naming clipboard text or an image before it's saved as a file.
+pub struct PasteNameState {
+    pub dest: std::path::PathBuf,
+    pub data: Vec<u8>,
+    pub input: String,
+    pub cursor_pos: usize,
+    /// Last commit was rejected (bad name or file exists); cleared on edit.
+    pub invalid: bool,
+}
+
 pub struct RenameState {
     pub item_idx: usize,
     pub input: String,

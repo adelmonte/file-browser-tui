@@ -119,6 +119,20 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
+    // Clipboard content naming prompt
+    if let Some(ref mut p) = app.paste_name {
+        match ev.code {
+            KeyCode::Esc => { app.paste_name = None; }
+            KeyCode::Enter => { actions::commit_paste_name(app); }
+            _ => {
+                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+                    p.invalid = false;
+                }
+            }
+        }
+        return false;
+    }
+
     // Permanent-delete confirmation popup
     if app.confirm_delete.is_some() {
         match ev.code {
@@ -318,6 +332,10 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         // Clipboard
         KeyCode::Char('c') => actions::clip_selection(app, ClipOp::Copy),
         KeyCode::Char('x') => actions::clip_selection(app, ClipOp::Cut),
+        KeyCode::Char('v' | 'p') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
+            let cwd = app.cwd.clone();
+            actions::paste_clipboard(app, &cwd);
+        }
         KeyCode::Char('p') => {
             let cwd = app.cwd.clone();
             actions::paste_clipboard(app, &cwd);

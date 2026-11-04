@@ -194,6 +194,7 @@ pub struct App {
     pub show_help: bool,
     pub clipboard: Option<Clipboard>,
     pub confirm_delete: Option<ConfirmDeleteState>,
+    pub paste_name: Option<crate::events::PasteNameState>,
 
     // Multi-selection
     pub multi_selection: std::collections::HashSet<usize>,
@@ -359,6 +360,7 @@ impl App {
             click_tracker: ClickTracker::default(),
             clipboard: None,
             confirm_delete: None,
+            paste_name: None,
             multi_selection: std::collections::HashSet::new(),
             expanded: std::collections::HashSet::new(),
             dir_counts: HashMap::new(),
@@ -1055,7 +1057,7 @@ impl App {
         moving
     }
 
-    fn ensure_selection_visible(&mut self) {
+    pub fn ensure_selection_visible(&mut self) {
         if self.view_mode == ViewMode::Icons {
             // Bring the whole item into view, animated
             let Some(idx) = self.selection else { return; };

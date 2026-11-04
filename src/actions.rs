@@ -180,7 +180,31 @@ pub fn clip_selection(app: &mut App, op: ClipOp) {
     }
 }
 
+/// The system clipboard's MIME types (empty when there's nothing or no
+/// wl-paste).
+pub fn system_clipboard_types() -> Vec<String> {
+    wl_paste(&["--list-types"])
+        .map(|out| String::from_utf8_lossy(&out).lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+fn wl_paste(args: &[&str]) -> Option<Vec<u8>> {
+    // A stuck clipboard owner mustn't hang the UI
+    let out = Command::new("timeout")
+        .arg("2").arg("wl-paste").args(args)
+        .stdin(Stdio::null()).stderr(Stdio::null())
+        .output().ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+/// Paste into `dest`: our own copied/cut files, else the system clipboard's
+/// files, else its image or text after asking for a file name (Dolphin's
+/// "Paste Clipboard Contents").
 pub fn paste_clipboard(app: &mut App, dest: &Path) {
+    if app.clipboard.is_none() {
+        paste_system(app, dest);
+        return;
+    }
     let Some(clip) = app.clipboard.clone() else { return; };
     let op = match clip.op {
         ClipOp::Copy => "copy",
@@ -191,6 +215,76 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
     }
     if clip.op == ClipOp::Cut {
         app.clipboard = None;
+    }
+}
+
+fn paste_system(app: &mut App, dest: &Path) {
+    let types = system_clipboard_types();
+    let has = |t: &str| types.iter().any(|x| x == t);
+    if has("text/uri-list")
+        && let Some(list) = wl_paste(&["-t", "text/uri-list"])
+    {
+        let paths = crate::dnd::parse_uri_list(&String::from_utf8_lossy(&list));
+        if !paths.is_empty() {
+            for src in &paths {
+                spawn_detached("gio", &["copy".as_ref(), src.as_os_str(), dest.as_os_str()]);
+            }
+            return;
+        }
+    }
+    let image = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"]
+        .into_iter().find(|t| has(t));
+    let (data, stem, ext) = if let Some(t) = image {
+        (wl_paste(&["-t", t]), "pasted picture", t.trim_start_matches("image/").replace("jpeg", "jpg"))
+    } else if types.iter().any(|t| t.starts_with("text/") || t == "UTF8_STRING" || t == "STRING") {
+        (wl_paste(&["--no-newline"]), "pasted text", "txt".to_string())
+    } else {
+        (None, "", String::new())
+    };
+    let Some(data) = data.filter(|d| !d.is_empty()) else {
+        app.notify("Nothing to paste".into());
+        return;
+    };
+    let mut name = format!("{stem}.{ext}");
+    for n in 2.. {
+        if !dest.join(&name).exists() {
+            break;
+        }
+        name = format!("{stem} ({n}).{ext}");
+    }
+    app.paste_name = Some(crate::events::PasteNameState {
+        dest: dest.to_path_buf(),
+        data,
+        cursor_pos: name.len(),
+        input: name,
+        invalid: false,
+    });
+}
+
+/// Write the named clipboard content; a bad or taken name keeps the prompt.
+pub fn commit_paste_name(app: &mut App) {
+    let Some(state) = &mut app.paste_name else { return; };
+    let name = state.input.trim();
+    let path = state.dest.join(name);
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.exists() {
+        state.invalid = true;
+        return;
+    }
+    if let Err(e) = std::fs::write(&path, &state.data) {
+        tracing::error!("paste: {e}");
+        state.invalid = true;
+        return;
+    }
+    app.paste_name = None;
+    if path.parent() == Some(app.cwd.as_path()) {
+        app.reload_dir();
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if let Some(idx) = app.listing.entries.iter().position(|e| e.name == name) {
+            app.multi_selection.clear();
+            app.selection = Some(idx);
+            app.selection_anchor = Some(idx);
+            app.ensure_selection_visible();
+        }
     }
 }
 
@@ -400,3 +494,4 @@ fn spawn_detached(bin: &str, args: &[&std::ffi::OsStr]) {
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn();
 }
+

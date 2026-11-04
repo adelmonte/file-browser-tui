@@ -118,6 +118,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         help::render_help(f);
     }
+    if app.paste_name.is_some() {
+        render_paste_name(f, app);
+    }
     if app.confirm_delete.is_some() {
         render_confirm_delete(f, app);
     }
@@ -161,6 +164,53 @@ fn confirm_delete_rect(term: Rect) -> Rect {
         width: w,
         height: h,
     }
+}
+
+/// Dolphin's "Paste Clipboard Contents" prompt: a file name for clipboard
+/// text or an image.
+fn render_paste_name(f: &mut Frame, app: &App) {
+    let Some(ref p) = app.paste_name else { return; };
+    let term = f.area();
+    let w = 52u16.min(term.width);
+    let h = 7u16.min(term.height);
+    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let bg = Style::default().bg(theme::FIELD_BG).fg(theme::TEXT);
+
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::BORDER))
+            .title(" Paste Clipboard Contents ")
+            .style(bg),
+        area,
+    );
+
+    // Input field scrolled so the cursor stays visible
+    let field_w = w.saturating_sub(6) as usize;
+    let mut shown = p.input.clone();
+    shown.insert(p.cursor_pos.min(shown.len()), '\u{258f}');
+    let chars: Vec<char> = shown.chars().collect();
+    let cur = shown[..p.cursor_pos.min(p.input.len())].chars().count();
+    let start = (cur + 1).saturating_sub(field_w);
+    let visible: String = chars.iter().skip(start).take(field_w).collect();
+    let field_bg = if p.invalid { theme::NORD11 } else { theme::INPUT };
+
+    let lines = vec![
+        Line::raw("  Filename for clipboard content:"),
+        Line::raw(""),
+        Line::from(vec![
+            ratatui::text::Span::raw("  "),
+            ratatui::text::Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::rgb(field_bg)).fg(Color::White)),
+        ]),
+        Line::raw(""),
+        Line::styled("  [Enter]  Save     [Esc]  Cancel", Style::default().add_modifier(Modifier::BOLD)),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).style(bg),
+        Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(2) },
+    );
 }
 
 fn render_confirm_delete(f: &mut Frame, app: &App) {

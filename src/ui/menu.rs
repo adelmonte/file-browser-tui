@@ -162,7 +162,7 @@ pub enum MenuOutcome {
 
 /// Build the context menu items for a right-click target.
 pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
-    let has_clip = app.clipboard.is_some();
+    let has_clip = app.clipboard.is_some() || !crate::actions::system_clipboard_types().is_empty();
     let mut items = Vec::new();
 
     match target {
