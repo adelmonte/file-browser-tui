@@ -184,19 +184,15 @@ pub fn bar_cursor() -> char {
     if cursor_visible() { '\u{258f}' } else { '\u{2800}' }
 }
 
+/// `text` with the blinking bar cursor at byte offset `cursor`, the same
+/// cursor as every other text field.
 pub fn spans(text: &str, cursor: usize, style: Style) -> Vec<Span<'static>> {
     let cursor = cursor.min(text.len());
-    let (before, rest) = text.split_at(cursor);
-    let mut chars = rest.chars();
-    let under = chars.next();
-    let after: String = chars.collect();
+    let (before, after) = text.split_at(cursor);
     vec![
         Span::styled(before.to_string(), style),
-        Span::styled(
-            under.map_or(" ".to_string(), String::from),
-            if cursor_visible() { style.add_modifier(Modifier::REVERSED) } else { style },
-        ),
-        Span::styled(after, style),
+        Span::styled(bar_cursor().to_string(), style.remove_modifier(Modifier::BOLD)),
+        Span::styled(after.to_string(), style),
     ]
 }
 
