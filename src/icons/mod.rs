@@ -18,6 +18,8 @@ pub struct IconImageReady {
     pub path: PathBuf,
     pub image: Option<Arc<image::DynamicImage>>,
     pub mime_type: Option<String>,
+    /// A folder preview, which a plain icon arriving later mustn't replace.
+    pub preview: bool,
 }
 
 struct IconRequest {
@@ -127,9 +129,15 @@ pub struct IconCache {
     mimes: LruCache<PathBuf, Option<String>>,
     protocols: LruCache<ProtoKey, StatefulProtocol>,
     tx_work: mpsc::SyncSender<IconRequest>,
+    /// Low priority: icons for folders not open yet (see `prefetch`).
+    tx_prefetch: mpsc::SyncSender<IconRequest>,
     rx_image: mpsc::Receiver<IconImageReady>,
     /// Paths for which a request is already in-flight
     pending: HashSet<PathBuf>,
+    /// Queued as prefetches: a real request still goes ahead of them.
+    prefetch_pending: HashSet<PathBuf>,
+    /// Paths whose cached image is a folder preview.
+    previews: HashSet<PathBuf>,
     fit: Fit,
 }
 
@@ -139,12 +147,44 @@ impl IconCache {
     pub fn new(folder_previews: bool) -> Self {
         theme::prewarm();
         let (tx_work, rx_work) = mpsc::sync_channel::<IconRequest>(128);
+        let (tx_prefetch, rx_prefetch) = mpsc::sync_channel::<IconRequest>(1024);
         let (tx_image, rx_image) = mpsc::channel::<IconImageReady>();
 
+        // Visible icons first; prefetches only when none are waiting, and a
+        // couple at a time so they never hold up what's on screen
+        let prefetching = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        struct Done(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Done {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         std::thread::spawn(move || {
-            while let Ok(req) = rx_work.recv() {
+            use std::sync::atomic::Ordering;
+            use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+            loop {
+                let next_prefetch = || (prefetching.load(Ordering::Relaxed) < 2)
+                    .then(|| rx_prefetch.try_recv().ok())
+                    .flatten();
+                let (req, prefetch) = match rx_work.try_recv() {
+                    Ok(r) => (r, false),
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => match next_prefetch() {
+                        Some(r) => (r, true),
+                        None => match rx_work.recv_timeout(std::time::Duration::from_millis(10)) {
+                            Ok(r) => (r, false),
+                            Err(RecvTimeoutError::Timeout) => continue,
+                            Err(RecvTimeoutError::Disconnected) => break,
+                        },
+                    },
+                };
+                let done = prefetch.then(|| {
+                    prefetching.fetch_add(1, Ordering::Relaxed);
+                    Done(prefetching.clone())
+                });
                 let tx = tx_image.clone();
                 rayon::spawn(move || {
+                    let _done = done;
                     let (mut icon_names, mime) = resolver::resolve_names_and_mime(&req.path, req.is_dir);
                     if let Some(name) = req.icon_override {
                         icon_names.insert(0, name);
@@ -165,7 +205,7 @@ impl IconCache {
                     let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
                     let Some(base) = image.clone().filter(|_| wants_preview) else {
                         // Always send back (even if no icon) so mime_type reaches the listing
-                        let _ = tx.send(IconImageReady { path: req.path, image, mime_type: mime });
+                        let _ = tx.send(IconImageReady { path: req.path, image, mime_type: mime, preview: false });
                         return;
                     };
 
@@ -182,14 +222,14 @@ impl IconCache {
                             Arc::new(p)
                         }));
                     });
-                    let send = |image| { let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone() }); };
+                    let send = |image, preview| { let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone(), preview }); };
                     match prx.recv_timeout(std::time::Duration::from_millis(150)) {
-                        Ok(Some(preview)) => send(Some(preview)),
-                        Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => send(image),
+                        Ok(Some(preview)) => send(Some(preview), true),
+                        Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => send(image, false),
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            send(image);
+                            send(image, false);
                             if let Ok(Some(preview)) = prx.recv() {
-                                send(Some(preview));
+                                send(Some(preview), true);
                             }
                         }
                     }
@@ -203,8 +243,11 @@ impl IconCache {
             protocols: LruCache::new(NonZeroUsize::new(500).unwrap()),
             mimes: LruCache::new(NonZeroUsize::new(20_000).unwrap()),
             tx_work,
+            tx_prefetch,
             rx_image,
             pending: HashSet::new(),
+            prefetch_pending: HashSet::new(),
+            previews: HashSet::new(),
             fit: GRID_FIT,
         }
     }
@@ -227,6 +270,18 @@ impl IconCache {
         }
     }
 
+    /// Like `request`, but only worked on while no visible icon waits:
+    /// warms the cache for folders that may be opened next.
+    pub fn prefetch(&mut self, path: &Path, is_dir: bool, target_px: u32, icon_override: Option<String>) {
+        if self.images.contains(path) || self.pending.contains(path) || self.prefetch_pending.contains(path) {
+            return;
+        }
+        let req = IconRequest { path: path.to_path_buf(), is_dir, target_px, icon_override };
+        if self.tx_prefetch.try_send(req).is_ok() {
+            self.prefetch_pending.insert(path.to_path_buf());
+        }
+    }
+
     /// Mime type from a previous resolution of this path, if any.
     pub fn cached_mime(&self, path: &Path) -> Option<&Option<String>> {
         self.mimes.peek(path)
@@ -237,6 +292,15 @@ impl IconCache {
         let mut mime_updates = Vec::new();
         while let Ok(ready) = self.rx_image.try_recv() {
             self.pending.remove(&ready.path);
+            self.prefetch_pending.remove(&ready.path);
+            // A prefetch and a request for one folder can both finish: keep
+            // the preview over the plain icon that may arrive after it
+            if !ready.preview && self.previews.contains(&ready.path) && self.images.contains(&ready.path) {
+                continue;
+            }
+            if ready.preview {
+                self.previews.insert(ready.path.clone());
+            }
             // An upgrade (folder preview) replaces an icon already on screen
             if self.images.contains(&ready.path) {
                 self.invalidate(&ready.path);
@@ -292,6 +356,8 @@ impl IconCache {
         self.images.clear();
         self.protocols.clear();
         self.pending.clear();
+        self.prefetch_pending.clear();
+        self.previews.clear();
     }
 
     /// Clear only encoded protocols, keeping raw images (e.g. terminal resize).

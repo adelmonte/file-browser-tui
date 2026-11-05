@@ -93,6 +93,9 @@ pub type FrameImage = (Rect, Option<(u8, u8, u8)>, bool);
 
 /// Rubber band: anchor cell, current cell, and the selection it adds to
 /// (Ctrl held).
+/// A folder's item to warm up: path, is a folder, guessed mime type.
+type PrefetchItem = (PathBuf, bool, Option<String>);
+
 pub type Band = ((u16, u16), (u16, u16), std::collections::HashSet<usize>);
 
 pub struct App {
@@ -246,6 +249,12 @@ pub struct App {
     pub quit_armed: Option<std::time::Instant>,
     /// The status bar's cancel button while a file operation runs.
     pub cancel_rect: Option<Rect>,
+    /// Folders on screen whose contents' icons are being warmed up (so
+    /// opening them shows icons at once), and at what icon size.
+    prefetched: std::collections::HashSet<PathBuf>,
+    prefetched_px: u32,
+    prefetch_tx: mpsc::Sender<(PathBuf, bool)>,
+    prefetch_rx: mpsc::Receiver<Vec<PrefetchItem>>,
     pub dirstates: DirStates,
 
     // Kitty graphics bookkeeping
@@ -303,6 +312,7 @@ impl App {
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
         let (keymap, mut key_problems) = crate::keys::Keymap::new(&config.keys);
+        let (prefetch_tx, prefetch_rx) = spawn_prefetch_lister();
         if let Some(t) = &config.theme {
             match t.clone().try_into::<crate::ui::theme::Theme>() {
                 Ok(t) => crate::ui::theme::set(t),
@@ -314,6 +324,10 @@ impl App {
             fileops: crate::fileops::FileOps::new(),
             quit_armed: None,
             cancel_rect: None,
+            prefetched: std::collections::HashSet::new(),
+            prefetched_px: 0,
+            prefetch_tx,
+            prefetch_rx,
             watched_path: cwd.clone(),
             sidebar_w: config.sidebar_w.clamp(10, 50),
             sidebar_dragging: false,
@@ -889,10 +903,51 @@ impl App {
                 self.icon_cache.request(&entry.path, entry.is_dir, target_px, icon_override);
             }
         }
+
+        // Then warm up the visible folders' contents
+        if self.prefetched_px != target_px {
+            self.prefetched.clear();
+            self.prefetched_px = target_px;
+        }
+        for i in start..end {
+            let entry = &self.listing.entries[i];
+            if entry.is_dir && self.prefetched.insert(entry.path.clone()) {
+                let _ = self.prefetch_tx.send((entry.path.clone(), self.show_hidden));
+            }
+        }
+    }
+
+    /// Queue a listed folder's first items as low-priority loads.
+    fn prefetch_children(&mut self, children: Vec<PrefetchItem>) {
+        let target_px = self.icon_target_px();
+        let mut thumbs = 0;
+        for (path, is_dir, mime) in children {
+            match mime {
+                // Thumbnails have no low-priority lane: only a few per folder
+                Some(m) if self.previews.covers(&m) => {
+                    if thumbs < 8 && !self.thumb_cache.failed(&path) {
+                        self.thumb_cache.request(&path, &m);
+                        thumbs += 1;
+                    }
+                }
+                _ => {
+                    let icon_override = if is_dir {
+                        self.config.folder_icons.get(path.to_string_lossy().as_ref()).cloned()
+                            .or_else(|| Self::xdg_folder_icon(&path))
+                    } else {
+                        None
+                    };
+                    self.icon_cache.prefetch(&path, is_dir, target_px, icon_override);
+                }
+            }
+        }
     }
 
     /// Drain all background channels.
     pub fn drain_channels(&mut self) {
+        while let Ok(children) = self.prefetch_rx.try_recv() {
+            self.prefetch_children(children);
+        }
         for report in self.fileops.poll() {
             self.notify(report.message());
             self.reload_dir();
@@ -1293,9 +1348,34 @@ impl App {
     }
 }
 
+/// Background lister for prefetching: a folder's first items roughly as
+/// they'll show (folders first, by name), with their guessed mime types.
+fn spawn_prefetch_lister() -> (mpsc::Sender<(PathBuf, bool)>, mpsc::Receiver<Vec<PrefetchItem>>) {
+    let (tx, rx) = mpsc::channel::<(PathBuf, bool)>();
+    let (out_tx, out_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok((dir, show_hidden)) = rx.recv() {
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            let mut items: Vec<(PathBuf, bool)> = rd.take(2000).flatten()
+                .filter(|e| show_hidden || !e.file_name().to_string_lossy().starts_with('.'))
+                .map(|e| { let p = e.path(); let d = p.is_dir(); (p, d) })
+                .collect();
+            items.sort_by_cached_key(|(p, d)| (!*d, p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
+            let children = items.into_iter().take(48)
+                .map(|(p, d)| { let m = if d { None } else { crate::mime::guess_by_name(&p) }; (p, d, m) })
+                .collect();
+            if out_tx.send(children).is_err() {
+                break;
+            }
+        }
+    });
+    (tx, out_rx)
+}
+
 fn free_space(path: &std::path::Path) -> Option<u64> {
     let st = nix::sys::statvfs::statvfs(path).ok()?;
     Some(st.blocks_available() as u64 * st.fragment_size() as u64)
 }
+
 
 
