@@ -32,16 +32,17 @@ fn ffmpegthumbnailer(source: &Path, out: &Path) -> anyhow::Result<()> {
 }
 
 fn ffmpeg(source: &Path, out: &Path) -> anyhow::Result<()> {
-    // Seek ~15% in to skip intros/black leaders; the thumbnail filter then
-    // picks the most representative of the next few frames.
-    let seek = duration_secs(source).map(|d| d * 0.15).unwrap_or(0.0);
+    // Seek ~15% in to skip intros/black leaders and take the keyframe
+    // there: decoding just one frame, on one thread, as several run at once
+    let seek = media_duration(source).or_else(|| duration_secs(source)).map(|d| d * 0.15).unwrap_or(0.0);
     let run = |seek: f64| {
         Command::new("ffmpeg")
-            .args(["-v", "error", "-nostdin", "-y", "-ss", &format!("{seek:.2}"), "-i"])
+            .args(["-v", "error", "-nostdin", "-y", "-threads", "1", "-skip_frame", "nokey"])
+            .args(["-ss", &format!("{seek:.2}"), "-i"])
             .arg(source)
             .args([
-                "-frames:v", "1",
-                "-vf", "thumbnail=30,scale=256:256:force_original_aspect_ratio=decrease",
+                "-an", "-sn", "-frames:v", "1",
+                "-vf", "scale=256:256:force_original_aspect_ratio=decrease",
                 "-f", "image2", "-c:v", "png",
             ])
             .arg(out)
@@ -66,6 +67,160 @@ fn duration_secs(source: &Path) -> Option<f64> {
         .stdin(Stdio::null()).stderr(Stdio::null())
         .output().ok()?;
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// Length in seconds read from the container itself (MP4/MOV, Matroska/
+/// WebM), sparing an ffprobe start, which costs more than the reading.
+pub fn media_duration(source: &Path) -> Option<f64> {
+    let mut f = std::fs::File::open(source).ok()?;
+    let mut magic = [0u8; 8];
+    std::io::Read::read_exact(&mut f, &mut magic).ok()?;
+    if magic[..4] == [0x1A, 0x45, 0xDF, 0xA3] {
+        matroska_duration(&mut f)
+    } else if &magic[4..8] == b"ftyp" {
+        mp4_duration(&mut f)
+    } else {
+        None
+    }
+}
+
+/// From the `mvhd` box inside `moov` (which may sit at the end of the file).
+fn mp4_duration(f: &mut std::fs::File) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = f.metadata().ok()?.len();
+    // Boxes: 4-byte size (1 = 64-bit size follows, 0 = to the end), 4-byte type
+    let next_box = |f: &mut std::fs::File, pos: u64, end: u64| -> Option<(u64, u64, [u8; 4])> {
+        if pos + 8 > end {
+            return None;
+        }
+        f.seek(SeekFrom::Start(pos)).ok()?;
+        let mut h = [0u8; 8];
+        f.read_exact(&mut h).ok()?;
+        let kind = [h[4], h[5], h[6], h[7]];
+        let (size, header) = match u32::from_be_bytes([h[0], h[1], h[2], h[3]]) {
+            1 => {
+                let mut b = [0u8; 8];
+                f.read_exact(&mut b).ok()?;
+                (u64::from_be_bytes(b), 16)
+            }
+            0 => (end - pos, 8),
+            n => (n as u64, 8),
+        };
+        (size >= header).then_some((pos + header, pos + size, kind))
+    };
+    let mut pos = 0;
+    let (moov, moov_end) = loop {
+        let (body, end, kind) = next_box(f, pos, len)?;
+        if &kind == b"moov" {
+            break (body, end.min(len));
+        }
+        pos = end;
+    };
+    // The header's duration; fragmented files (DASH) leave it 0 and give
+    // it in mvex/mehd instead, in the same timescale
+    let mut scale = 0;
+    let mut pos = moov;
+    while let Some((body, end, kind)) = next_box(f, pos, moov_end) {
+        let mut b = [0u8; 32];
+        let u32_at = |b: &[u8; 32], i: usize| u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as u64;
+        if &kind == b"mvhd" {
+            f.seek(SeekFrom::Start(body)).ok()?;
+            f.read_exact(&mut b).ok()?;
+            let dur;
+            (scale, dur) = if b[0] == 1 {
+                (u32_at(&b, 20), u32_at(&b, 24) << 32 | u32_at(&b, 28))
+            } else {
+                (u32_at(&b, 12), u32_at(&b, 16))
+            };
+            if scale > 0 && dur > 0 {
+                return Some(dur as f64 / scale as f64);
+            }
+        } else if &kind == b"mvex" && scale > 0 {
+            let mut p = body;
+            while let Some((mbody, mend, mkind)) = next_box(f, p, end) {
+                if &mkind == b"mehd" {
+                    f.seek(SeekFrom::Start(mbody)).ok()?;
+                    let mut b = [0u8; 32];
+                    let n = f.read(&mut b).ok()?;
+                    let dur = if b[0] == 1 && n >= 12 { u32_at(&b, 4) << 32 | u32_at(&b, 8) } else { u32_at(&b, 4) };
+                    return (dur > 0).then(|| dur as f64 / scale as f64);
+                }
+                p = mend;
+            }
+        }
+        pos = end;
+    }
+    None
+}
+
+/// From the Segment's Info element (Duration × TimecodeScale), which comes
+/// before the clusters in the first part of the file.
+fn matroska_duration(f: &mut std::fs::File) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let mut buf = Vec::new();
+    f.take(512 << 10).read_to_end(&mut buf).ok()?;
+    // EBML variable-length integers: the leading zero bits give the length;
+    // IDs keep the marker bit, sizes drop it (all ones = unknown size)
+    let vint = |pos: usize, keep_marker: bool| -> Option<(u64, usize, bool)> {
+        let first = *buf.get(pos)?;
+        let n = first.leading_zeros() as usize + 1;
+        if n > 8 {
+            return None;
+        }
+        let mask = 0xFFu64 >> n;
+        let mut v = if keep_marker { first as u64 } else { first as u64 & mask };
+        let mut all_ones = v == mask;
+        for i in 1..n {
+            let b = *buf.get(pos + i)?;
+            all_ones &= b == 0xFF;
+            v = v << 8 | b as u64;
+        }
+        Some((v, n, !keep_marker && all_ones))
+    };
+    let element = |pos: usize| -> Option<(u64, usize, Option<usize>)> {
+        let (id, idn, _) = vint(pos, true)?;
+        let (size, sn, unknown) = vint(pos + idn, false)?;
+        Some((id, pos + idn + sn, (!unknown).then_some(size as usize)))
+    };
+    const SEGMENT: u64 = 0x18538067;
+    const INFO: u64 = 0x1549A966;
+    const CLUSTER: u64 = 0x1F43B675;
+    let mut pos = 0;
+    // Top level: skip the EBML header, enter the Segment
+    loop {
+        let (id, body, size) = element(pos)?;
+        if id == SEGMENT {
+            pos = body;
+            break;
+        }
+        pos = body + size?;
+    }
+    loop {
+        let (id, body, size) = element(pos)?;
+        if id == CLUSTER {
+            return None;
+        }
+        let size = size?;
+        if id == INFO {
+            let (mut scale, mut duration) = (1_000_000u64, None);
+            let mut p = body;
+            while p < body + size {
+                let (id, b, s) = element(p)?;
+                let s = s?;
+                let data = buf.get(b..b + s)?;
+                match id {
+                    0x2AD7B1 => scale = data.iter().fold(0, |v, &x| v << 8 | x as u64),
+                    0x4489 if s == 4 => duration = Some(f32::from_be_bytes(data.try_into().ok()?) as f64),
+                    0x4489 if s == 8 => duration = Some(f64::from_be_bytes(data.try_into().ok()?)),
+                    _ => {}
+                }
+                p = b + s;
+            }
+            return duration.map(|d| d * scale as f64 / 1e9).filter(|d| *d > 0.0);
+        }
+        pos = body + size;
+    }
 }
 
 fn is_not_found(e: &anyhow::Error) -> bool {
@@ -261,4 +416,6 @@ mod tests {
         assert_eq!(resolve_href("OEBPS/", &percent_decode("../images/My%20Cover.jpg")), "images/My Cover.jpg");
     }
 }
+
+
 
