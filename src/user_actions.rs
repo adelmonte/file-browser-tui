@@ -137,11 +137,7 @@ pub fn run(action: &UserAction, paths: &[PathBuf], cwd: &Path) {
     for file in targets {
         let line = expand(file);
         tracing::info!("user action {:?}: {line}", action.label);
-        let _ = Command::new("sh")
-            .args(["-c", &line])
-            .current_dir(cwd)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn();
+        crate::launch::detach(Command::new("sh").args(["-c", &line]).current_dir(cwd));
     }
 }
 
@@ -317,11 +313,7 @@ pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
 
 pub fn kdeconnect_share(device: &KdeConnectDevice, paths: &[PathBuf]) {
     for p in paths {
-        let _ = Command::new("kdeconnect-cli")
-            .args(["-d", &device.id, "--share"])
-            .arg(p)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn();
+        crate::launch::detach(Command::new("kdeconnect-cli").args(["-d", &device.id, "--share"]).arg(p));
     }
 }
 

@@ -9,6 +9,7 @@ mod fs;
 mod handler;
 mod icons;
 mod keys;
+mod launch;
 mod apps;
 mod check;
 mod clipboard;

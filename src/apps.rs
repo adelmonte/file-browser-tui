@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -263,7 +263,7 @@ pub fn launch(app: &DesktopApp, paths: &[PathBuf], terminal: &str) {
         if let Some(dir) = paths.first().and_then(|p| p.parent()) {
             cmd.current_dir(dir);
         }
-        let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+        crate::launch::detach(&mut cmd);
     }
 }
 

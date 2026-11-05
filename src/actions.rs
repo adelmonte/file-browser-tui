@@ -1,7 +1,7 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
 };
 
 use crate::{
@@ -152,7 +152,7 @@ const KITTY_ARGS: &[&str] = &[
 /// selected).
 pub fn open_new_window(path: &Path) {
     if let Some(mut cmd) = kitty_command(Some(path)) {
-        spawn_detached_cmd(&mut cmd);
+        crate::launch::detach(&mut cmd);
     }
 }
 
@@ -177,13 +177,6 @@ pub fn kitty_command(path: Option<&Path>) -> Option<Command> {
     Some(cmd)
 }
 
-fn spawn_detached_cmd(cmd: &mut Command) {
-    // Own process group: closing this window (SIGHUP) mustn't take it along
-    use std::os::unix::process::CommandExt;
-    let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .process_group(0)
-        .spawn();
-}
 
 fn target_path(app: &App, target: MenuTarget) -> Option<PathBuf> {
     match target {
@@ -455,18 +448,12 @@ fn compress(app: &mut App, target: MenuTarget, targz: bool) {
 
     if targz {
         let out = unique_name(&parent, &format!("{name}.tar.gz"));
-        let _ = Command::new("tar")
-            .args(["-czf", out.to_string_lossy().as_ref(), "-C", parent.to_string_lossy().as_ref(), &name])
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn();
+        crate::launch::detach(Command::new("tar")
+            .args(["-czf", out.to_string_lossy().as_ref(), "-C", parent.to_string_lossy().as_ref(), &name]));
     } else {
         let out = unique_name(&parent, &format!("{name}.zip"));
         let out_name = out.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let _ = Command::new("zip")
-            .current_dir(&parent)
-            .args(["-r", &out_name, &name])
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn();
+        crate::launch::detach(Command::new("zip").current_dir(&parent).args(["-r", &out_name, &name]));
     }
 }
 
@@ -487,11 +474,7 @@ fn open_terminal(app: &App, dir: &Path) {
     let cmd = terminal_command(app);
     let mut parts = cmd.split_whitespace();
     let Some(bin) = parts.next() else { return; };
-    let _ = Command::new(bin)
-        .args(parts)
-        .current_dir(dir)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn();
+    crate::launch::detach(Command::new(bin).args(parts).current_dir(dir));
 }
 
 // ---------------------------------------------------------------------------
@@ -534,11 +517,7 @@ fn run_custom(app: &App, idx: usize, target: MenuTarget) {
         .replace("%f", &shell_quote(&path.to_string_lossy()))
         .replace("%d", &shell_quote(&dir.to_string_lossy()));
 
-    let _ = Command::new("sh")
-        .args(["-c", &cmd])
-        .current_dir(&dir)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn();
+    crate::launch::detach(Command::new("sh").args(["-c", &cmd]).current_dir(&dir));
 }
 
 fn shell_quote(s: &str) -> String {

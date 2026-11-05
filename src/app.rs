@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::mpsc};
+use std::{collections::HashMap, path::PathBuf, sync::mpsc};
 
 use ratatui::layout::{Rect, Size};
 use ratatui_image::picker::Picker;
@@ -1354,8 +1354,7 @@ impl App {
         if let Some(idx) = self.selection
             && let Some(entry) = self.listing.entries.get(idx) {
                 if entry.is_dir { return; }
-                let _ = std::process::Command::new("xdg-open").arg(&entry.path)
-                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+                crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
             }
     }
 
@@ -1365,8 +1364,7 @@ impl App {
                 if entry.is_dir {
                     self.navigate_to(entry.path);
                 } else {
-                    let _ = std::process::Command::new("xdg-open").arg(&entry.path)
-                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+                    crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
                 }
             }
     }

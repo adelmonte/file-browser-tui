@@ -73,9 +73,14 @@ pub fn write(mime: Option<&str>, data: &[u8]) {
         }
         None => return,
     };
-    if let Ok(mut child) = cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
+    // wl-copy/xclip stay running to serve the clipboard; in a session of
+    // their own, the copy survives this window closing
+    cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+    if let Ok(mut child) = crate::launch::spawn_own_session(&mut cmd)
         && let Some(mut stdin) = child.stdin.take()
     {
         let _ = stdin.write_all(data);
+        drop(stdin);
+        std::thread::spawn(move || { let _ = child.wait(); });
     }
 }
