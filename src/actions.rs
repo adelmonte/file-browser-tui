@@ -129,8 +129,8 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
 // Target resolution
 // ---------------------------------------------------------------------------
 
-/// Kitty options every window of the app is launched with (see the
-/// launchers): no padding, and Shift/Ctrl+Shift clicks passed to the app.
+/// Kitty options every window of the app is launched with (`--kitty`):
+/// no padding, and Shift/Ctrl+Shift clicks passed to the app.
 const KITTY_ARGS: &[&str] = &[
     "--app-id=file-browser-tui",
     "-o", "window_margin_width=0",
@@ -146,15 +146,30 @@ const KITTY_ARGS: &[&str] = &[
 /// Another window of the app at `path` (a file opens its folder with it
 /// selected).
 pub fn open_new_window(path: &Path) {
-    let Ok(exe) = std::env::current_exe() else { return; };
-    let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
-    spawn_detached_cmd(
-        Command::new("kitty")
-            .args(KITTY_ARGS)
-            .arg(format!("--directory={}", dir.display()))
-            .arg(exe)
-            .arg(path),
-    );
+    if let Some(mut cmd) = kitty_command(Some(path)) {
+        spawn_detached_cmd(&mut cmd);
+    }
+}
+
+/// Set in windows started by `kitty_command`, so the app knows kitty has
+/// its options.
+pub const KITTY_ENV: &str = "FILE_BROWSER_TUI_KITTY";
+
+/// A kitty window running this app with `KITTY_ARGS`, at `path` (a file
+/// opens its folder with it selected) or the current folder.
+pub fn kitty_command(path: Option<&Path>) -> Option<Command> {
+    let exe = std::env::current_exe().ok()?;
+    let mut cmd = Command::new("kitty");
+    cmd.args(KITTY_ARGS).env(KITTY_ENV, "1");
+    if let Some(path) = path {
+        let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+        cmd.arg(format!("--directory={}", dir.display()));
+    }
+    cmd.arg(exe);
+    if let Some(path) = path {
+        cmd.arg(path);
+    }
+    Some(cmd)
 }
 
 fn spawn_detached_cmd(cmd: &mut Command) {

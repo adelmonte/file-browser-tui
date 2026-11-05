@@ -38,6 +38,7 @@ pub fn run() -> i32 {
     let kitty = std::env::var_os("KITTY_WINDOW_ID").is_some()
         || std::env::var("TERM").is_ok_and(|t| t.contains("kitty"));
     line(kitty, "kitty", "images, smooth menus and drag and drop (other terminals get text-drawn icons)");
+    line(has_command("kitty"), "--kitty", "launch in a kitty window with the app's options (use in launchers)");
 
     println!("\nTools");
     for &(cmd, what, group) in TOOLS {

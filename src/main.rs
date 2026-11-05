@@ -35,6 +35,16 @@ use config::Config;
 fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("--check") => std::process::exit(check::run()),
+        Some("--kitty") => {
+            // Become a kitty window running the app with its options
+            use std::os::unix::process::CommandExt;
+            let path = std::env::args_os().nth(2).map(std::path::PathBuf::from)
+                .and_then(|p| std::fs::canonicalize(p).ok());
+            let Some(mut cmd) = actions::kitty_command(path.as_deref()) else { std::process::exit(1) };
+            let err = cmd.exec();
+            eprintln!("file-browser-tui: couldn't start kitty: {err}");
+            std::process::exit(1);
+        }
         Some("--version" | "-V") => {
             println!("file-browser-tui {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
@@ -59,6 +69,7 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let first_run = !Config::path().exists();
     let (config, config_err) = match Config::load() {
         Ok(c) => (c, None),
         Err(e) => {
@@ -113,6 +124,13 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
+    // Started in kitty some other way: say once how to get its options
+    if first_run
+        && app.picker.protocol_type() == ProtocolType::Kitty
+        && std::env::var_os(actions::KITTY_ENV).is_none()
+    {
+        app.notify("Tip: launch with `file-browser-tui --kitty` for Shift-click selection and no window padding".into());
+    }
     if let Some(p) = start.filter(|p| !p.is_dir()) {
         app.reveal(&p);
     }
@@ -156,10 +174,12 @@ fn main() -> anyhow::Result<()> {
 const HELP: &str = "\
 file-browser-tui: a Dolphin-like file manager for the terminal (best in kitty)
 
-Usage: file-browser-tui [PATH]
+Usage: file-browser-tui [--kitty] [PATH]
   PATH        folder to open, or a file to open its folder with it selected
 
 Options:
+  --kitty     open in a new kitty window set up for the app (no padding,
+              Shift/Ctrl+Shift clicks reach it); use this in launchers
   --check     list the optional tools and features found on this system
   --version   print the version
   --help      print this help
