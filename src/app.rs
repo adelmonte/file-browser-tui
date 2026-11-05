@@ -68,6 +68,22 @@ pub const TOPBAR_H: u16 = 3;
 pub const ICON_LEVELS: [u16; 20] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 27];
 pub const DEFAULT_ICON_LEVEL: usize = 3;
 
+/// Terminal rows a group header takes in Icons view (label, then a line;
+/// one more above it after the first group).
+pub const GROUP_HEADER_H: u16 = 2;
+
+/// A horizontal band of the Icons view: a group header or a row of items
+/// (entries `start..end`), `y` terminal rows from the top of the content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IconBand {
+    pub y: usize,
+    pub h: u16,
+    pub start: usize,
+    pub end: usize,
+    /// The group's label, for a header.
+    pub header: Option<String>,
+}
+
 /// Grid geometry for a zoom level: (cell_w, cell_h, icon_rows, img_w).
 /// The image is square in pixels, so its width in columns follows the font's
 /// aspect; the cell adds a small margin for labels so neighbours sit close
@@ -241,6 +257,15 @@ pub struct App {
 
     // Cached layout (updated on each render)
     pub grid_cols: u16,
+    /// Icons view layout, from the last frame (see `layout_icons`).
+    pub icon_bands: Vec<IconBand>,
+    /// What `icon_bands` was laid out for: (columns, cell height, grouped,
+    /// sort field, listing generation).
+    icon_layout_key: (u16, u16, bool, SortField, u64),
+    /// Bumped whenever the listing is replaced.
+    listing_gen: u64,
+    /// Show in Groups for the Icons view (`show_groups` is Details').
+    pub icon_groups: bool,
     pub grid_area: Rect,
     pub main_area: Rect,
 
@@ -435,6 +460,10 @@ impl App {
             topbar_crumbs: Vec::new(),
             topbar_path_rect: Rect::default(),
             grid_cols: 8,
+            icon_bands: Vec::new(),
+            icon_layout_key: (0, 0, false, SortField::Name, u64::MAX),
+            listing_gen: 0,
+            icon_groups: false,
             grid_area: Rect::default(),
             main_area: Rect::default(),
             last_terminal_size: terminal_size,
@@ -486,6 +515,7 @@ impl App {
 
         self.restore_mimes(&mut listing.entries);
 
+        self.listing_gen += 1;
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);
         self.free_space = free_space(&self.cwd);
@@ -716,6 +746,7 @@ impl App {
         self.folders_first = state.folders_first.unwrap_or(c.folders_first);
         self.show_hidden = state.show_hidden.unwrap_or(c.show_hidden);
         self.show_groups = state.groups.unwrap_or(c.show_in_groups);
+        self.icon_groups = state.icon_groups.unwrap_or(false);
         // Folders without their own zoom follow the home folder's
         let home_size = dirs::home_dir().and_then(|h| self.dirstates.get(&h)).and_then(|s| s.icon_size_idx);
         let idx = state.icon_size_idx.or(home_size).unwrap_or(c.icon_size_idx).min(ICON_LEVELS.len() - 1);
@@ -840,17 +871,106 @@ impl App {
         self.save_sort_state();
     }
 
-    /// Whether the listing is laid out in groups (Details, not searching).
+    /// Whether Show in Groups is on for the current view (each view has its
+    /// own: Details' defaults on, Icons' off).
+    pub fn groups_on(&self) -> bool {
+        match self.view_mode {
+            ViewMode::Details => self.show_groups,
+            ViewMode::Icons => self.icon_groups,
+            ViewMode::Compact => false,
+        }
+    }
+
+    /// Whether the listing is laid out in groups (not while searching).
     pub fn grouped(&self) -> bool {
-        self.show_groups && self.view_mode == ViewMode::Details
-            && !self.search.as_ref().is_some_and(|s| s.has_query())
+        self.groups_on() && !self.search.as_ref().is_some_and(|s| s.has_query())
     }
 
     pub fn toggle_groups(&mut self) {
-        self.show_groups = !self.show_groups;
-        let on = self.show_groups;
-        self.dirstates.update(&self.cwd, |s| s.groups = Some(on));
+        match self.view_mode {
+            ViewMode::Details => {
+                self.show_groups = !self.show_groups;
+                let on = self.show_groups;
+                self.dirstates.update(&self.cwd, |s| s.groups = Some(on));
+            }
+            ViewMode::Icons => {
+                self.icon_groups = !self.icon_groups;
+                let on = self.icon_groups;
+                self.dirstates.update(&self.cwd, |s| s.icon_groups = Some(on));
+            }
+            ViewMode::Compact => return,
+        }
         self.reload_dir();
+    }
+
+    /// Lay out the Icons view for `cols` columns: rows of items, and with
+    /// groups a header before each group, which starts a new row. Kept
+    /// until something it depends on changes.
+    pub fn layout_icons(&mut self, cols: u16) {
+        let grouped = self.grouped();
+        let key = (cols, self.cell_h, grouped, self.sort.field, self.listing_gen);
+        if key == self.icon_layout_key {
+            return;
+        }
+        self.icon_layout_key = key;
+        let cols = cols.max(1) as usize;
+        let n = self.listing.entries.len();
+        let mut bands = Vec::with_capacity(n / cols + 1);
+        let mut y = 0;
+        let push_rows = |bands: &mut Vec<IconBand>, y: &mut usize, start: usize, end: usize| {
+            for s in (start..end).step_by(cols) {
+                bands.push(IconBand { y: *y, h: self.cell_h, start: s, end: (s + cols).min(end), header: None });
+                *y += self.cell_h as usize;
+            }
+        };
+        if grouped {
+            let mut start = 0;
+            while start < n {
+                let (key, label) = crate::ui::groups::group_of(&self.listing.entries[start], self.sort.field);
+                let end = (start + 1..n)
+                    .find(|&i| crate::ui::groups::group_of(&self.listing.entries[i], self.sort.field).0 != key)
+                    .unwrap_or(n);
+                // Later groups get a blank row above their header
+                let h = GROUP_HEADER_H + (start > 0) as u16;
+                bands.push(IconBand { y, h, start, end: start, header: Some(label) });
+                y += h as usize;
+                push_rows(&mut bands, &mut y, start, end);
+                start = end;
+            }
+        } else {
+            push_rows(&mut bands, &mut y, 0, n);
+        }
+        self.icon_bands = bands;
+    }
+
+    /// Height of the whole Icons view content, in terminal rows.
+    pub fn icons_height(&self) -> usize {
+        self.icon_bands.last().map_or(0, |b| b.y + b.h as usize)
+    }
+
+    /// The Icons band holding entry `idx`.
+    pub fn band_of(&self, idx: usize) -> Option<usize> {
+        let i = self.icon_bands.partition_point(|b| b.end <= idx);
+        (i < self.icon_bands.len()).then_some(i)
+    }
+
+    /// The Icons band at content row `y`.
+    pub fn band_at(&self, y: usize) -> usize {
+        self.icon_bands.partition_point(|b| b.y + b.h as usize <= y)
+    }
+
+    /// The entry above or below `idx` in Icons view: same column in the
+    /// next row of items (past group headers), or the row's last item.
+    pub fn icon_neighbor(&self, idx: usize, down: bool) -> Option<usize> {
+        let b = self.band_of(idx)?;
+        let col = idx - self.icon_bands[b].start;
+        let rows: Box<dyn Iterator<Item = &IconBand>> = if down {
+            Box::new(self.icon_bands[b + 1..].iter())
+        } else {
+            Box::new(self.icon_bands[..b].iter().rev())
+        };
+        let row = rows.into_iter().find(|r| r.header.is_none())?;
+        Some((row.start + col).min(row.end - 1))
     }
 
     /// The Details line showing entry `idx`.
@@ -868,8 +988,8 @@ impl App {
     pub fn set_view_mode(&mut self, view: ViewMode) {
         if view != self.view_mode {
             self.view_mode = view;
-            // The tree and groups only exist in Details
-            if !self.expanded.is_empty() || self.show_groups {
+            // The tree only exists in Details; groups are per view
+            if !self.expanded.is_empty() || self.show_groups || self.icon_groups {
                 self.reload_dir();
             }
         }
@@ -945,6 +1065,13 @@ impl App {
             _ => (self.grid_cols.max(1) as usize, (self.grid_area.height / self.cell_h + 2) as usize),
         };
         let (mut start, mut end) = (self.scroll_offset * cols, ((self.scroll_offset + rows_visible) * cols).min(self.listing.entries.len()));
+        // Icons view: the entries in the bands on screen
+        if self.view_mode == ViewMode::Icons && !self.icon_bands.is_empty() {
+            let top = self.scroll_offset.min(self.icon_bands.len() - 1);
+            let bottom = self.band_at(self.icon_bands[top].y + self.scroll_sub as usize + self.grid_area.height as usize)
+                .min(self.icon_bands.len() - 1);
+            (start, end) = (self.icon_bands[top].start, self.icon_bands[bottom].end.max(self.icon_bands[top].start));
+        }
         // Details lines include group headers: take the entries they show
         if self.view_mode == ViewMode::Details && !self.details_rows.is_empty() {
             use crate::ui::groups::DRow;
@@ -1165,6 +1292,7 @@ impl App {
         let mut listing = DirListing { entries };
         self.restore_mimes(&mut listing.entries);
         crate::fs::sort_entries(&mut listing.entries, self.folders_first, &self.sort);
+        self.listing_gen += 1;
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);
     }
@@ -1247,11 +1375,32 @@ impl App {
     }
 
     pub fn move_selection_rows(&mut self, delta_row: i32) {
+        if self.view_mode == ViewMode::Icons && let Some(cur) = self.selection {
+            let mut idx = cur;
+            for _ in 0..delta_row.unsigned_abs() {
+                idx = self.icon_neighbor(idx, delta_row > 0).unwrap_or(idx);
+            }
+            self.move_selection(idx as i32 - cur as i32);
+            return;
+        }
         let cols = match self.view_mode {
             ViewMode::Details => 1,
             _ => self.grid_cols.max(1) as i32,
         };
         self.move_selection(delta_row * cols);
+    }
+
+    /// Rows up or down from the selection as an index step (Icons view
+    /// steps over group headers), for extending the selection.
+    pub fn row_step(&self, down: bool) -> i32 {
+        if self.view_mode == ViewMode::Icons
+            && let Some(cur) = self.selection
+            && let Some(n) = self.icon_neighbor(cur, down)
+        {
+            return n as i32 - cur as i32;
+        }
+        let cols = self.grid_cols.max(1) as i32;
+        if down { cols } else { -cols }
     }
 
     /// Extend the multi-selection by delta cells from the current anchor.
@@ -1277,8 +1426,7 @@ impl App {
     }
 
     fn max_scroll(&self) -> f32 {
-        let rows = self.listing.entries.len().div_ceil(self.grid_cols.max(1) as usize);
-        (rows as f32 * self.cell_h as f32 - self.grid_area.height as f32).max(0.0)
+        (self.icons_height() as f32 - self.grid_area.height as f32).max(0.0)
     }
 
     /// Scroll the Icons view by `rows` terminal rows (animated).
@@ -1296,8 +1444,11 @@ impl App {
             self.scroll_target = self.scroll_pos;
             return false;
         }
+        // In Icons view scroll_offset is the band at the top, scroll_sub
+        // how far into it
+        let _ = ch;
         if self.scroll_offset != self.scroll_seen {
-            self.scroll_pos = (self.scroll_offset * ch) as f32;
+            self.scroll_pos = self.icon_bands.get(self.scroll_offset).map_or(0, |b| b.y) as f32;
             self.scroll_target = self.scroll_pos;
         }
         self.scroll_target = self.scroll_target.clamp(0.0, self.max_scroll());
@@ -1305,8 +1456,8 @@ impl App {
         let moving = d.abs() >= 0.5;
         self.scroll_pos = if moving { self.scroll_pos + d * 0.35 } else { self.scroll_target };
         let rows = self.scroll_pos.round().max(0.0) as usize;
-        self.scroll_offset = rows / ch;
-        self.scroll_sub = (rows % ch) as u16;
+        self.scroll_offset = self.band_at(rows).min(self.icon_bands.len().saturating_sub(1));
+        self.scroll_sub = rows.saturating_sub(self.icon_bands.get(self.scroll_offset).map_or(0, |b| b.y)) as u16;
         self.scroll_seen = self.scroll_offset;
         moving
     }
@@ -1316,7 +1467,12 @@ impl App {
             // Bring the whole item into view, animated
             let Some(idx) = self.selection else { return; };
             let ch = self.cell_h as f32;
-            let top = (idx / self.grid_cols.max(1) as usize) as f32 * ch;
+            let Some(b) = self.band_of(idx) else { return; };
+            // A group's first row shows its header with it
+            let header = b > 0 && self.icon_bands[b - 1].header.is_some();
+            let header_h = if header { GROUP_HEADER_H as f32 } else { 0.0 };
+            let top = self.icon_bands[b].y as f32 - header_h;
+            let ch = ch + header_h;
             let h = self.grid_area.height as f32;
             if top < self.scroll_target {
                 self.scroll_target = top;

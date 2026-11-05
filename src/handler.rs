@@ -52,9 +52,7 @@ fn contains(rect: Rect, col: u16, row: u16) -> bool {
 pub(crate) fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     let count = app.listing.entries.len();
     match app.view_mode {
-        ViewMode::Icons => {
-            cell_at_pos((col, row), app.grid_area, (app.scroll_offset, app.scroll_sub), app.grid_cols, count, (app.grid_pitch, app.cell_h))
-        }
+        ViewMode::Icons => crate::ui::grid::icon_at_pos(app, col, row),
         ViewMode::Compact => {
             cell_at_pos((col, row), app.grid_area, (app.scroll_offset, 0), app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
         }
@@ -291,12 +289,12 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         KeyCode::Left  if ev.modifiers.contains(KeyModifiers::SHIFT) => app.extend_selection(-1),
         KeyCode::Right if ev.modifiers.contains(KeyModifiers::SHIFT) => app.extend_selection(1),
         KeyCode::Up    if ev.modifiers.contains(KeyModifiers::SHIFT) => {
-            let cols = app.grid_cols.max(1) as i32;
-            app.extend_selection(-cols);
+            let step = app.row_step(false);
+            app.extend_selection(step);
         }
         KeyCode::Down  if ev.modifiers.contains(KeyModifiers::SHIFT) => {
-            let cols = app.grid_cols.max(1) as i32;
-            app.extend_selection(cols);
+            let step = app.row_step(true);
+            app.extend_selection(step);
         }
 
         // Navigation (plain, clears multi-selection)

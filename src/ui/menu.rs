@@ -378,8 +378,9 @@ pub fn build_view_menu(app: &App) -> Vec<MenuItem> {
         MenuItem::new(format!("{check}{icon} {v}"), MenuAction::SetView(v))
     }).collect();
     items.push(MenuItem::sep());
-    let check = if app.show_groups { "\u{f00c} " } else { "  " };
-    items.push(MenuItem::new(format!("{check}\u{f0c9} Show in Groups"), MenuAction::ToggleGroups));
+    let check = if app.groups_on() { "\u{f00c} " } else { "  " };
+    items.push(MenuItem::new(format!("{check}\u{f0c9} Show in Groups"), MenuAction::ToggleGroups)
+        .enabled_if(app.view_mode != ViewMode::Compact));
     items
 }
 

@@ -90,8 +90,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     // One column of breathing room on each side so neighbouring labels never touch
     let label_w = if cell_w >= 6 { cell_w as usize - 1 } else { cell_w as usize };
 
+    app.layout_icons(cols);
     let hovered = if app.menu.is_none() && matches!(app.drag_state, DragState::Idle) {
-        app.mouse_pos.and_then(|p| cell_at_pos(p, area, (app.scroll_offset, app.scroll_sub), cols, entries_len, (pitch, cell_h)))
+        app.mouse_pos.and_then(|(c, r)| icon_at_pos(app, c, r))
     } else {
         None
     };
@@ -100,14 +101,20 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     // or bottom edge are drawn whole off-screen and only their visible rows
     // copied in (Kitty placeholders address each cell, so images clip too)
     let geo = CellGeo { cell_w, cell_h, icon_rows, img_w_cells, img_x_off, label_w };
-    let sub = app.scroll_sub as i32;
-    for row_idx in 0..rows_visible {
-        let abs_row = app.scroll_offset + row_idx;
-        let y = area.y as i32 + row_idx as i32 * cell_h as i32 - sub;
+    // Bands from the one at the top, shifted by how far into it we are
+    let _ = rows_visible;
+    let Some(first) = app.icon_bands.get(app.scroll_offset) else { return; };
+    let origin = first.y as i32 + app.scroll_sub as i32;
+    for bi in app.scroll_offset..app.icon_bands.len() {
+        let band = app.icon_bands[bi].clone();
+        let y = area.y as i32 + band.y as i32 - origin;
         if y >= area.bottom() as i32 { break; }
-        for col_idx in 0..cols as usize {
-            let entry_idx = abs_row * cols as usize + col_idx;
-            if entry_idx >= entries_len { break; }
+        if let Some(label) = &band.header {
+            // Label and line at the bottom of the band (a gap row above)
+            draw_group_header(f.buffer_mut(), area, y + band.h as i32 - 2, label);
+            continue;
+        }
+        for (col_idx, entry_idx) in (band.start..band.end).enumerate() {
             let cell_x = area.x + col_idx as u16 * pitch + item_off;
 
             let top = y.max(area.y as i32) as u16;
@@ -133,6 +140,35 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
+}
+
+/// A group's header in Icons view: its label, then a thin line under it
+/// across the view (rows outside `area` clipped).
+fn draw_group_header(buf: &mut Buffer, area: Rect, y: i32, label: &str) {
+    let x = area.x + 1;
+    let w = area.width.saturating_sub(2);
+    if (area.y as i32..area.bottom() as i32).contains(&y) {
+        let text: String = label.chars().take(w as usize).collect();
+        buf.set_string(x, y as u16, text, Style::default().fg(theme::text()).add_modifier(ratatui::style::Modifier::BOLD));
+    }
+    let line_y = y + 1;
+    if (area.y as i32..area.bottom() as i32).contains(&line_y) {
+        buf.set_string(x, line_y as u16, "\u{2500}".repeat(w as usize), Style::default().fg(theme::border()));
+    }
+}
+
+/// The entry under a position in Icons view (None between items and on
+/// group headers).
+pub fn icon_at_pos(app: &App, col: u16, row: u16) -> Option<usize> {
+    let area = app.grid_area;
+    if !area.contains(ratatui::layout::Position { x: col, y: row }) { return None; }
+    let first = app.icon_bands.get(app.scroll_offset)?;
+    let y = first.y + app.scroll_sub as usize + (row - area.y) as usize;
+    let band = app.icon_bands.get(app.band_at(y))?;
+    if band.header.is_some() { return None; }
+    let c = ((col - area.x) / app.grid_pitch.max(1)) as usize;
+    let idx = band.start + c;
+    (c < app.grid_cols as usize && idx < band.end).then_some(idx)
 }
 
 struct CellGeo {

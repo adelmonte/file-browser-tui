@@ -24,7 +24,7 @@ fn metrics(app: &App) -> (f32, f32, f32, u16, u16) {
     let cols = app.grid_cols.max(1) as usize;
     match app.view_mode {
         ViewMode::Icons => (
-            (n.div_ceil(cols) * app.cell_h as usize) as f32, area.height as f32,
+            app.icons_height() as f32, area.height as f32,
             app.scroll_pos, area.y, area.height,
         ),
         ViewMode::Compact => (
