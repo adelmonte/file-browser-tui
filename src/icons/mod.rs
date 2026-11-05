@@ -86,7 +86,19 @@ pub fn fit_to_cells(
         max_h = max_h.min(fit.max_rows * font.height as f32);
     }
     let max_h = (max_h as u32).max(1);
-    let fitted = img.resize(box_w, max_h, image::imageops::FilterType::Triangle).to_rgba8();
+    // Icons come rasterized at this size (see App::icon_target_px), so
+    // usually nothing is resized; shrinking otherwise averages areas,
+    // much faster than a filter
+    let (iw, ih) = (img.width().max(1), img.height().max(1));
+    let scale = (box_w as f32 / iw as f32).min(max_h as f32 / ih as f32);
+    let (w, h) = (((iw as f32 * scale).round() as u32).clamp(1, box_w), ((ih as f32 * scale).round() as u32).clamp(1, max_h));
+    let fitted = if (w, h) == (iw, ih) {
+        img.to_rgba8()
+    } else if scale < 1.0 {
+        image::imageops::thumbnail(&img.to_rgba8(), w, h)
+    } else {
+        img.resize(box_w, max_h, image::imageops::FilterType::Triangle).to_rgba8()
+    };
     let fill = match bg {
         Some((r, g, b)) => image::Rgba([r, g, b, 255]),
         None => image::Rgba([0, 0, 0, 0]),
@@ -282,6 +294,11 @@ impl IconCache {
         }
     }
 
+    /// Whether requested icons are still loading (prefetches aside).
+    pub fn loading(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Mime type from a previous resolution of this path, if any.
     pub fn cached_mime(&self, path: &Path) -> Option<&Option<String>> {
         self.mimes.peek(path)
@@ -365,5 +382,6 @@ impl IconCache {
         self.protocols.clear();
     }
 }
+
 
 

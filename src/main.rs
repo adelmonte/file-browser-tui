@@ -203,6 +203,16 @@ fn run(
     app.grid_cols = (app.main_area.width / app.cell_w).max(1);
     app.last_terminal_size = ratatui::layout::Size { width: sz.width, height: sz.height };
     app.queue_visible_icons();
+    // A new window shows up complete: give the first frame's icons a
+    // moment to load instead of drawing without them
+    ui::sidebar::request_icons(app);
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_millis(150)
+        && (app.icon_cache.loading() || app.sidebar_icons.loading() || app.thumb_cache.loading())
+    {
+        std::thread::sleep(Duration::from_millis(2));
+        app.drain_channels();
+    }
 
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();

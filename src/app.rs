@@ -860,9 +860,12 @@ impl App {
 
     /// Pixel size to render icons at.
     pub fn icon_target_px(&self) -> u32 {
+        // The size the grid draws them (icons::fit_to_cells), so a
+        // frame full of new icons doesn't resize each one
         let fs = self.picker.font_size();
-        let px = fs.height as u32 * self.icon_rows as u32;
-        px.clamp(32, 512)
+        let img_w = icon_dims(self.icon_size_idx, fs).3 as u32;
+        let max_h = ((fs.height as u32 * self.icon_rows as u32) as f32 * crate::icons::GRID_FIT.max_h) as u32;
+        max_h.min(img_w * fs.width as u32).clamp(32, 512)
     }
 
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).
