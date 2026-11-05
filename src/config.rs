@@ -15,6 +15,8 @@ pub struct Config {
     #[serde(default)]
     pub sort: SortConfig,
     #[serde(default)]
+    pub layout: LayoutConfig,
+    #[serde(default)]
     pub show_hidden: bool,
     #[serde(default = "default_true")]
     pub folders_first: bool,
@@ -102,6 +104,35 @@ impl Default for SortConfig {
     }
 }
 
+/// Spacing of the Icons and Compact views.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LayoutConfig {
+    /// Columns added to the icon's width for each Icons view cell.
+    pub icon_spacing: u16,
+    /// Lines of name under each icon.
+    pub icon_label_lines: u16,
+    /// Width of each Compact view column.
+    pub compact_width: u16,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self { icon_spacing: 2, icon_label_lines: 2, compact_width: 22 }
+    }
+}
+
+impl LayoutConfig {
+    /// Within what the views can draw.
+    pub fn clamped(self) -> Self {
+        Self {
+            icon_spacing: self.icon_spacing.min(20),
+            icon_label_lines: self.icon_label_lines.clamp(1, 6),
+            compact_width: self.compact_width.clamp(8, 80),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -138,6 +169,7 @@ impl Default for Config {
             places: default_places(),
             default_view: ViewMode::Icons,
             sort: SortConfig::default(),
+            layout: LayoutConfig::default(),
             show_hidden: false,
             folders_first: true,
             show_in_groups: true,
@@ -246,6 +278,11 @@ sidebar_w = 18                  # sidebar width in columns (also set by dragging
 # [sort]
 # field = "name"                # name, size, modified, created, accessed or type
 # ascending = true
+
+# [layout]
+# icon_spacing = 2              # Icons view: columns added to each icon's width
+# icon_label_lines = 2          # Icons view: lines of name under each icon (1-6)
+# compact_width = 22            # Compact view: width of each column
 
 # Custom icons for particular folders, by icon theme name.
 # [folder_icons]

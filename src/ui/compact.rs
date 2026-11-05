@@ -8,14 +8,16 @@ use ratatui::{
 use crate::app::App;
 use crate::ui::{grid::centered_grid_area, theme};
 
-pub const COMPACT_CELL_W: u16 = 22;
+pub fn compact_cell_w() -> u16 {
+    crate::app::layout().compact_width
+}
 pub const COMPACT_CELL_H: u16 = 2;
 
 pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Block::default(), area);
 
-    let area = centered_grid_area(area, COMPACT_CELL_W);
-    let cols = (area.width / COMPACT_CELL_W).max(1);
+    let area = centered_grid_area(area, compact_cell_w());
+    let cols = (area.width / compact_cell_w()).max(1);
     app.grid_cols = cols;
     app.grid_area = area;
 
@@ -28,11 +30,11 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             let entry_idx = abs_row * cols as usize + col_idx;
             if entry_idx >= entries_len { break; }
 
-            let cell_x = area.x + col_idx as u16 * COMPACT_CELL_W;
+            let cell_x = area.x + col_idx as u16 * compact_cell_w();
             let cell_y = area.y + row_idx as u16 * COMPACT_CELL_H;
             if cell_y >= area.y + area.height { break; }
 
-            app.item_rects.push((entry_idx, Rect { x: cell_x + 1, y: cell_y, width: COMPACT_CELL_W - 1, height: 1 }));
+            app.item_rects.push((entry_idx, Rect { x: cell_x + 1, y: cell_y, width: compact_cell_w() - 1, height: 1 }));
             let entry = &app.listing.entries[entry_idx];
             let is_selected = app.selection == Some(entry_idx)
                 || app.multi_selection.contains(&entry_idx);
@@ -46,7 +48,7 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             };
 
             // Cell = 1-col gutter + " icon name " highlighted as one block
-            let inner_w = COMPACT_CELL_W as usize - 1;
+            let inner_w = compact_cell_w() as usize - 1;
             let name = truncate_name(&entry.name, inner_w - 4);
             let text = format!(" {icon} {name}");
 

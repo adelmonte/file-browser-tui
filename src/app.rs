@@ -84,6 +84,13 @@ pub struct IconBand {
     pub header: Option<String>,
 }
 
+static LAYOUT: std::sync::OnceLock<crate::config::LayoutConfig> = std::sync::OnceLock::new();
+
+/// The config's `[layout]`, set once at startup.
+pub fn layout() -> crate::config::LayoutConfig {
+    LAYOUT.get().copied().unwrap_or_default()
+}
+
 /// Grid geometry for a zoom level: (cell_w, cell_h, icon_rows, img_w).
 /// The image is square in pixels, so its width in columns follows the font's
 /// aspect; the cell adds a small margin for labels so neighbours sit close
@@ -95,9 +102,10 @@ pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16,
     // Only as wide as the image actually drawn (GRID_FIT shrinks it to
     // leave a gap above), or every cell carries invisible width
     let img_w = ((rows as f32 * fh / fw * crate::icons::GRID_FIT.max_h).round() as u16).max(2);
-    let cell_w = (img_w + 2).max(8);
+    let layout = layout();
+    let cell_w = (img_w + layout.icon_spacing).max(8);
     let icon_rows = rows;
-    (cell_w, icon_rows + 2, icon_rows, img_w)
+    (cell_w, icon_rows + layout.icon_label_lines, icon_rows, img_w)
 }
 
 /// Image identity rendered in a cell this frame: (rect, bg variant, dimmed).
@@ -345,6 +353,7 @@ impl App {
         crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
 
         let terminal_size = Size { width: 220, height: 50 };
+        let _ = LAYOUT.set(config.layout.clamped());
         let icon_size_idx = config.icon_size_idx.min(ICON_LEVELS.len() - 1);
         let view_mode = config.default_view;
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());

@@ -9,7 +9,7 @@ use crate::{
     app::{App, TOPBAR_H, ViewMode},
     events::{ClickKind, ClipOp, ConfirmDeleteState, DragState, DRAG_THRESHOLD},
     ui::{
-        compact::{COMPACT_CELL_H, COMPACT_CELL_W},
+        compact::{COMPACT_CELL_H, compact_cell_w},
         grid::{cell_at_pos, details_row_at_pos},
         menu::{self, MenuKind, MenuOutcome, MenuState, MenuTarget},
         sidebar,
@@ -54,7 +54,7 @@ pub(crate) fn hit_test(app: &App, col: u16, row: u16) -> Option<usize> {
     match app.view_mode {
         ViewMode::Icons => crate::ui::grid::icon_at_pos(app, col, row),
         ViewMode::Compact => {
-            cell_at_pos((col, row), app.grid_area, (app.scroll_offset, 0), app.grid_cols, count, (COMPACT_CELL_W, COMPACT_CELL_H))
+            cell_at_pos((col, row), app.grid_area, (app.scroll_offset, 0), app.grid_cols, count, (compact_cell_w(), COMPACT_CELL_H))
         }
         ViewMode::Details => {
             details_row_at_pos(row, app.grid_area, app.scroll_offset, &app.details_rows)
