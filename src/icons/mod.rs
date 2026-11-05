@@ -3,6 +3,7 @@ mod theme;
 pub mod raster;
 pub mod resolver;
 
+use std::sync::Arc;
 use std::{
     collections::HashSet,
     num::NonZeroUsize,
@@ -15,7 +16,7 @@ use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 pub struct IconImageReady {
     pub path: PathBuf,
-    pub image: Option<image::DynamicImage>,
+    pub image: Option<Arc<image::DynamicImage>>,
     pub mime_type: Option<String>,
 }
 
@@ -121,7 +122,7 @@ type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>, bool);
 pub struct IconCache {
     /// Raw rasterized icons keyed by path; protocols are rebuilt from these.
     /// `None` = resolved but no icon found (don't re-request).
-    images: LruCache<PathBuf, Option<image::DynamicImage>>,
+    images: LruCache<PathBuf, Option<Arc<image::DynamicImage>>>,
     /// Resolved mime types; independent of icon size, so survives `clear`.
     mimes: LruCache<PathBuf, Option<String>>,
     protocols: LruCache<ProtoKey, StatefulProtocol>,
@@ -154,12 +155,12 @@ impl IconCache {
                     let resolved = resolver::resolve_icon_path(&icon_names, req.is_dir);
                     let is_link = req.path.symlink_metadata().is_ok_and(|m| m.is_symlink());
                     let mut image = resolved.and_then(|(icon_path, is_svg)| {
-                        raster::load_icon(&icon_path, is_svg, req.target_px)
+                        raster::load_icon_shared(&icon_path, is_svg, req.target_px)
                             .map_err(|e| { tracing::warn!("load_icon {:?}: {e}", icon_path); e })
                             .ok()
                     });
                     if is_link && let Some(img) = &mut image {
-                        add_link_emblem(img);
+                        add_link_emblem(Arc::make_mut(img));
                     }
                     let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
                     let Some(base) = image.clone().filter(|_| wants_preview) else {
@@ -178,7 +179,7 @@ impl IconCache {
                             if is_link {
                                 add_link_emblem(&mut p);
                             }
-                            p
+                            Arc::new(p)
                         }));
                     });
                     let send = |image| { let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone() }); };
@@ -197,7 +198,8 @@ impl IconCache {
         });
 
         Self {
-            images: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            // Plain icons are shared rasters, so many entries cost little
+            images: LruCache::new(NonZeroUsize::new(5000).unwrap()),
             protocols: LruCache::new(NonZeroUsize::new(500).unwrap()),
             mimes: LruCache::new(NonZeroUsize::new(20_000).unwrap()),
             tx_work,
@@ -270,7 +272,7 @@ impl IconCache {
 
     /// The loaded image for a path, if any.
     pub fn image(&self, path: &Path) -> Option<&image::DynamicImage> {
-        self.images.peek(path)?.as_ref()
+        self.images.peek(path)?.as_deref()
     }
 
     /// Drop all protocol variants for a path (raw image stays cached).
@@ -297,4 +299,5 @@ impl IconCache {
         self.protocols.clear();
     }
 }
+
 

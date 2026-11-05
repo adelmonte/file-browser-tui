@@ -4,6 +4,24 @@ use image::DynamicImage;
 
 /// Load an icon image, rasterizing SVG via rsvg-convert if needed.
 /// Rasterized SVGs are cached persistently so each icon converts once per size.
+/// Rasterized theme icons by (file, size): files of one type share an icon,
+/// so a folder full of PDFs rasterizes the PDF icon once.
+type SharedIcons = lru::LruCache<(std::path::PathBuf, u32), std::sync::Arc<DynamicImage>>;
+static SHARED: std::sync::Mutex<Option<SharedIcons>> = std::sync::Mutex::new(None);
+
+pub fn load_icon_shared(path: &Path, is_svg: bool, target_px: u32) -> anyhow::Result<std::sync::Arc<DynamicImage>> {
+    let key = (path.to_path_buf(), target_px);
+    if let Some(img) = SHARED.lock().ok().and_then(|mut c| c.as_mut()?.get(&key).cloned()) {
+        return Ok(img);
+    }
+    let img = std::sync::Arc::new(load_icon(path, is_svg, target_px)?);
+    if let Ok(mut c) = SHARED.lock() {
+        c.get_or_insert_with(|| lru::LruCache::new(std::num::NonZeroUsize::new(400).unwrap()))
+            .put(key, img.clone());
+    }
+    Ok(img)
+}
+
 pub fn load_icon(path: &Path, is_svg: bool, target_px: u32) -> anyhow::Result<DynamicImage> {
     if !is_svg {
         let img = image::open(path)?;
