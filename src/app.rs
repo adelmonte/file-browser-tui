@@ -1156,7 +1156,7 @@ impl App {
         };
 
         let name = state.input.as_str();
-        if name == entry.name {
+        if name == entry.name || (name.is_empty() && state.placeholder.is_some()) {
             self.rename_state = None;
             return;
         }

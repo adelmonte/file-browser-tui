@@ -329,16 +329,17 @@ fn paste_system(app: &mut App, dest: &Path) {
     app.paste_name = Some(crate::events::PasteNameState {
         dest: dest.to_path_buf(),
         data,
-        cursor_pos: name.len(),
-        input: name,
+        cursor_pos: 0,
+        input: String::new(),
         invalid: false,
+        placeholder: name,
     });
 }
 
 /// Write the named clipboard content; a bad or taken name keeps the prompt.
 pub fn commit_paste_name(app: &mut App) {
     let Some(state) = &mut app.paste_name else { return; };
-    let name = state.input.trim();
+    let name = if state.input.trim().is_empty() { state.placeholder.as_str() } else { state.input.trim() };
     let path = state.dest.join(name);
     if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.exists() {
         state.invalid = true;
@@ -461,7 +462,7 @@ fn create_new(app: &mut App, is_dir: bool) {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     if let Some(idx) = app.listing.entries.iter().position(|e| e.name == name) {
         app.selection = Some(idx);
-        start_rename(app, idx);
+        app.rename_state = Some(RenameState::fresh(idx, &name));
     }
 }
 

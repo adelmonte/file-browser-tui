@@ -194,15 +194,21 @@ fn render_paste_name(f: &mut Frame, app: &App) {
     let chars: Vec<char> = shown.chars().collect();
     let cur = shown[..p.cursor_pos.min(p.input.len())].chars().count();
     let start = (cur + 1).saturating_sub(field_w);
-    let visible: String = chars.iter().skip(start).take(field_w).collect();
+    let mut visible: String = chars.iter().skip(start).take(field_w).collect();
     let field_bg = if p.invalid { theme::NORD11 } else { theme::INPUT };
+    let mut field_fg = Color::White;
+    if p.input.is_empty() {
+        // Greyed suggestion, used if nothing is typed
+        visible = format!("{}{}", crate::lineedit::bar_cursor(), p.placeholder).chars().take(field_w).collect();
+        field_fg = theme::MUTED;
+    }
 
     let lines = vec![
         Line::raw("  Filename for clipboard content:"),
         Line::raw(""),
         Line::from(vec![
             ratatui::text::Span::raw("  "),
-            ratatui::text::Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::rgb(field_bg)).fg(Color::White)),
+            ratatui::text::Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::rgb(field_bg)).fg(field_fg)),
         ]),
         Line::raw(""),
         Line::styled("  [Enter]  Save     [Esc]  Cancel", Style::default().add_modifier(Modifier::BOLD)),

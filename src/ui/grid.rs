@@ -206,12 +206,21 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
     if let Some(ref rename) = app.rename_state
         && rename.item_idx == entry_idx {
             // Thin bar marks the cursor inside the wrapped name
-            let mut shown = rename.input.clone();
-            shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
-            let lines = wrap_label(&shown, label_w, label_rows);
             let bg = if rename.invalid { theme::NORD11 } else { theme::SEL };
+            let style = Style::default().bg(rgb(bg)).fg(Color::White).add_modifier(Modifier::BOLD);
+            // Empty new item: cursor, then its default name greyed
+            let (shown, style) = match &rename.placeholder {
+                Some(p) if rename.input.is_empty() =>
+                    (format!("{}{p}", crate::lineedit::bar_cursor()), style.fg(theme::MUTED).remove_modifier(Modifier::BOLD)),
+                _ => {
+                    let mut shown = rename.input.clone();
+                    shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
+                    (shown, style)
+                }
+            };
+            let lines = wrap_label(&shown, label_w, label_rows);
             Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))
-                .style(Style::default().bg(rgb(bg)).fg(Color::White).add_modifier(Modifier::BOLD))
+                .style(style)
                 .render(label_rect, buf);
             return;
         }

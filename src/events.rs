@@ -134,6 +134,8 @@ pub struct PasteNameState {
     pub cursor_pos: usize,
     /// Last commit was rejected (bad name or file exists); cleared on edit.
     pub invalid: bool,
+    /// Shown greyed while the field is empty, and used if it's left empty.
+    pub placeholder: String,
 }
 
 pub struct RenameState {
@@ -142,6 +144,9 @@ pub struct RenameState {
     pub cursor_pos: usize,
     /// Last commit was rejected (bad name or target exists); cleared on edit.
     pub invalid: bool,
+    /// A just-created item: the field starts empty with its name greyed,
+    /// and committing it empty keeps that name.
+    pub placeholder: Option<String>,
 }
 
 impl RenameState {
@@ -152,6 +157,11 @@ impl RenameState {
             input: current_name.to_string(),
             cursor_pos: len,
             invalid: false,
+            placeholder: None,
         }
+    }
+
+    pub fn fresh(item_idx: usize, name: &str) -> Self {
+        Self { item_idx, input: String::new(), cursor_pos: 0, invalid: false, placeholder: Some(name.to_string()) }
     }
 }
