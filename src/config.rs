@@ -168,17 +168,116 @@ impl Config {
         Self { read_only: true, ..Self::default() }
     }
 
+    /// Write back what the app changes itself (Places, sidebar width),
+    /// editing those keys in place so the rest of the file, comments
+    /// included, stays as the user wrote it. A first run writes the
+    /// commented template.
     pub fn save(&self) -> Result<()> {
         if self.read_only {
             return Ok(());
         }
-        let path = config_path();
+        self.save_to(&config_path())
+    }
+
+    fn save_to(&self, path: &std::path::Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, toml::to_string_pretty(self)?)?;
+        let text = std::fs::read_to_string(path).unwrap_or_else(|_| template());
+        let mut doc: toml_edit::DocumentMut = text.parse()
+            .with_context(|| format!("parsing {}", path.display()))?;
+        self.apply_to(&mut doc)?;
+        let out = doc.to_string();
+        if out != text || !path.exists() {
+            std::fs::write(path, out)?;
+        }
         Ok(())
     }
+
+    fn apply_to(&self, doc: &mut toml_edit::DocumentMut) -> Result<()> {
+        let owned: toml_edit::DocumentMut = toml::to_string(&Owned { sidebar_w: self.sidebar_w, places: &self.places })?.parse()?;
+        if doc.get("sidebar_w").and_then(|v| v.as_integer()) != Some(self.sidebar_w as i64) {
+            doc["sidebar_w"] = owned["sidebar_w"].clone();
+        }
+        let same_places = doc.get("places").map(|p| p.to_string()) == owned.get("places").map(|p| p.to_string());
+        if !same_places {
+            doc["places"] = owned["places"].clone();
+        }
+        Ok(())
+    }
+}
+
+/// The parts of the config the app itself changes.
+#[derive(Serialize)]
+struct Owned<'a> {
+    sidebar_w: u16,
+    places: &'a [PlaceConfig],
+}
+
+/// A new user's config: every option, commented out at its default.
+fn template() -> String {
+    use std::fmt::Write;
+    let mut s = String::from(r#"# file-browser-tui configuration. Uncomment a line to change it.
+# View settings are remembered per folder; these are the defaults for
+# folders you haven't changed.
+
+# default_view = "icons"        # icons, compact or details
+# show_hidden = false
+# folders_first = true
+# show_in_groups = true         # Details view: Dolphin's "Show in Groups"
+# icon_size_idx = 7             # 0 (smallest) to 19
+# folder_previews = true        # show a folder's pictures on its icon
+# terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
+sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
+
+# Which files show a preview of their content, by Dolphin's thumbnailer
+# names. Unset: follow Dolphin's own setting if there is one.
+# preview_plugins = ["imagethumbnail", "jpegthumbnail", "svgthumbnail",
+#     "ffmpegthumbs", "audiothumbnail", "ebookthumbnail",
+#     "opendocumentthumbnail", "comicbookthumbnail"]   # + "gsthumbnail" for PDFs
+
+# [sort]
+# field = "name"                # name, size, modified, created, accessed or type
+# ascending = true
+
+# Custom icons for particular folders, by icon theme name.
+# [folder_icons]
+# "/home/me/Projects" = "folder-development"
+
+# Extra right-click menu entries. %f is the item, %d its folder.
+# [[context_menu.custom]]
+# label = "Open in VS Code"
+# command = "code %f"
+# targets = ["file", "dir"]     # any of file, dir, empty; [] = everywhere
+
+# Keyboard shortcuts. Listing an action replaces its default keys; [] unbinds it.
+# Keys are written like "Ctrl+Shift+X", "Alt+F", "F2", "Backspace", "Ctrl+Plus".
+# [keys]
+"#);
+    for (name, _, keys, what) in crate::keys::ACTIONS {
+        let keys: Vec<String> = keys.iter().map(|k| format!("{k:?}")).collect();
+        let _ = writeln!(s, "# {:<17} = [{}]{:>width$}# {what}", name, keys.join(", "), "", width = 24usize.saturating_sub(keys.join(", ").len() + 2));
+    }
+    s.push_str("\n# Colors, as \"#rrggbb\". Anything left out keeps the default (Nord).\n# [theme]\n");
+    let t = crate::ui::theme::Theme::default();
+    let roles: [(&str, Option<crate::ui::theme::Rgb>); 17] = [
+        ("text", Some(t.text)), ("text_strong", t.text_strong), ("muted", Some(t.muted)), ("accent", Some(t.accent)),
+        ("panel", Some(t.panel)), ("input", Some(t.input)), ("border", Some(t.border)), ("selection", Some(t.selection)),
+        ("hover", Some(t.hover)), ("highlight", Some(t.highlight)), ("scrollbar", Some(t.scrollbar)), ("error", Some(t.error)),
+        ("danger_bg", Some(t.danger_bg)), ("warning", Some(t.warning)), ("drop_target", Some(t.drop_target)),
+        ("drop_target_text", t.drop_target_text), ("ghost", Some(t.ghost)),
+    ];
+    for (name, c) in roles {
+        match c {
+            Some((r, g, b)) => { let _ = writeln!(s, "# {name:<17} = \"#{r:02x}{g:02x}{b:02x}\""); }
+            None => { let _ = writeln!(s, "# {name:<17} = \"#ffffff\"      # default: the terminal's own color"); }
+        }
+    }
+    s.push_str("\n# Places in the sidebar (also edited from the app: drag to reorder,\n# right-click to add or remove).\n");
+    #[derive(Serialize)]
+    struct P<'a> { places: &'a [PlaceConfig] }
+    s.push_str(&toml::to_string(&P { places: &default_places() }).unwrap_or_default());
+    s
 }
 
 impl Config {
@@ -193,3 +292,45 @@ fn config_path() -> PathBuf {
         .join("file-browser-tui/config.toml")
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_and_in_place_save() {
+        // The template is all comments: it reads as the defaults
+        let t: Config = toml::from_str(&template()).unwrap();
+        assert_eq!(t.sidebar_w, Config::default().sidebar_w);
+        assert!(t.keys.is_empty() && t.theme.is_none());
+        // Uncommenting the documented lines gives valid settings
+        let on: String = template().lines()
+            .filter(|l| l.starts_with("# ") && l.contains(" = ") && !l.contains("preview_plugins") && !l.contains("\"/home/me"))
+            .map(|l| format!("{}\n", &l[2..]))
+            .collect();
+        let keys: String = on.lines().filter(|l| crate::keys::ACTIONS.iter().any(|a| l.starts_with(&format!("{} ", a.0)))).map(|l| format!("{l}\n")).collect();
+        let theme: String = on.lines().filter(|l| l.contains("\"#")).map(|l| format!("{l}\n")).collect();
+        let parsed: Config = toml::from_str(&format!("[keys]\n{keys}[theme]\n{theme}")).unwrap();
+        assert_eq!(parsed.keys.len(), crate::keys::ACTIONS.len());
+        assert!(crate::keys::Keymap::new(&parsed.keys).1.is_empty());
+        let _: crate::ui::theme::Theme = parsed.theme.unwrap().try_into().unwrap();
+
+        let dir = std::env::temp_dir().join(format!("fbt-config-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.toml");
+        let mut c = Config::default();
+        c.save_to(&path).unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+        assert!(first.starts_with("# file-browser-tui configuration") && first.contains("[[places]]"));
+        // A user's comment and setting survive the app saving its own changes
+        std::fs::write(&path, first.replace("# show_hidden = false", "show_hidden = true  # mine")).unwrap();
+        c.sidebar_w = 30;
+        c.places.pop();
+        c.save_to(&path).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("show_hidden = true  # mine") && after.contains("sidebar_w = 30"));
+        let back: Config = toml::from_str(&after).unwrap();
+        assert!(back.show_hidden && back.places.len() == c.places.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
