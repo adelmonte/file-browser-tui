@@ -447,6 +447,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             }
 
             // Sidebar
+            if let Some(&(_, i)) = app.eject_rects.iter().find(|(r, _)| contains(*r, col, row)) {
+                app.unmount_device(i, false);
+                return;
+            }
             if let Some(target) = sidebar::target_at(app, col, row) {
                 let path = match target {
                     // Opens on release, unless it turns into a reorder drag

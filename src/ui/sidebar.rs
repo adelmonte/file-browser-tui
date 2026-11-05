@@ -38,48 +38,17 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(Paragraph::new(vec![Line::from("\u{2503}"); h as usize]).style(Style::default().fg(color)), grip);
     }
 
-    let cwd = app.cwd.clone();
     let hover = app.mouse_pos.and_then(|(c, r)| target_at(app, c, r));
+    app.eject_rects.clear();
 
-    struct Row {
-        target: SidebarTarget,
-        icon: String,
-        name: String,
-        current: bool,
-        dim: bool,
-        usage: Option<f32>,
-    }
-    let mut sections: Vec<(&str, Vec<Row>)> = Vec::new();
-
-    let places = app.places.iter().enumerate().map(|(i, p)| Row {
-        target: SidebarTarget::Place(i),
-        icon: place_icon(&p.path, p.icon.as_deref()),
-        name: p.name.clone(),
-        current: std::path::Path::new(&p.path) == cwd,
-        dim: false,
-        usage: None,
-    }).collect();
-    sections.push(("Places", places));
-
-    let mut devices: Vec<Row> = app.devices.iter().enumerate().map(|(i, d)| Row {
-        target: SidebarTarget::Device(i),
-        icon: if d.path == "/" { "drive-harddisk-root".into() } else { "drive-harddisk".into() },
-        name: d.name.clone(),
-        current: std::path::Path::new(&d.path) == cwd,
-        dim: false,
-        usage: d.usage,
-    }).collect();
-    devices.extend(app.kdeconnect_devices.iter().enumerate().map(|(i, d)| Row {
-        target: SidebarTarget::Phone(i),
-        icon: if d.reachable { "smartphone".into() } else { "smartphonedisconnected".into() },
-        name: d.name.clone(),
-        current: app.kdeconnect_mounts.get(&d.id).is_some_and(|m| cwd.starts_with(m)),
-        dim: !d.reachable,
-        usage: None,
-    }));
-    if !devices.is_empty() {
-        sections.push(("Devices", devices));
-    }
+    let sections = sections(app);
+    // Kitty's centered names are written after the frame, over anything
+    // drawn on top of them: rows under a menu or dialog get plain text
+    let menu_rects = app.menu.as_ref()
+        .map(|m| crate::ui::menu::covered(m, f.area(), app.picker.protocol_type() == ProtocolType::Kitty))
+        .unwrap_or_default();
+    let dialog = app.show_help || app.properties.is_some() || app.name_prompt.is_some()
+        || app.confirm_delete.is_some();
 
     let font = app.picker.font_size();
     let kitty = app.picker.protocol_type() == ProtocolType::Kitty;
@@ -140,10 +109,24 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
 
             draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: icon_w, height: h }, bg);
             let text_x = inner.x + 1 + icon_w + 1;
-            let text_w = (inner.x + width).saturating_sub(text_x + 1);
+            let mut text_w = (inner.x + width).saturating_sub(text_x + 1);
+            if row.eject && let SidebarTarget::Device(i) = row.target && text_w > 6 {
+                // Two columns at the far right, a row tall, centered
+                let r = Rect { x: inner.x + width - 3, y: y + (h - 1) / 2, width: 2, height: 1 };
+                let hot = app.mouse_pos.is_some_and(|(c, rr)| c >= r.x && c < r.right() && rr == r.y);
+                let eject_bg = if hot { Some(theme::get().highlight) } else { bg };
+                if hot {
+                    f.render_widget(Block::default().style(Style::default().bg(theme::rgb(theme::get().highlight))), r);
+                }
+                draw_icon(f, app, "media-eject", r, eject_bg);
+                app.eject_rects.push((r, i));
+                text_w -= 3;
+            }
             let name: String = row.name.chars().take(text_w as usize).collect();
             let name_y = y;
-            if kitty && h > 1 && row.usage.is_none() {
+            let name_rect = Rect { x: text_x, y, width: text_w, height: h };
+            let covered = dialog || menu_rects.iter().any(|m| m.intersects(name_rect));
+            if kitty && h > 1 && row.usage.is_none() && !covered {
                 // Kitty can center normal-size text across both rows
                 let (seq, used) = kitty::centered_text(text_x, y, h, text_w, &name, fg, bg);
                 let buf = f.buffer_mut();
@@ -172,6 +155,68 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     app.sidebar_rows = row_map;
 }
 
+struct Row {
+    target: SidebarTarget,
+    icon: String,
+    name: String,
+    current: bool,
+    dim: bool,
+    usage: Option<f32>,
+    /// An unmountable device: an eject button at the right end.
+    eject: bool,
+}
+
+/// The sidebar's sections and rows, as drawn.
+fn sections(app: &App) -> Vec<(&'static str, Vec<Row>)> {
+    let cwd = &app.cwd;
+    let mut sections: Vec<(&'static str, Vec<Row>)> = Vec::new();
+
+    let places = app.places.iter().enumerate().map(|(i, p)| Row {
+        target: SidebarTarget::Place(i),
+        icon: place_icon(&p.path, p.icon.as_deref()),
+        name: p.name.clone(),
+        current: std::path::Path::new(&p.path) == cwd,
+        dim: false,
+        usage: None,
+        eject: false,
+    }).collect();
+    sections.push(("Places", places));
+
+    let mut devices: Vec<Row> = app.devices.iter().enumerate().map(|(i, d)| Row {
+        target: SidebarTarget::Device(i),
+        icon: d.icon().into(),
+        name: d.name.clone(),
+        current: std::path::Path::new(&d.path) == cwd,
+        dim: false,
+        usage: d.usage,
+        eject: d.can_unmount(),
+    }).collect();
+    devices.extend(app.kdeconnect_devices.iter().enumerate().map(|(i, d)| Row {
+        target: SidebarTarget::Phone(i),
+        icon: if d.reachable { "smartphone".into() } else { "smartphonedisconnected".into() },
+        name: d.name.clone(),
+        current: app.kdeconnect_mounts.get(&d.id).is_some_and(|m| cwd.starts_with(m)),
+        dim: !d.reachable,
+        usage: None,
+        eject: false,
+    }));
+    if !devices.is_empty() {
+        sections.push(("Devices", devices));
+    }
+
+    sections
+}
+
+/// Ask for every icon the first frame shows (sidebar, location), so
+/// startup can wait for them instead of drawing without.
+pub fn request_icons(app: &mut App) {
+    let mut names: Vec<String> = sections(app).into_iter().flat_map(|(_, rows)| rows).map(|r| r.icon).collect();
+    names.push(crate::ui::topbar::location_icon(app));
+    for name in names {
+        request_icon(app, &name);
+    }
+}
+
 /// Thin two-tone bar hugging the top of its row, right under the device
 /// name (Dolphin's free-space indicator); red when nearly full.
 fn usage_bar(usage: f32, width: u16) -> Line<'static> {
@@ -187,9 +232,7 @@ fn usage_bar(usage: f32, width: u16) -> Line<'static> {
 /// Draw a theme icon by name (cached separately from file icons).
 pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Option<(u8, u8, u8)>) {
     // Sidebar icons are keyed by theme name, in their own cache
-    let key = PathBuf::from(format!("sidebar-icon/{name}"));
-    let px = (app.picker.font_size().height as f32 * ICON_ROWS) as u32;
-    app.sidebar_icons.request(&key, true, px.max(24), Some(name.to_string()));
+    let key = request_icon(app, name);
     let Some(proto) = app.sidebar_icons.get_mut(&app.picker, &key, rect.width, rect.height, bg, false) else { return; };
     f.render_widget(Clear, rect);
     if let Some(c) = bg {
@@ -199,6 +242,13 @@ pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Optio
     if app.picker.protocol_type() == ProtocolType::Kitty {
         kitty::split_placeholder_rows(f.buffer_mut(), rect, &mut app.kitty_transmits);
     }
+}
+
+fn request_icon(app: &mut App, name: &str) -> PathBuf {
+    let key = PathBuf::from(format!("sidebar-icon/{name}"));
+    let px = (app.picker.font_size().height as f32 * ICON_ROWS) as u32;
+    app.sidebar_icons.request(&key, true, px.max(24), Some(name.to_string()));
+    key
 }
 
 /// Map a mouse position to a sidebar target using the rendered row map.

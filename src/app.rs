@@ -184,6 +184,10 @@ pub struct App {
     // Sidebar
     pub places: Vec<PlaceEntry>,
     pub devices: Vec<DeviceEntry>,
+    /// Eject buttons drawn this frame: (rect, index into `devices`).
+    pub eject_rects: Vec<(Rect, usize)>,
+    unmount_tx: mpsc::Sender<(String, Result<(), String>)>,
+    unmount_rx: mpsc::Receiver<(String, Result<(), String>)>,
     pub sidebar_w: u16,
     pub sidebar_dragging: bool,
     /// Row → target map built during sidebar render (index = row in inner area).
@@ -303,6 +307,7 @@ impl App {
 
         let places = crate::places::places_from_config(&config.places);
         let devices = crate::places::default_devices();
+        let (unmount_tx, unmount_rx) = mpsc::channel();
         let dirstates = DirStates::load();
 
         let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
@@ -389,6 +394,9 @@ impl App {
             details_headers: Vec::new(),
             places,
             devices,
+            eject_rects: Vec::new(),
+            unmount_tx,
+            unmount_rx,
             menu: None,
             dnd: Default::default(),
             properties: None,
@@ -723,6 +731,20 @@ impl App {
         false
     }
 
+    /// Unmount a device in the background (and power the drive off with
+    /// `power_off`), leaving it first if we're inside.
+    pub fn unmount_device(&mut self, i: usize, power_off: bool) {
+        let Some(dev) = self.devices.get(i).filter(|d| d.can_unmount()).cloned() else { return; };
+        if self.cwd.starts_with(&dev.path) {
+            self.navigate_to(dirs::home_dir().unwrap_or_else(|| "/".into()));
+        }
+        self.notify(format!("Unmounting {}\u{2026}", dev.name));
+        let tx = self.unmount_tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send((dev.name.clone(), crate::fs::mounts::unmount(&dev, power_off)));
+        });
+    }
+
     pub fn notify(&mut self, text: String) {
         self.notice = Some((text, std::time::Instant::now() + std::time::Duration::from_secs(8)));
     }
@@ -982,6 +1004,15 @@ impl App {
         if let Ok(ev) = self.mount_event_rx.try_recv() {
             let MountEvent::Updated(devs) = ev;
             self.devices = devs;
+        }
+        while let Ok((name, result)) = self.unmount_rx.try_recv() {
+            match result {
+                Ok(()) => self.notify(format!("{name} can now be safely removed")),
+                Err(e) => self.notify(format!("Couldn't unmount {name}: {e}")),
+            }
+            if let Ok(devs) = crate::fs::mounts::parse_mountinfo() {
+                self.devices = devs;
+            }
         }
 
         if let Some(rx) = &self.kdeconnect_mount_rx

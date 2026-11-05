@@ -88,9 +88,7 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
 
     // The folder icon stays while editing, and the text starts where the
     // breadcrumbs do, so nothing shifts
-    let icon_name = crate::icons::resolver::directory_icon(&app.cwd)
-        .or_else(|| App::xdg_folder_icon(&app.cwd))
-        .unwrap_or_else(|| "folder".into());
+    let icon_name = location_icon(app);
     let icon_rect = Rect { width: 2.min(body.width), ..body };
     crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, None);
 
@@ -209,3 +207,10 @@ fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
     out
 }
 
+
+/// Theme icon for the current folder, shown at the start of the location bar.
+pub fn location_icon(app: &App) -> String {
+    crate::icons::resolver::directory_icon(&app.cwd)
+        .or_else(|| App::xdg_folder_icon(&app.cwd))
+        .unwrap_or_else(|| "folder".into())
+}

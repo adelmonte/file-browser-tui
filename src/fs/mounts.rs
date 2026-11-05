@@ -8,21 +8,85 @@ use std::{
 
 use nix::poll::{PollFd, PollFlags, poll};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MountKind {
+    /// The root filesystem: always there, never unmounted from here.
+    Root,
+    /// Removable media mounted by udisks under /run/media.
+    Media,
+    /// A user FUSE mount (sshfs, rclone, gocryptfs, ...).
+    Fuse,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceEntry {
     pub name: String,
     pub path: String,
     /// Fraction of the filesystem in use (0..=1).
     pub usage: Option<f32>,
+    pub kind: MountKind,
+    /// What's mounted (e.g. /dev/sdb1), from mountinfo.
+    pub source: String,
 }
 
 impl DeviceEntry {
     pub fn new(name: String, path: String) -> Self {
+        Self::with_kind(name, path, MountKind::Root, String::new())
+    }
+
+    fn with_kind(name: String, path: String, kind: MountKind, source: String) -> Self {
         let usage = nix::sys::statvfs::statvfs(path.as_str()).ok().and_then(|st| {
             let total = st.blocks() as f64;
             (total > 0.0).then(|| (1.0 - st.blocks_available() as f64 / total) as f32)
         });
-        Self { name, path, usage }
+        Self { name, path, usage, kind, source }
+    }
+
+    pub fn can_unmount(&self) -> bool {
+        self.kind != MountKind::Root
+    }
+
+    /// Theme icon for the sidebar.
+    pub fn icon(&self) -> &'static str {
+        match self.kind {
+            MountKind::Root => "drive-harddisk-root",
+            MountKind::Media => "drive-removable-media",
+            MountKind::Fuse => "folder-remote",
+        }
+    }
+}
+
+/// Unmount `dev` (powering the drive off too with `power_off`, Dolphin's
+/// Safely Remove). Blocks; returns the tool's complaint on failure.
+pub fn unmount(dev: &DeviceEntry, power_off: bool) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    // Our own working directory inside it would keep it busy
+    if std::env::current_dir().is_ok_and(|d| d.starts_with(&dev.path)) {
+        let _ = std::env::set_current_dir(dirs::home_dir().unwrap_or_else(|| "/".into()));
+    }
+    let run = |cmd: &str, args: &[&str]| -> Result<(), String> {
+        let out = Command::new(cmd).args(args).stdin(Stdio::null()).output()
+            .map_err(|e| format!("{cmd}: {e}"))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if err.is_empty() { format!("{cmd} failed") } else { err })
+    };
+    match dev.kind {
+        MountKind::Root => Err("the root filesystem can't be unmounted".into()),
+        MountKind::Fuse => run("fusermount3", &["-u", &dev.path])
+            .or_else(|_| run("fusermount", &["-u", &dev.path]))
+            .or_else(|e| run("umount", &[&dev.path]).map_err(|_| e)),
+        MountKind::Media if dev.source.starts_with("/dev/") => {
+            run("udisksctl", &["unmount", "--no-user-interaction", "-b", &dev.source])
+                .or_else(|e| run("umount", &[&dev.path]).map_err(|_| e))?;
+            if power_off {
+                run("udisksctl", &["power-off", "--no-user-interaction", "-b", &dev.source])?;
+            }
+            Ok(())
+        }
+        MountKind::Media => run("umount", &[&dev.path]),
     }
 }
 
@@ -82,6 +146,7 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
         // Find separator "-" to get fstype
         let dash_pos = fields.iter().position(|&f| f == "-");
         let fstype = dash_pos.and_then(|p| fields.get(p + 1)).copied().unwrap_or("");
+        let source = dash_pos.and_then(|p| fields.get(p + 2)).map(|s| unescape_mountpoint(s)).unwrap_or_default();
 
         if mountpoint == "/" {
             continue;
@@ -108,7 +173,8 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
             .unwrap_or(&mountpoint)
             .to_string();
 
-        devices.push(DeviceEntry::new(name, mountpoint));
+        let kind = if is_media { MountKind::Media } else { MountKind::Fuse };
+        devices.push(DeviceEntry::with_kind(name, mountpoint, kind, source));
     }
 
     Ok(devices)

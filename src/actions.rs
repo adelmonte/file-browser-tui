@@ -98,6 +98,11 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
         }
 
         MenuAction::AddToPlaces => add_to_places(app),
+        MenuAction::Unmount | MenuAction::SafelyRemove => {
+            if let MenuTarget::Device(idx) = target {
+                app.unmount_device(idx, action == MenuAction::SafelyRemove);
+            }
+        }
         MenuAction::RemovePlace => {
             if let MenuTarget::Place(idx) = target {
                 remove_place(app, idx);

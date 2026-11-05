@@ -43,6 +43,9 @@ pub enum MenuAction {
     Properties,
     AddToPlaces,
     RemovePlace,
+    Unmount,
+    /// Unmount and power off the drive (Dolphin's Safely Remove).
+    SafelyRemove,
     SetView(ViewMode),
     SetSortField(SortField),
     SetAscending(bool),
@@ -258,9 +261,19 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             items.push(MenuItem::new("\u{f067}  Add Current Dir to Places", MenuAction::AddToPlaces));
         }
 
-        MenuTarget::Device(_) => {
+        MenuTarget::Device(idx) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
             items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
+            items.push(MenuItem::new("\u{f120}  Open Terminal Here", MenuAction::OpenTerminal));
+            if let Some(dev) = app.devices.get(idx).filter(|d| d.can_unmount()) {
+                items.push(MenuItem::sep());
+                items.push(MenuItem::with_icon("Unmount", Some("media-eject".into()), MenuAction::Unmount));
+                if dev.kind == crate::fs::mounts::MountKind::Media && dev.source.starts_with("/dev/") {
+                    items.push(MenuItem::new("\u{f287}  Safely Remove", MenuAction::SafelyRemove));
+                }
+            }
+            items.push(MenuItem::sep());
+            items.push(MenuItem::new("\u{f05a}  Properties", MenuAction::Properties));
         }
 
         MenuTarget::SidebarEmpty => {
@@ -447,6 +460,18 @@ pub fn menu_rect(menu: &MenuState, term: Rect) -> Rect {
     let x = menu.pos.0.min(term.width.saturating_sub(w));
     let y = menu.pos.1.min(term.height.saturating_sub(h));
     Rect { x, y, width: w, height: h }
+}
+
+/// Where the menu (and its open submenu) will be drawn this frame, for
+/// layers rendered before it.
+pub fn covered(menu: &MenuState, term: Rect, tall: bool) -> Vec<Rect> {
+    let mut m = menu.clone();
+    m.tall = tall;
+    let mut out = vec![menu_rect(&m, term)];
+    if m.submenu_open && m.items.get(m.selected).is_some_and(|i| !i.submenu.is_empty()) {
+        out.push(submenu_rect(&m, term));
+    }
+    out
 }
 
 pub fn submenu_rect(menu: &MenuState, term: Rect) -> Rect {
