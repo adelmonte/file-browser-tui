@@ -350,7 +350,9 @@ impl App {
         let dirstates = DirStates::load();
 
         let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
-        crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
+        if config.kdeconnect {
+            crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
+        }
 
         let terminal_size = Size { width: 220, height: 50 };
         let _ = LAYOUT.set(config.layout.clamped());

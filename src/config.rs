@@ -46,6 +46,9 @@ pub struct Config {
     /// shown but never written to disk; "~/" means the home folder.
     #[serde(default)]
     pub thumbnail_cache_exclude: Vec<String>,
+    /// KDE Connect: phones under Devices and Send to Device.
+    #[serde(default = "default_true")]
+    pub kdeconnect: bool,
     /// Icon theme by name (e.g. "Papirus-Dark"); empty: the desktop's.
     #[serde(default)]
     pub icon_theme: String,
@@ -182,6 +185,7 @@ impl Default for Config {
             thumbnails: None,
             thumbnail_cache_exclude: Vec::new(),
             icon_theme: String::new(),
+            kdeconnect: true,
             keys: HashMap::new(),
             theme: None,
             read_only: false,
@@ -265,6 +269,7 @@ fn template() -> String {
 # icon_size_idx = 7             # 0 (smallest) to 19
 # folder_previews = true        # show a folder's pictures on its icon
 # terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
+# kdeconnect = true            # phones under Devices, Send to Device (needs kdeconnect)
 # icon_theme = ""               # e.g. "Papirus-Dark"; empty = the desktop's (KDE, GTK or GNOME setting)
 sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
 
