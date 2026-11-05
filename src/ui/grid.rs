@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Text},
-    widgets::{Block, Clear, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, StatefulWidget, Widget},
 };
 use ratatui_image::{StatefulImage, picker::ProtocolType};
 
@@ -105,6 +105,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let _ = rows_visible;
     let Some(first) = app.icon_bands.get(app.scroll_offset) else { return; };
     let origin = first.y as i32 + app.scroll_sub as i32;
+    let renaming = app.rename_state.as_ref().map(|r| r.item_idx);
+    let mut rename_cell = None;
     for bi in app.scroll_offset..app.icon_bands.len() {
         let band = app.icon_bands[bi].clone();
         let y = area.y as i32 + band.y as i32 - origin;
@@ -116,6 +118,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         }
         for (col_idx, entry_idx) in (band.start..band.end).enumerate() {
             let cell_x = area.x + col_idx as u16 * pitch + item_off;
+            if renaming == Some(entry_idx) {
+                rename_cell = Some((cell_x, y));
+            }
 
             let top = y.max(area.y as i32) as u16;
             let bottom = (y + cell_h as i32).min(area.bottom() as i32) as u16;
@@ -140,6 +145,38 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
+    if let Some((x, y)) = rename_cell {
+        draw_rename_box(f.buffer_mut(), app, area, x, y + icon_rows as i32, cell_w);
+    }
+}
+
+/// The name being edited, whole: a field under the icon that grows down
+/// over the items below as the name needs more lines, outlined so it's
+/// plainly an edit and not just a selection.
+fn draw_rename_box(buf: &mut Buffer, app: &App, area: Rect, cell_x: u16, label_y: i32, cell_w: u16) {
+    let Some(rename) = &app.rename_state else { return; };
+    let x = cell_x.saturating_sub(1).max(area.x);
+    let right = (cell_x + cell_w + 1).min(area.right());
+    let width = right - x;
+    let text_w = width.saturating_sub(2) as usize;
+    let mut shown = rename.input.clone();
+    shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
+    let lines = wrap_label(&shown, text_w, 64);
+    let height = (lines.len() as u16 + 1).min(area.height);
+    // Kept on screen: pushed up if it would run off the bottom
+    let y = label_y.min(area.bottom() as i32 - height as i32).max(area.y as i32) as u16;
+    let rect = Rect { x, y, width, height };
+    let field = if rename.invalid { theme::rgb(theme::get().error) } else { theme::input() };
+    let style = Style::default().bg(field).fg(theme::text_strong());
+    Clear.render(rect, buf);
+    Block::default()
+        .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::accent()).bg(field))
+        .style(style)
+        .render(rect, buf);
+    let inner = Rect { x: x + 1, y, width: width.saturating_sub(2), height: height.saturating_sub(1) };
+    Paragraph::new(lines_to_text_centered(&lines, text_w)).style(style).render(inner, buf);
 }
 
 /// A group's header in Icons view: its label, then a thin line under it
