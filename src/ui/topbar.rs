@@ -86,12 +86,8 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         f.render_widget(Block::default().style(Style::default().bg(path_bg())), field);
     }
 
-    if app.path_bar_editing {
-        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(theme::text_strong())));
-        f.render_widget(Paragraph::new(line), body);
-        return;
-    }
-
+    // The folder icon stays while editing, and the text starts where the
+    // breadcrumbs do, so nothing shifts
     let icon_name = crate::icons::resolver::directory_icon(&app.cwd)
         .or_else(|| App::xdg_folder_icon(&app.cwd))
         .unwrap_or_else(|| "folder".into());
@@ -99,6 +95,11 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
     crate::ui::sidebar::draw_icon(f, app, &icon_name, icon_rect, None);
 
     let crumbs_area = Rect { x: body.x + 3, width: body.width.saturating_sub(3), ..body };
+    if app.path_bar_editing {
+        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(theme::text_strong())));
+        f.render_widget(Paragraph::new(line), crumbs_area);
+        return;
+    }
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());
     let end = crumbs_area.x + crumbs_area.width;
     let mut x = crumbs_area.x;
@@ -207,3 +208,4 @@ fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
     }
     out
 }
+
