@@ -15,7 +15,46 @@ pub fn video_thumb(source: &Path, tmp: &Path) -> anyhow::Result<DynamicImage> {
     }
     let img = image::open(tmp);
     let _ = std::fs::remove_file(tmp);
-    Ok(img?)
+    let mut img = img?.to_rgba8();
+    filmstrip(&mut img);
+    Ok(DynamicImage::ImageRgba8(img))
+}
+
+/// Dolphin's film-strip edges on a video frame: a dark band down each side
+/// with sprocket holes. Drawn into the thumbnail, as Dolphin does, so the
+/// shared cache looks the same in both.
+fn filmstrip(img: &mut image::RgbaImage) {
+    let (w, h) = img.dimensions();
+    let band = (w.min(h) / 14).max(4);
+    if w < band * 4 {
+        return;
+    }
+    let (hole_w, hole_h) = ((band as f32 * 0.5).round().max(2.0) as u32, (band as f32 * 0.6).round().max(2.0) as u32);
+    let pitch = (hole_h as f32 * 1.8).round() as u32;
+    let film = image::Rgba([24, 24, 24, 255]);
+    let hole = image::Rgba([226, 226, 222, 255]);
+    let first = (h % pitch + pitch - hole_h) / 2;
+    for x0 in [0, w - band] {
+        for y in 0..h {
+            for x in x0..x0 + band {
+                img.put_pixel(x, y, film);
+            }
+        }
+        let hx = x0 + (band - hole_w) / 2;
+        let mut y = first;
+        while y + hole_h <= h {
+            for dy in 0..hole_h {
+                for dx in 0..hole_w {
+                    // Corners left off: slightly rounded holes
+                    let corner = (dx == 0 || dx == hole_w - 1) && (dy == 0 || dy == hole_h - 1);
+                    if !corner || hole_w < 3 {
+                        img.put_pixel(hx + dx, y + dy, hole);
+                    }
+                }
+            }
+            y += pitch;
+        }
+    }
 }
 
 fn ffmpegthumbnailer(source: &Path, out: &Path) -> anyhow::Result<()> {
