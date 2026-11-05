@@ -260,6 +260,12 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
             return Ok(img);
         }
     }
+    // Failed before and unchanged since: don't run the thumbnailer again
+    let fail_dir = root.join("fail/file-browser-tui");
+    let fail_path = fail_dir.join(&name);
+    if src_mtime.is_some() && is_thumb_valid(&fail_path, src_mtime) {
+        anyhow::bail!("thumbnailing failed before");
+    }
 
     let large = root.join("large");
     std::fs::create_dir_all(&large)?;
@@ -269,24 +275,42 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
     let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = large.join(format!("{name}.{}-{seq}.tmp.png", std::process::id()));
 
-    let img = if mime_type.starts_with("video/") {
-        generator::video_thumb(&abs, &tmp)?
+    let generated = if mime_type.starts_with("video/") {
+        generator::video_thumb(&abs, &tmp)
     } else if mime_type.starts_with("image/svg") {
-        crate::icons::raster::load_icon(&abs, true, 256)?
+        crate::icons::raster::load_icon(&abs, true, 256)
     } else if mime_type.starts_with("image/") {
-        generator::image_thumb(&abs)?
+        generator::image_thumb(&abs)
     } else if mime_type.starts_with("audio/") {
-        generator::audio_thumb(&abs, &tmp)?
+        generator::audio_thumb(&abs, &tmp)
     } else if mime_type == "application/epub+zip" {
-        generator::epub_thumb(&abs)?
+        generator::epub_thumb(&abs)
     } else if mime_type == "application/pdf" {
-        generator::pdf_thumb(&abs, &tmp)?
+        generator::pdf_thumb(&abs, &tmp)
     } else if mime_type == "application/vnd.comicbook+zip" {
-        generator::comic_thumb(&abs)?
+        generator::comic_thumb(&abs)
     } else if mime_type.starts_with("application/vnd.oasis.opendocument.") {
-        generator::opendocument_thumb(&abs)?
+        generator::opendocument_thumb(&abs)
     } else {
         anyhow::bail!("no thumbnailer for {mime_type}");
+    };
+    let img = match generated {
+        Ok(img) => img,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            // Remember it (as the spec's fail marker) unless the tool itself
+            // is missing, so installing it later still works
+            let tool_missing = e.chain().any(|c| c.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound));
+            if !tool_missing && std::fs::create_dir_all(&fail_dir).is_ok() {
+                let marker = fail_dir.join(format!("{name}.{}-{seq}.tmp.png", std::process::id()));
+                let blank = image::DynamicImage::new_rgba8(1, 1);
+                if save_thumb(&blank, &marker, &uri, src_mtime).is_ok() {
+                    let _ = std::fs::rename(&marker, &fail_path);
+                }
+            }
+            return Err(e);
+        }
     };
 
     save_thumb(&img, &tmp, &uri, src_mtime)?;
