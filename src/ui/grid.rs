@@ -203,9 +203,29 @@ pub fn icon_at_pos(app: &App, col: u16, row: u16) -> Option<usize> {
     let y = first.y + app.scroll_sub as usize + (row - area.y) as usize;
     let band = app.icon_bands.get(app.band_at(y))?;
     if band.header.is_some() { return None; }
-    let c = ((col - area.x) / app.grid_pitch.max(1)) as usize;
+    let pitch = app.grid_pitch.max(1);
+    let c = ((col - area.x) / pitch) as usize;
     let idx = band.start + c;
-    (c < app.grid_cols as usize && idx < band.end).then_some(idx)
+    if c >= app.grid_cols as usize || idx >= band.end {
+        return None;
+    }
+    // Only the icon and the name's text count, as in Dolphin: the space
+    // around them starts a rubber band
+    let cell_w = app.cell_w;
+    let x = ((col - area.x) % pitch) as i32 - (pitch.saturating_sub(cell_w) / 2) as i32;
+    let ry = (y - band.y) as u16;
+    if ry < app.icon_rows {
+        let img_w = app.img_w.min(cell_w) as i32;
+        let img_x = (cell_w as i32 - img_w) / 2;
+        return (x >= img_x && x < img_x + img_w).then_some(idx);
+    }
+    let label_w = if cell_w >= 6 { cell_w as usize - 1 } else { cell_w as usize };
+    let lines = wrap_label(&app.listing.entries[idx].name, label_w, app.cell_h.saturating_sub(app.icon_rows) as usize);
+    let line = lines.get((ry - app.icon_rows) as usize)?;
+    let w = unicode_width::UnicodeWidthStr::width(line.as_str()) as i32;
+    let start = (cell_w as i32 - w).max(0) / 2;
+    // A column of slack either side, so a short name isn't a tiny target
+    (x >= start - 1 && x <= start + w).then_some(idx)
 }
 
 struct CellGeo {
