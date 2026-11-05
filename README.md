@@ -1,7 +1,6 @@
 # file-browser-tui
 
-<!-- TODO: add a screenshot as demo.png -->
-<!-- ![file-browser-tui screenshot](demo.png) -->
+![file-browser-tui screenshot](filebrowser-tui.png)
 
 A Dolphin-like file manager for the terminal, built with [ratatui](https://ratatui.rs).
 It aims for Dolphin's look and habits (places sidebar, icon grid, breadcrumbs,
