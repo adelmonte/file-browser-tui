@@ -116,7 +116,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         properties::render_properties(f, props);
     }
     if app.show_help {
-        help::render_help(f);
+        help::render_help(f, app);
     }
     if app.paste_name.is_some() {
         render_paste_name(f, app);

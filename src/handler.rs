@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+use crate::keys::Action;
 use crate::lineedit::{self, Edit};
 use crate::{
     search::{SearchMode, SearchScope},
@@ -99,8 +100,8 @@ fn total_scroll_rows(app: &App) -> usize {
 
 pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     crate::lineedit::bump_cursor();
-    // Global quit — works regardless of any modal state
-    if ev.modifiers.contains(KeyModifiers::CONTROL) && ev.code == KeyCode::Char('q') {
+    // Quit works regardless of any modal state
+    if app.keymap.action(&ev) == Some(Action::Quit) {
         return true;
     }
 
@@ -243,40 +244,18 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
-    // Normal navigation. Modifier combos must precede their plain-key arms.
+    if let Some(action) = app.keymap.action(&ev) {
+        return run_action(app, action);
+    }
+
+    // Fixed keys: selection movement, open, escape
     match ev.code {
-        KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::CONTROL) => app.open_search(),
-        KeyCode::Char('f') if ev.modifiers.contains(KeyModifiers::ALT) =>
-            actions::execute(app, crate::ui::menu::MenuAction::NewFolder, crate::ui::menu::MenuTarget::Empty),
-        KeyCode::Char('a') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
-            let n = app.listing.entries.len();
-            if n > 0 {
-                app.multi_selection = (0..n).collect();
-                app.selection = Some(app.selection.unwrap_or(0).min(n - 1));
-            }
-        }
         KeyCode::Esc if app.search.is_some() => app.close_search(),
-        KeyCode::Char('q') | KeyCode::Char('Q')
-            if ev.modifiers.difference(KeyModifiers::SHIFT).is_empty() =>
-        {
-            return true;
-        }
         KeyCode::Esc => {
             app.selection = None;
             app.multi_selection.clear();
             app.drag_state = DragState::Idle;
         }
-
-        // Path bar focus
-        KeyCode::Char('l') if ev.modifiers.contains(KeyModifiers::CONTROL) => app.start_path_edit(),
-        KeyCode::Char('d') if ev.modifiers.contains(KeyModifiers::ALT) => app.start_path_edit(),
-        KeyCode::Char('/') => app.start_path_edit(),
-
-        // Up a dir
-        KeyCode::Up if ev.modifiers.contains(KeyModifiers::ALT) => app.navigate_up(),
-        KeyCode::Backspace if ev.modifiers.contains(KeyModifiers::SHIFT) => app.navigate_up(),
-        // Previous dir (history)
-        KeyCode::Backspace => app.navigate_back(),
 
         // Shift+Arrow: extend multi-selection (must precede plain arrow arms)
         KeyCode::Left  if ev.modifiers.contains(KeyModifiers::SHIFT) => app.extend_selection(-1),
@@ -293,60 +272,67 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         // Navigation (plain, clears multi-selection)
         KeyCode::Left | KeyCode::Right if app.view_mode == ViewMode::Details
             && app.tree_key(ev.code == KeyCode::Right) => {}
-        KeyCode::Left  | KeyCode::Char('h') => {
+        KeyCode::Left => {
             app.multi_selection.clear();
             app.selection_anchor = None;
             app.move_selection_cols(-1);
         }
-        KeyCode::Right | KeyCode::Char('l') => {
+        KeyCode::Right => {
             app.multi_selection.clear();
             app.selection_anchor = None;
             app.move_selection_cols(1);
         }
-        KeyCode::Up    | KeyCode::Char('k') => {
+        KeyCode::Up => {
             app.multi_selection.clear();
             app.selection_anchor = None;
             app.move_selection_rows(-1);
         }
-        KeyCode::Down  | KeyCode::Char('j') => {
+        KeyCode::Down => {
             app.multi_selection.clear();
             app.selection_anchor = None;
             app.move_selection_rows(1);
         }
         KeyCode::Enter => app.enter_selected(),
 
-        // Sidebar resize (Alt+[ and Alt+]) — must be before plain [ / ]
-        KeyCode::Char('[') if ev.modifiers.contains(KeyModifiers::ALT) => {
-            app.sidebar_w = app.sidebar_w.saturating_sub(2).max(8);
+        _ => {}
+    }
+    false
+}
+
+/// Do a bound action; true means quit.
+fn run_action(app: &mut App, action: Action) -> bool {
+    use crate::ui::menu::{MenuAction, MenuTarget};
+    // Menu actions on the selection, or the folder itself without one
+    let target = app.selection.map_or(MenuTarget::Empty, MenuTarget::Entry);
+    match action {
+        Action::Quit => return true,
+        Action::Help => app.show_help = true,
+        Action::Search => app.open_search(),
+        Action::SelectAll => {
+            let n = app.listing.entries.len();
+            if n > 0 {
+                app.multi_selection = (0..n).collect();
+                app.selection = Some(app.selection.unwrap_or(0).min(n - 1));
+            }
         }
-        KeyCode::Char(']') if ev.modifiers.contains(KeyModifiers::ALT) => {
-            app.sidebar_w = (app.sidebar_w + 2).min(50);
-        }
-
-        // History
-        KeyCode::Char('[') => app.navigate_back(),
-        KeyCode::Char(']') => app.navigate_forward(),
-
-        // Hidden files toggle
-        KeyCode::Char('.') => app.toggle_show_hidden(),
-
-        // Clipboard
-        KeyCode::Char('c') => actions::clip_selection(app, ClipOp::Copy),
-        KeyCode::Char('x') => actions::clip_selection(app, ClipOp::Cut),
-        // Dolphin's Create Folder (F10, and Alt+F in this user's dolphinui.rc)
-        KeyCode::F(10) => actions::execute(app, crate::ui::menu::MenuAction::NewFolder, crate::ui::menu::MenuTarget::Empty),
-        KeyCode::Char('v' | 'p') if ev.modifiers.contains(KeyModifiers::CONTROL) => {
+        Action::EditPath => app.start_path_edit(),
+        Action::Back => app.navigate_back(),
+        Action::Forward => app.navigate_forward(),
+        Action::Up => app.navigate_up(),
+        Action::Reload => app.reload_dir(),
+        Action::ToggleHidden => app.toggle_show_hidden(),
+        Action::NewFolder => actions::execute(app, MenuAction::NewFolder, MenuTarget::Empty),
+        Action::NewFile => actions::execute(app, MenuAction::NewFile, MenuTarget::Empty),
+        Action::Rename => actions::rename_selection(app),
+        Action::Copy => actions::clip_selection(app, ClipOp::Copy),
+        Action::Cut => actions::clip_selection(app, ClipOp::Cut),
+        Action::Paste => {
             let cwd = app.cwd.clone();
             actions::paste_clipboard(app, &cwd);
         }
-        KeyCode::Char('p') => {
-            let cwd = app.cwd.clone();
-            actions::paste_clipboard(app, &cwd);
-        }
-
-        // File ops
-        KeyCode::F(2) => actions::rename_selection(app),
-        KeyCode::Delete if ev.modifiers.contains(KeyModifiers::SHIFT) => {
+        Action::CopyLocation => actions::execute(app, MenuAction::CopyLocation, target),
+        Action::Trash => actions::trash_selection(app),
+        Action::Delete => {
             let paths = actions::selected_paths(app);
             if !paths.is_empty() {
                 let display_name = if paths.len() == 1 {
@@ -360,19 +346,15 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                 app.confirm_delete = Some(ConfirmDeleteState { paths, display_name });
             }
         }
-        KeyCode::Delete => actions::trash_selection(app),
-
-        // Reload
-        KeyCode::F(5) | KeyCode::Char('r') => app.reload_dir(),
-
-        // Icon size
-        KeyCode::Char('=') | KeyCode::Char('+') => app.resize_icons(1),
-        KeyCode::Char('-') => app.resize_icons(-1),
-
-        // Help
-        KeyCode::Char('?') => { app.show_help = true; }
-
-        _ => {}
+        Action::Properties => actions::execute(app, MenuAction::Properties, target),
+        Action::OpenTerminal => actions::execute(app, MenuAction::OpenTerminal, MenuTarget::Empty),
+        Action::ZoomIn => app.resize_icons(1),
+        Action::ZoomOut => app.resize_icons(-1),
+        Action::ViewIcons => app.set_view_mode(ViewMode::Icons),
+        Action::ViewCompact => app.set_view_mode(ViewMode::Compact),
+        Action::ViewDetails => app.set_view_mode(ViewMode::Details),
+        Action::SidebarNarrower => app.sidebar_w = app.sidebar_w.saturating_sub(2).max(8),
+        Action::SidebarWider => app.sidebar_w = (app.sidebar_w + 2).min(50),
     }
     false
 }

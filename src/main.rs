@@ -7,6 +7,7 @@ mod events;
 mod fs;
 mod handler;
 mod icons;
+mod keys;
 mod apps;
 mod lineedit;
 mod mime;

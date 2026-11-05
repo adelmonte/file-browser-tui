@@ -240,6 +240,7 @@ pub struct App {
 
     // Config & per-dir persistence
     pub config: Config,
+    pub keymap: crate::keys::Keymap,
     pub dirstates: DirStates,
 
     // Kitty graphics bookkeeping
@@ -296,7 +297,9 @@ impl App {
         let view_mode = config.default_view;
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
+        let (keymap, key_problems) = crate::keys::Keymap::new(&config.keys);
         let mut app = Self {
+            keymap,
             watched_path: cwd.clone(),
             sidebar_w: config.sidebar_w.clamp(10, 50),
             sidebar_dragging: false,
@@ -404,6 +407,9 @@ impl App {
         };
         app.apply_dir_state();
         app.reload_dir();
+        if !key_problems.is_empty() {
+            app.notify(format!("Config [keys]: {}", key_problems.join("; ")));
+        }
         Ok(app)
     }
 

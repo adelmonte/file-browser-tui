@@ -44,6 +44,10 @@ pub struct Config {
     /// pdftoppm). Unset: follow Dolphin's own setting, or its defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_plugins: Option<Vec<String>>,
+    /// Keyboard shortcuts by action name, e.g. `rename = ["F2", "Alt+R"]`;
+    /// replaces that action's defaults, `[]` unbinds it (see keys.rs).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub keys: HashMap<String, Vec<String>>,
     /// Set when the on-disk config failed to parse, so we never overwrite it.
     #[serde(skip)]
     read_only: bool,
@@ -137,6 +141,7 @@ impl Default for Config {
             context_menu: ContextMenuConfig::default(),
             folder_previews: true,
             preview_plugins: None,
+            keys: HashMap::new(),
             read_only: false,
         }
     }
@@ -176,3 +181,4 @@ fn config_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("file-browser-tui/config.toml")
 }
+
