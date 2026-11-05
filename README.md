@@ -5,9 +5,9 @@
 
 A Dolphin-like file manager for the terminal, built with [ratatui](https://ratatui.rs).
 It aims for Dolphin's look and habits (places sidebar, icon grid, breadcrumbs,
-right-click menus, Dolphin's shortcuts) and reads the same desktop files Dolphin does:
-your icon theme, the shared thumbnail cache, folder icons from `.directory` files and
-KDE service menus. In [kitty](https://sw.kovidgoyal.net/kitty/) it shows real theme
+right-click menus, Dolphin's shortcuts) and follows the freedesktop standards: your icon
+theme, the shared thumbnail cache, the trash, mime types and default apps. Everything
+else is set in its own config file. In [kitty](https://sw.kovidgoyal.net/kitty/) it shows real theme
 icons, thumbnails and smooth translucent menus; other terminals get text-drawn icons.
 
 ## Features
@@ -18,7 +18,7 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
   in Details and Icons view, per folder.
 - **Thumbnails** for images, videos (with film-strip edges), audio cover art, EPUB,
   comic books, OpenDocument and PDF, plus Dolphin-style folder previews. They go in the
-  freedesktop cache (`~/.cache/thumbnails`), so Dolphin and the app share them.
+  freedesktop cache (`~/.cache/thumbnails`), shared with other file managers.
   Thumbnails on screen come first, then the screens around them, then the first items
   of the folders you can see, so scrolling and opening folders feel instant.
 - **Places sidebar**: drag to reorder, right-click to add or remove; devices with usage
@@ -36,7 +36,8 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
 - **Right-click menus**: Open With (your desktop's apps), Open Terminal Here, Compress,
   Send to Device (KDE Connect), Properties, and your own actions. Existing KDE service
   menus are imported on first run.
-- **Configurable** keyboard shortcuts and colors.
+- **Configurable**: keyboard shortcuts, every interface color, icon theme, folder icons,
+  spacing, which files get thumbnails, sidebar places and right-click actions.
 
 ## Requirements
 
@@ -44,8 +45,8 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
 - [kitty](https://sw.kovidgoyal.net/kitty/) for icons, thumbnails, smooth menus and
   drag and drop. Other terminals work, with text-drawn icons and no images.
 - A [Nerd Font](https://www.nerdfonts.com/) for menu and toolbar glyphs.
-- An icon theme (whatever your desktop uses, e.g. Breeze or Papirus) and `rsvg-convert`
-  (librsvg) to draw its icons.
+- An icon theme (e.g. Breeze, Papirus, Adwaita) and `rsvg-convert` (librsvg) to draw
+  its icons.
 
 Optional tools, used when present (run `file-browser-tui --check` to see what's found):
 
@@ -54,7 +55,7 @@ Optional tools, used when present (run `file-browser-tui --check` to see what's 
 | `wl-clipboard` (Wayland) or `xclip` (X11) | the clipboard |
 | `fd`, `ripgrep` | searching by name, searching inside files |
 | `ffmpeg` (`ffmpegthumbnailer` if you prefer it) | video thumbnails, audio cover art |
-| `poppler` (`pdftoppm`) | PDF thumbnails (enable `gsthumbnail`, see below) |
+| `poppler` (`pdftoppm`) | PDF thumbnails (add `"pdf"` to `thumbnails`, see below) |
 | `xdg-utils` | opening files with their default app |
 | `zip` | Compress → zip |
 | `kdeconnect` | Send to Device, browsing phones |
@@ -137,24 +138,50 @@ up = ["Alt+Up", "Shift+Backspace"]
 
 ### Colors
 
-The default look is [Nord](https://www.nordtheme.com/). Set any of the roles listed in
-the generated config; anything left out keeps its default.
+There are 17 color roles, covering text, panels, borders, selection, hover, menus,
+scrollbars, warnings and drag and drop. All are listed in the generated config with
+their defaults ([Nord](https://www.nordtheme.com/)); set any of them, and anything
+left out keeps its default. `text_strong` and `drop_target_text` default to your
+terminal's own text color.
 
 ```toml
 [theme]
 accent = "#88c0d0"
 selection = "#3b4252"
+panel = "#2e3440"
+```
+
+### Icons
+
+```toml
+icon_theme = "Papirus-Dark"   # empty: your desktop's (KDE, GTK or GNOME setting)
+icon_size_idx = 7             # default zoom, 0 (smallest) to 19
+
+[folder_icons]
+"~/Projects" = "folder-development"
+"~/Music" = "folder-music"
+```
+
+### Layout
+
+```toml
+sidebar_w = 18                # also set by dragging the sidebar's edge
+
+[layout]
+icon_spacing = 2              # Icons view: columns added to each icon's width
+icon_label_lines = 2          # Icons view: lines of name under each icon (1-6)
+compact_width = 22            # Compact view: width of each column
 ```
 
 ### Thumbnails
 
-Which files get thumbnails follows Dolphin's preview settings (`dolphinrc`) if you have
-them, otherwise Dolphin's defaults. Override it with Dolphin's plugin names:
+Pick which kinds of files show a thumbnail of their content: `images`, `svg`,
+`videos`, `audio` (album art), `ebooks` (EPUB), `comics` (CBZ), `documents`
+(OpenDocument) and `pdf`. The default is all of them except `pdf`.
 
 ```toml
-preview_plugins = ["imagethumbnail", "jpegthumbnail", "svgthumbnail", "ffmpegthumbs",
-    "audiothumbnail", "ebookthumbnail", "opendocumentthumbnail", "comicbookthumbnail",
-    "gsthumbnail"]
+thumbnails = ["images", "svg", "videos", "audio", "pdf"]
+folder_previews = true        # show a folder's pictures on its icon
 ```
 
 To keep a folder's thumbnails off disk (made when shown, never cached):
