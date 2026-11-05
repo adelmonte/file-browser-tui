@@ -219,12 +219,12 @@ fn run(
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();
 
-    loop {
+    'frames: loop {
         // Drain background results (icons, thumbs, dir events, mount events)
         app.drain_channels();
 
         // Render frame
-        app.tick_scroll();
+        let animating = app.tick_scroll();
         terminal.draw(|f| ui::render(f, app))?;
         // Window title follows the current folder, like Dolphin's
         if app.cwd != title_path {
@@ -255,8 +255,17 @@ fn run(
         // Queue icons for newly visible cells after render updated grid_cols/grid_area
         app.queue_visible_icons();
 
-        // Poll for terminal events
-        if event::poll(Duration::from_millis(16))? {
+        // Wait for input until the next frame is due (sooner while
+        // scrolling), then take everything queued before drawing again, so
+        // a burst of wheel events is one frame, not one each
+        let wait = Duration::from_millis(if animating { 8 } else { 16 });
+        let batch_start = std::time::Instant::now();
+        let mut timeout = wait;
+        while event::poll(timeout)? {
+            timeout = Duration::ZERO;
+            if batch_start.elapsed() > wait {
+                break;
+            }
             let ev = event::read()?;
             if let Event::Key(key) = &ev
                 && dnd::swallow(app, key)
@@ -276,7 +285,7 @@ fn run(
                         continue;
                     }
                     if handler::handle_key(app, key) {
-                        break;
+                        break 'frames;
                     }
                     maybe_restart_watcher(app, dir_watcher);
                 }

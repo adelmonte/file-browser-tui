@@ -140,6 +140,8 @@ pub struct App {
     /// rows into it) are derived from it each frame.
     pub scroll_pos: f32,
     pub scroll_target: f32,
+    /// When the scroll animation last advanced (it runs on elapsed time).
+    scroll_tick: std::time::Instant,
     pub scroll_sub: u16,
     /// `scroll_offset` as last derived; a different value means it was set
     /// directly (new folder, view change) and the animation jumps there.
@@ -405,6 +407,7 @@ impl App {
             scroll_offset: 0,
             scroll_pos: 0.0,
             scroll_target: 0.0,
+            scroll_tick: std::time::Instant::now(),
             scroll_sub: 0,
             scroll_seen: 0,
             free_space: free_space(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
@@ -1525,9 +1528,22 @@ impl App {
             self.scroll_target = self.scroll_pos;
         }
         self.scroll_target = self.scroll_target.clamp(0.0, self.max_scroll());
+        // Eased on elapsed time, so the motion is the same however often
+        // frames come: most of the way within ~0.1 s, and never slower than
+        // a steady glide, so the last rows don't trickle in
+        const EASE_SECS: f32 = 0.045;
+        const MIN_ROWS_PER_SEC: f32 = 60.0;
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(self.scroll_tick).as_secs_f32().min(0.05);
+        self.scroll_tick = now;
         let d = self.scroll_target - self.scroll_pos;
-        let moving = d.abs() >= 0.5;
-        self.scroll_pos = if moving { self.scroll_pos + d * 0.35 } else { self.scroll_target };
+        let moving = d.abs() >= 0.05;
+        self.scroll_pos = if moving {
+            let step = (d.abs() * (1.0 - (-dt / EASE_SECS).exp())).max(MIN_ROWS_PER_SEC * dt).min(d.abs());
+            self.scroll_pos + step * d.signum()
+        } else {
+            self.scroll_target
+        };
         let rows = self.scroll_pos.round().max(0.0) as usize;
         self.scroll_offset = self.band_at(rows).min(self.icon_bands.len().saturating_sub(1));
         self.scroll_sub = rows.saturating_sub(self.icon_bands.get(self.scroll_offset).map_or(0, |b| b.y)) as u16;
