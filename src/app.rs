@@ -258,6 +258,9 @@ pub struct App {
     /// Folders on screen whose contents' icons are being warmed up (so
     /// opening them shows icons at once), and at what icon size.
     prefetched: std::collections::HashSet<PathBuf>,
+    /// Previewable files in folders that were on screen, by folder: their
+    /// thumbnails are made ahead for the disk cache.
+    thumb_depth: HashMap<PathBuf, Vec<(PathBuf, String)>>,
     prefetched_px: u32,
     prefetch_tx: mpsc::Sender<(PathBuf, bool)>,
     prefetch_rx: mpsc::Receiver<Vec<PrefetchItem>>,
@@ -332,6 +335,7 @@ impl App {
             quit_armed: None,
             cancel_rect: None,
             prefetched: std::collections::HashSet::new(),
+            thumb_depth: HashMap::new(),
             prefetched_px: 0,
             prefetch_tx,
             prefetch_rx,
@@ -475,17 +479,27 @@ impl App {
         self.dir_counts.clear();
         self.icons_grace_until = std::time::Instant::now() + std::time::Duration::from_millis(300);
 
-        // Mime types are only resolved once per path; restore them so media
-        // entries keep showing thumbnails instead of generic icons.
-        for entry in &mut listing.entries {
-            if let Some(mime) = self.icon_cache.cached_mime(&entry.path) {
-                entry.mime_type = mime.clone();
-            }
-        }
+        self.restore_mimes(&mut listing.entries);
 
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);
         self.free_space = free_space(&self.cwd);
+    }
+
+    /// Mime types are only resolved once per path; restore them so media
+    /// entries keep showing thumbnails instead of generic icons. Unresolved
+    /// media get a guess from the name, so their thumbnails (on screen or
+    /// ahead) start without waiting for the icon worker to resolve them.
+    fn restore_mimes(&self, entries: &mut [DirEntry]) {
+        for entry in entries {
+            if let Some(mime) = self.icon_cache.cached_mime(&entry.path) {
+                entry.mime_type = mime.clone();
+            } else if !entry.is_dir
+                && let Some(guess) = crate::mime::guess_by_name(&entry.path).filter(|m| self.previews.covers(m))
+            {
+                entry.mime_type = Some(guess);
+            }
+        }
     }
 
     /// Insert the contents of expanded folders after each one (Details tree).
@@ -915,11 +929,7 @@ impl App {
             let is_media = mime.as_deref().is_some_and(|m| self.previews.covers(m))
                 && !self.thumb_cache.failed(&entry.path);
 
-            if is_media {
-                if let Some(ref mime_type) = mime {
-                    self.thumb_cache.request(&entry.path, mime_type);
-                }
-            } else {
+            if !is_media {
                 let icon_override = if entry.is_dir {
                     self.config.folder_icons
                         .get(entry.path.to_string_lossy().as_ref())
@@ -932,9 +942,38 @@ impl App {
             }
         }
 
+        // Thumbnails: what's on screen, then a couple of screens around it
+        // (nearest first, more below than above), then the visible
+        // folders' first items
+        let entries = &self.listing.entries;
+        let page = end - start;
+        let media = |i: usize| {
+            let e = &entries[i];
+            e.mime_type.as_deref().filter(|m| self.previews.covers(m)).map(|m| (e.path.as_path(), m))
+        };
+        let mut jobs: Vec<(&std::path::Path, &str, crate::thumbs::Priority)> = Vec::new();
+        jobs.extend((start..end).filter_map(media).map(|(p, m)| (p, m, crate::thumbs::Priority::Visible)));
+        let (below, above) = (end..(end + page * 2).min(entries.len()), (start.saturating_sub(page)..start).rev());
+        let mut below = below.peekable();
+        let mut above = above.peekable();
+        while below.peek().is_some() || above.peek().is_some() {
+            for i in below.by_ref().take(2).chain(above.next()) {
+                if let Some((p, m)) = media(i) {
+                    jobs.push((p, m, crate::thumbs::Priority::Ahead));
+                }
+            }
+        }
+        for e in &entries[start..end] {
+            if let Some(items) = e.is_dir.then(|| self.thumb_depth.get(&e.path)).flatten() {
+                jobs.extend(items.iter().map(|(p, m)| (p.as_path(), m.as_str(), crate::thumbs::Priority::Depth)));
+            }
+        }
+        self.thumb_cache.plan(&jobs);
+
         // Then warm up the visible folders' contents
         if self.prefetched_px != target_px {
             self.prefetched.clear();
+            self.thumb_depth.clear();
             self.prefetched_px = target_px;
         }
         for i in start..end {
@@ -948,16 +987,10 @@ impl App {
     /// Queue a listed folder's first items as low-priority loads.
     fn prefetch_children(&mut self, children: Vec<PrefetchItem>) {
         let target_px = self.icon_target_px();
-        let mut thumbs = 0;
+        let mut thumbs = Vec::new();
         for (path, is_dir, mime) in children {
             match mime {
-                // Thumbnails have no low-priority lane: only a few per folder
-                Some(m) if self.previews.covers(&m) => {
-                    if thumbs < 8 && !self.thumb_cache.failed(&path) {
-                        self.thumb_cache.request(&path, &m);
-                        thumbs += 1;
-                    }
-                }
+                Some(m) if self.previews.covers(&m) => thumbs.push((path, m)),
                 _ => {
                     let icon_override = if is_dir {
                         self.config.folder_icons.get(path.to_string_lossy().as_ref()).cloned()
@@ -968,6 +1001,10 @@ impl App {
                     self.icon_cache.prefetch(&path, is_dir, target_px, icon_override);
                 }
             }
+        }
+        // One listing per folder: a relisting replaces it
+        if let Some(dir) = thumbs.first().and_then(|(p, _)| p.parent()) {
+            self.thumb_depth.insert(dir.to_path_buf(), thumbs);
         }
     }
 
@@ -1089,11 +1126,7 @@ impl App {
             }
         };
         let mut listing = DirListing { entries };
-        for entry in &mut listing.entries {
-            if let Some(mime) = self.icon_cache.cached_mime(&entry.path) {
-                entry.mime_type = mime.clone();
-            }
-        }
+        self.restore_mimes(&mut listing.entries);
         crate::fs::sort_entries(&mut listing.entries, self.folders_first, &self.sort);
         let old = std::mem::replace(&mut self.listing, listing);
         self.remap_indices(&old);

@@ -16,53 +16,126 @@ pub struct ThumbReady {
     pub path: PathBuf,
     /// None when no thumbnail could be made (the file shows its icon).
     pub image: Option<image::DynamicImage>,
+    /// Made only to have it on disk (a folder not open yet): not kept.
+    warm_only: bool,
+}
+
+/// How soon a thumbnail is wanted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// On screen.
+    Visible,
+    /// Just past the screen, for scrolling.
+    Ahead,
+    /// In a folder on screen, for opening it; made for the disk cache only.
+    Depth,
 }
 
 struct ThumbRequest {
     path: PathBuf,
     mime_type: String,
+    warm_only: bool,
 }
+
+/// Work waiting for the thumbnail workers, by priority.
+#[derive(Default)]
+struct Queue {
+    jobs: [std::collections::VecDeque<ThumbRequest>; 3],
+    running: HashSet<PathBuf>,
+    /// Ahead/Depth jobs being worked on.
+    running_bg: usize,
+    quit: bool,
+}
+
+type Shared = std::sync::Arc<(std::sync::Mutex<Queue>, std::sync::Condvar)>;
 
 type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>, bool);
 
 pub struct ThumbCache {
     images: LruCache<PathBuf, image::DynamicImage>,
     protocols: LruCache<ProtoKey, StatefulProtocol>,
-    tx_work: mpsc::SyncSender<ThumbRequest>,
+    shared: Shared,
     rx_image: mpsc::Receiver<ThumbReady>,
+    /// Queued or being made.
     pending: HashSet<PathBuf>,
+    /// The part of `pending` that's on screen.
+    pending_visible: HashSet<PathBuf>,
     failed: HashSet<PathBuf>,
+    /// Made for the disk cache this session (Depth), so not asked again.
+    warmed: HashSet<PathBuf>,
+    /// Fingerprint of the last `plan`, to skip replanning an unchanged view.
+    planned: u64,
 }
 
 impl ThumbCache {
     pub fn new() -> Self {
-        let (tx_work, rx_work) = mpsc::sync_channel::<ThumbRequest>(64);
         let (tx_image, rx_image) = mpsc::channel::<ThumbReady>();
+        let shared: Shared = Default::default();
 
-        std::thread::spawn(move || {
-            while let Ok(req) = rx_work.recv() {
-                let tx = tx_image.clone();
-                rayon::spawn(move || {
+        // Thumbnailers mostly wait on decoders and ffmpeg, so they get their
+        // own threads rather than the icon pool. Two are kept for what's on
+        // screen: background work never takes the last of them
+        let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(3, 8);
+        let bg_limit = workers - 2;
+        for _ in 0..workers {
+            let (shared, tx) = (shared.clone(), tx_image.clone());
+            std::thread::spawn(move || {
+                let (lock, cv) = &*shared;
+                loop {
+                    let (req, bg) = {
+                        let mut q = lock.lock().unwrap();
+                        let picked = loop {
+                            if q.quit {
+                                return;
+                            }
+                            if let Some(r) = q.jobs[0].pop_front() {
+                                break (r, false);
+                            }
+                            if q.running_bg < bg_limit
+                                && let Some(r) = q.jobs[1].pop_front().or_else(|| q.jobs[2].pop_front())
+                            {
+                                q.running_bg += 1;
+                                break (r, true);
+                            }
+                            q = cv.wait(q).unwrap();
+                        };
+                        q.running.insert(picked.0.path.clone());
+                        picked
+                    };
                     let image = generate_or_load_thumb(&req.path, &req.mime_type)
                         .map_err(|e| tracing::debug!("thumb {:?}: {e}", req.path))
                         .ok();
-                    let _ = tx.send(ThumbReady { path: req.path, image });
-                });
-            }
-        });
+                    let path = req.path.clone();
+                    // Sent before leaving `running`, so a replan in between
+                    // can't queue it again
+                    let _ = tx.send(ThumbReady { path: req.path, image, warm_only: req.warm_only });
+                    let mut q = lock.lock().unwrap();
+                    q.running.remove(&path);
+                    if bg {
+                        q.running_bg -= 1;
+                        cv.notify_one();
+                    }
+                }
+            });
+        }
 
         Self {
-            images: LruCache::new(NonZeroUsize::new(400).unwrap()),
+            // A few screens' worth: what's shown plus what's ahead
+            images: LruCache::new(NonZeroUsize::new(600).unwrap()),
             protocols: LruCache::new(NonZeroUsize::new(200).unwrap()),
-            tx_work,
+            shared,
             rx_image,
             pending: HashSet::new(),
+            pending_visible: HashSet::new(),
             failed: HashSet::new(),
+            warmed: HashSet::new(),
+            planned: 0,
         }
     }
 
+    /// Whether thumbnails on screen are still being made.
     pub fn loading(&self) -> bool {
-        !self.pending.is_empty()
+        !self.pending_visible.is_empty()
     }
 
     /// Whether making a thumbnail for this path already failed.
@@ -70,24 +143,65 @@ impl ThumbCache {
         self.failed.contains(path)
     }
 
-    pub fn request(&mut self, path: &Path, mime_type: &str) {
-        if self.images.contains(path) || self.pending.contains(path) || self.failed.contains(path) {
+    fn wanted(&self, path: &Path, prio: Priority) -> bool {
+        !self.images.contains(path) && !self.failed.contains(path)
+            && !(prio == Priority::Depth && (self.warmed.contains(path) || keep_off_disk(path)))
+    }
+
+    /// Replace the queued work with these, most wanted first; anything
+    /// queued that isn't among them (scrolled away, folder left) is dropped.
+    /// Cheap to call every frame: an unchanged plan is skipped.
+    pub fn plan(&mut self, jobs: &[(&Path, &str, Priority)]) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for (path, _, prio) in jobs {
+            if self.wanted(path, *prio) {
+                (path, *prio as u8).hash(&mut h);
+            }
+        }
+        let fingerprint = h.finish();
+        if fingerprint == self.planned {
             return;
         }
-        let req = ThumbRequest { path: path.to_path_buf(), mime_type: mime_type.to_string() };
-        // Only mark pending if queued; a full queue is retried next frame
-        if self.tx_work.try_send(req).is_ok() {
-            self.pending.insert(path.to_path_buf());
+        self.planned = fingerprint;
+
+        let (lock, cv) = &*self.shared;
+        let mut q = lock.lock().unwrap();
+        for queue in &mut q.jobs {
+            queue.clear();
         }
+        let mut pending: HashSet<PathBuf> = self.pending.iter().filter(|p| q.running.contains(*p)).cloned().collect();
+        self.pending_visible.retain(|p| pending.contains(p));
+        for &(path, mime, prio) in jobs {
+            if prio == Priority::Visible && self.wanted(path, prio) {
+                self.pending_visible.insert(path.to_path_buf());
+            }
+            if !self.wanted(path, prio) || pending.contains(path) {
+                continue;
+            }
+            pending.insert(path.to_path_buf());
+            q.jobs[prio as usize].push_back(ThumbRequest {
+                path: path.to_path_buf(),
+                mime_type: mime.to_string(),
+                warm_only: prio == Priority::Depth,
+            });
+        }
+        drop(q);
+        cv.notify_all();
+        self.pending = pending;
     }
 
     pub fn drain_ready(&mut self) {
         while let Ok(ready) = self.rx_image.try_recv() {
             self.pending.remove(&ready.path);
+            self.pending_visible.remove(&ready.path);
             match ready.image {
+                Some(_) if ready.warm_only => { self.warmed.insert(ready.path); }
                 Some(img) => { self.images.put(ready.path, img); }
                 None => { self.failed.insert(ready.path); }
             }
+            // Something changed: the next plan isn't a repeat
+            self.planned = 0;
         }
     }
 
@@ -124,6 +238,16 @@ impl ThumbCache {
 
     pub fn clear_protocols(&mut self) {
         self.protocols.clear();
+    }
+}
+
+impl Drop for ThumbCache {
+    fn drop(&mut self) {
+        let (lock, cv) = &*self.shared;
+        if let Ok(mut q) = lock.lock() {
+            q.quit = true;
+        }
+        cv.notify_all();
     }
 }
 
