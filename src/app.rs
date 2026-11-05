@@ -140,6 +140,8 @@ pub struct App {
     /// rows into it) are derived from it each frame.
     pub scroll_pos: f32,
     pub scroll_target: f32,
+    /// When the scroll animation last advanced (it runs on elapsed time).
+    scroll_tick: std::time::Instant,
     pub scroll_sub: u16,
     /// `scroll_offset` as last derived; a different value means it was set
     /// directly (new folder, view change) and the animation jumps there.
@@ -405,6 +407,7 @@ impl App {
             scroll_offset: 0,
             scroll_pos: 0.0,
             scroll_target: 0.0,
+            scroll_tick: std::time::Instant::now(),
             scroll_sub: 0,
             scroll_seen: 0,
             free_space: free_space(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))),
@@ -1525,9 +1528,15 @@ impl App {
             self.scroll_target = self.scroll_pos;
         }
         self.scroll_target = self.scroll_target.clamp(0.0, self.max_scroll());
+        // The same ease as ever (35% of the way per 60 Hz frame), but on
+        // elapsed time, so frames arriving faster don't speed it up
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(self.scroll_tick).as_secs_f32().min(0.05);
+        self.scroll_tick = now;
         let d = self.scroll_target - self.scroll_pos;
         let moving = d.abs() >= 0.5;
-        self.scroll_pos = if moving { self.scroll_pos + d * 0.35 } else { self.scroll_target };
+        let k = 1.0 - 0.65f32.powf(dt / (1.0 / 60.0));
+        self.scroll_pos = if moving { self.scroll_pos + d * k } else { self.scroll_target };
         let rows = self.scroll_pos.round().max(0.0) as usize;
         self.scroll_offset = self.band_at(rows).min(self.icon_bands.len().saturating_sub(1));
         self.scroll_sub = rows.saturating_sub(self.icon_bands.get(self.scroll_offset).map_or(0, |b| b.y)) as u16;

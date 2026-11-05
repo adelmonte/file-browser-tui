@@ -219,12 +219,18 @@ fn run(
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();
 
-    loop {
+    'frames: loop {
         // Drain background results (icons, thumbs, dir events, mount events)
         app.drain_channels();
 
-        // Render frame
+        // Render frame. Everything it writes (cells, centered labels, image
+        // cleanup) goes in one synchronized update, so the terminal shows
+        // whole frames only, never one half-drawn mid-scroll
         app.tick_scroll();
+        {
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(b"\x1b[?2026h");
+        }
         terminal.draw(|f| ui::render(f, app))?;
         // Window title follows the current folder, like Dolphin's
         if app.cwd != title_path {
@@ -251,12 +257,25 @@ fn run(
             }
             let _ = out.flush();
         }
+        {
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(b"\x1b[?2026l");
+            let _ = out.flush();
+        }
 
         // Queue icons for newly visible cells after render updated grid_cols/grid_area
         app.queue_visible_icons();
 
-        // Poll for terminal events
-        if event::poll(Duration::from_millis(16))? {
+        // Wait up to a frame for input, then take everything already
+        // queued before drawing again: a burst of wheel events is one frame
+        let frame = Duration::from_millis(16);
+        let batch_start = std::time::Instant::now();
+        let mut timeout = frame;
+        while event::poll(timeout)? {
+            timeout = Duration::ZERO;
+            if batch_start.elapsed() > frame {
+                break;
+            }
             let ev = event::read()?;
             if let Event::Key(key) = &ev
                 && dnd::swallow(app, key)
@@ -276,7 +295,7 @@ fn run(
                         continue;
                     }
                     if handler::handle_key(app, key) {
-                        break;
+                        break 'frames;
                     }
                     maybe_restart_watcher(app, dir_watcher);
                 }
