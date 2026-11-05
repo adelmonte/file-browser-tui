@@ -333,7 +333,18 @@ fn open_name_prompt(app: &mut App, kind: crate::events::PromptKind, dest: &Path,
 pub fn commit_name_prompt(app: &mut App) {
     use crate::events::PromptKind;
     let Some(state) = &mut app.name_prompt else { return; };
-    let name = if state.input.trim().is_empty() { state.placeholder.as_str() } else { state.input.trim() };
+    let typed = state.input.trim();
+    let name = if typed.is_empty() {
+        state.placeholder.clone()
+    } else {
+        // A pasted picture or text keeps its type when only a name is typed
+        let ext = Path::new(&state.placeholder).extension().map(|e| e.to_string_lossy().to_string());
+        match ext {
+            Some(ext) if matches!(state.kind, PromptKind::Paste(_)) && Path::new(typed).extension().is_none() => format!("{typed}.{ext}"),
+            _ => typed.to_string(),
+        }
+    };
+    let name = name.as_str();
     let path = state.dest.join(name);
     if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.symlink_metadata().is_ok() {
         state.invalid = true;
