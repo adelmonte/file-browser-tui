@@ -117,6 +117,50 @@ enum Place {
     Skip,
 }
 
+/// One thing a job (or a rename, or New Folder) did, as undo needs it.
+/// Overwrites, merges and permanent deletes aren't recorded: nothing
+/// could bring back what they replaced.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Undo {
+    /// Made by a copy or New Folder/File: undoing puts it in the trash.
+    Created(PathBuf),
+    /// Moved or renamed from `from` to `to`.
+    Moved { from: PathBuf, to: PathBuf },
+    /// Put in the trash, as `trashed`.
+    Trashed { from: PathBuf, trashed: PathBuf },
+}
+
+impl Undo {
+    /// Reverse it. A move back across filesystems is left to the caller
+    /// (`Err` of kind CrossesDevices), as it needs the copy machinery.
+    pub fn revert(&self) -> io::Result<()> {
+        match self {
+            Undo::Created(p) => trash(p).map(|_| ()),
+            Undo::Moved { from, to } => {
+                if fs::symlink_metadata(from).is_ok() {
+                    return Err(io::Error::other(format!("{} is in the way", from.display())));
+                }
+                if let Some(parent) = from.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(to, from)
+            }
+            Undo::Trashed { from, trashed } => {
+                let dest = if fs::symlink_metadata(from).is_ok() { free_name(from) } else { from.clone() };
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(trashed, &dest)?;
+                if let (Some(files), Some(name)) = (trashed.parent(), trashed.file_name()) {
+                    let info = files.with_file_name("info").join(format!("{}.trashinfo", name.to_string_lossy()));
+                    let _ = fs::remove_file(info);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// How a finished job went, for the status bar.
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -125,6 +169,8 @@ pub struct Report {
     pub skipped: usize,
     pub errors: Vec<String>,
     pub cancelled: bool,
+    /// What it did, in order, for undo.
+    pub undo: Vec<Undo>,
 }
 
 impl Report {
@@ -279,7 +325,7 @@ impl<'a> Worker<'a> {
             multi: false,
             p: Progress { op, scanning: true, total_bytes: 0, done_bytes: 0, total_items: 0, done_items: 0, current: String::new(), started: now },
             last_sent: now - Duration::from_secs(1),
-            report: Report { op, done: 0, skipped: 0, errors: Vec::new(), cancelled: false },
+            report: Report { op, done: 0, skipped: 0, errors: Vec::new(), cancelled: false, undo: Vec::new() },
         }
     }
 
@@ -345,7 +391,11 @@ impl<'a> Worker<'a> {
                     let result = match op {
                         Op::Copy => self.copy_top(src, job.dest.as_deref().unwrap_or(Path::new("."))),
                         Op::Move => self.move_top(src, job.dest.as_deref().unwrap_or(Path::new("."))),
-                        Op::Trash => trash(src).map(|_| true),
+                        Op::Trash => trash(src).map(|trashed| {
+                            let from = std::path::absolute(src).unwrap_or_else(|_| src.clone());
+                            self.report.undo.push(Undo::Trashed { from, trashed });
+                            true
+                        }),
                         Op::Delete => remove_any(src).map(|_| true),
                         Op::EmptyTrash => Ok(true),
                     };
@@ -421,7 +471,12 @@ impl<'a> Worker<'a> {
             return Err(io::Error::other("can't copy a folder into itself"));
         }
         let place = self.place(src, dest_dir.join(name), self.multi)?;
-        self.copy_placed(src, place)
+        let created = match &place { Place::New(t) => Some(t.clone()), _ => None };
+        let copied = self.copy_placed(src, place)?;
+        if copied && let Some(t) = created {
+            self.report.undo.push(Undo::Created(t));
+        }
+        Ok(copied)
     }
 
     /// Copy to where `place` says; false if skipped.
@@ -460,7 +515,12 @@ impl<'a> Worker<'a> {
             return Err(io::Error::other("can't move a folder into itself"));
         }
         let place = self.place(src, dest_dir.join(name), self.multi)?;
-        self.move_placed(src, place)
+        let to = match &place { Place::New(t) | Place::Replace(t) => Some(t.clone()), _ => None };
+        let moved = self.move_placed(src, place)?;
+        if moved && let Some(to) = to {
+            self.report.undo.push(Undo::Moved { from: src.to_path_buf(), to });
+        }
+        Ok(moved)
     }
 
     /// Move to where `place` says; false if skipped.
@@ -833,6 +893,49 @@ mod tests {
         assert!(trash.join("files/my file.txt").exists() && trash.join("files/my file.txt.2").exists());
         let info = fs::read_to_string(trash.join("info/my file.txt.2.trashinfo")).unwrap();
         assert!(info.starts_with("[Trash Info]\nPath=/") && info.contains("my%20file.txt\nDeletionDate=20"), "{info}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undo_records_and_reverts() {
+        let root = std::env::temp_dir().join(format!("fbt-undo-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("a.txt"), "a").unwrap();
+        fs::write(src.join("b.txt"), "b").unwrap();
+        fs::write(dst.join("b.txt"), "old b").unwrap();
+        let mut seen = Vec::new();
+        let mut ops = FileOps::new();
+
+        // A copy records what it made, not what it overwrote
+        ops.copy(vec![src.join("a.txt"), src.join("b.txt")], &dst);
+        let r = answering(&mut ops, &mut seen, |_| once(Choice::Replace));
+        assert_eq!(r.undo, vec![Undo::Created(dst.join("a.txt"))]);
+
+        // A move goes back where it was
+        fs::create_dir(root.join("moved")).unwrap();
+        ops.move_to(vec![src.join("a.txt")], &root.join("moved"));
+        let r = answering(&mut ops, &mut seen, |_| panic!("no clash expected"));
+        assert_eq!(r.undo, vec![Undo::Moved { from: src.join("a.txt"), to: root.join("moved/a.txt") }]);
+        r.undo[0].revert().unwrap();
+        assert_eq!(fs::read_to_string(src.join("a.txt")).unwrap(), "a");
+        assert!(!root.join("moved/a.txt").exists());
+
+        // Something new in the way: refused, nothing lost
+        let step = Undo::Moved { from: src.join("b.txt"), to: dst.join("b.txt") };
+        assert!(step.revert().is_err());
+        assert_eq!(fs::read_to_string(dst.join("b.txt")).unwrap(), "b");
+
+        // Out of the trash, its .trashinfo gone with it
+        let trash_dir = root.join("Trash");
+        let f = src.join("a.txt");
+        let trashed = trash_into(&trash_dir, &f, &f).unwrap();
+        assert!(!f.exists());
+        Undo::Trashed { from: f.clone(), trashed }.revert().unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "a");
+        assert_eq!(fs::read_dir(trash_dir.join("info")).unwrap().count(), 0);
         let _ = fs::remove_dir_all(&root);
     }
 }

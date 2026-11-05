@@ -29,6 +29,8 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
 - **File operations** done by the app itself: copy, move, trash (freedesktop trash
   spec) and delete, with a progress bar, time left and cancel, and Dolphin's
   "File Already Exists" choices (Overwrite / Write Into, Skip, Rename, Apply to All).
+- **Undo** (`Ctrl+Z`) for copies, moves, renames, trashing and new folders or files;
+  undoing a copy moves the copies to the trash rather than deleting them.
 - **Clipboard** that works with other file managers: cut/copy/paste files between the
   app and Dolphin, Nautilus etc., and paste copied text or images as a new file.
 - **Drag and drop**: rubber-band selection, dragging items onto folders and places, and
@@ -111,6 +113,7 @@ Dolphin's defaults; `F1` in the app lists them, including any you've changed.
 | `Shift+arrows`, `Shift/Ctrl+click` | extend the selection |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste |
 | `Ctrl+Alt+C` | copy the location |
+| `Ctrl+Z` | undo the last copy, move, rename, trash or new item |
 | `F2` | rename |
 | `F10` | new folder |
 | `Delete` / `Shift+Delete` | move to trash / delete permanently |

@@ -70,6 +70,7 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
             }
         }
 
+        MenuAction::Undo => app.undo(),
         MenuAction::Paste => {
             if let Some(dest) = target_dir(app, target) {
                 paste_clipboard(app, &dest);
@@ -338,6 +339,11 @@ pub fn commit_name_prompt(app: &mut App) {
         state.invalid = true;
         return;
     }
+    let state_kind_label = match &state.kind {
+        PromptKind::NewFolder => format!("new folder {name}"),
+        PromptKind::NewFile => format!("new file {name}"),
+        PromptKind::Paste(_) => format!("pasted {name}"),
+    };
     let result = match &state.kind {
         PromptKind::NewFolder => std::fs::create_dir(&path),
         PromptKind::NewFile => std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map(|_| ()),
@@ -349,6 +355,7 @@ pub fn commit_name_prompt(app: &mut App) {
         return;
     }
     app.name_prompt = None;
+    app.remember_undo(state_kind_label, vec![crate::fileops::Undo::Created(path.clone())]);
     if path.parent() == Some(app.cwd.as_path()) {
         app.reload_dir();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

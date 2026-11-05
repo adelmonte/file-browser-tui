@@ -9,6 +9,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     Quit,
+    Undo,
     Help,
     Search,
     SelectAll,
@@ -57,6 +58,7 @@ pub const ACTIONS: &[(&str, Action, &[&str], &str)] = &[
     ("cut", Action::Cut, &["Ctrl+X"], "Cut"),
     ("paste", Action::Paste, &["Ctrl+V"], "Paste"),
     ("copy_location", Action::CopyLocation, &["Ctrl+Alt+C"], "Copy location"),
+    ("undo", Action::Undo, &["Ctrl+Z"], "Undo"),
     ("trash", Action::Trash, &["Delete"], "Move to trash"),
     ("delete", Action::Delete, &["Shift+Delete"], "Delete permanently"),
     ("properties", Action::Properties, &["Alt+Enter"], "Properties"),

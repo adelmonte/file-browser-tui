@@ -360,6 +360,7 @@ fn run_action(app: &mut App, action: Action) -> bool {
         }
         Action::CopyLocation => actions::execute(app, MenuAction::CopyLocation, target),
         Action::Trash => actions::trash_selection(app),
+        Action::Undo => app.undo(),
         Action::Delete => {
             let paths = actions::selected_paths(app);
             if !paths.is_empty() {

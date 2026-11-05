@@ -197,6 +197,9 @@ pub struct App {
     kdeconnect_mount_rx: Option<mpsc::Receiver<(String, Result<PathBuf, String>)>>,
     /// A message shown in the status bar until it expires.
     pub notice: Option<(String, std::time::Instant)>,
+    /// Finished operations that can be undone, newest last: a label for
+    /// the menu, and the steps.
+    pub undo_stack: Vec<(String, Vec<crate::fileops::Undo>)>,
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
     pub place_drag: Option<crate::events::PlaceDrag>,
@@ -435,6 +438,7 @@ impl App {
             kdeconnect_mounts: HashMap::new(),
             kdeconnect_mount_rx: None,
             notice: None,
+            undo_stack: Vec::new(),
             sidebar_icons: IconCache::new(false)
                 .with_fit(crate::icons::Fit {
                     max_h: 1.0,
@@ -845,6 +849,45 @@ impl App {
         self.fileops.resolve(crate::fileops::Resolution { choice, all });
     }
 
+    pub fn remember_undo(&mut self, label: String, steps: Vec<crate::fileops::Undo>) {
+        const KEEP: usize = 50;
+        self.undo_stack.push((label, steps));
+        if self.undo_stack.len() > KEEP {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Reverse the newest undoable operation, last step first.
+    pub fn undo(&mut self) {
+        use crate::fileops::Undo;
+        let Some((label, steps)) = self.undo_stack.pop() else {
+            self.notify("Nothing to undo".into());
+            return;
+        };
+        let mut failed = Vec::new();
+        let mut across: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for step in steps.iter().rev() {
+            match step.revert() {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices
+                    && let Undo::Moved { from, to } = step => across.push((to.clone(), from.clone())),
+                Err(e) => failed.push(e.to_string()),
+            }
+        }
+        // Moves back to another filesystem go through the copy machinery
+        for (now, was) in across {
+            if let Some(dir) = was.parent() {
+                self.fileops.move_to(vec![now], dir);
+            }
+        }
+        self.reload_dir();
+        match failed.as_slice() {
+            [] => self.notify(format!("Undid {label}")),
+            [one] => self.notify(format!("Undid {label}, except: {one}")),
+            [first, ..] => self.notify(format!("Undid {label}, except {} items: {first}, ...", failed.len())),
+        }
+    }
+
     pub fn notify(&mut self, text: String) {
         self.notice = Some((text, std::time::Instant::now() + std::time::Duration::from_secs(8)));
     }
@@ -1195,6 +1238,15 @@ impl App {
         }
         for report in self.fileops.poll() {
             self.notify(report.message());
+            if !report.undo.is_empty() {
+                let n = report.undo.len();
+                let what = match report.op {
+                    crate::fileops::Op::Copy => "copy",
+                    crate::fileops::Op::Move => "move",
+                    _ => "trash",
+                };
+                self.remember_undo(format!("{what} of {}", if n == 1 { "1 item".into() } else { format!("{n} items") }), report.undo);
+            }
             self.reload_dir();
         }
         if self.conflict_prompt.is_none() && let Some(c) = self.fileops.conflict.clone() {
@@ -1559,6 +1611,8 @@ impl App {
             state.invalid = true;
             return;
         }
+        let label = format!("rename to {}", new_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
+        self.remember_undo(label, vec![crate::fileops::Undo::Moved { from: entry.path.clone(), to: new_path.clone() }]);
         self.rename_state = None;
         self.reload_dir();
         self.selection = self.listing.entries.iter().position(|e| e.path == new_path);
