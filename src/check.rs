@@ -17,6 +17,7 @@ pub fn has_command(name: &str) -> bool {
 /// Optional tools: command, what it's for, and whether any of a group will
 /// do (the group name).
 const TOOLS: &[(&str, &str, Option<&str>)] = &[
+    ("rsvg-convert", "drawing the icon theme's SVG icons (librsvg)", None),
     ("wl-paste", "clipboard on Wayland (with wl-copy)", Some("clipboard")),
     ("xclip", "clipboard on X11", Some("clipboard")),
     ("fd", "fast file name search", None),
@@ -26,6 +27,7 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("xdg-open", "opening files with their default app", None),
     ("tar", "Compress to tar.gz", None),
     ("zip", "Compress to zip", None),
+    ("udisksctl", "unmounting and safely removing drives", None),
     ("kdeconnect-cli", "Send to Device / browsing phones (KDE Connect)", None),
     ("gio", "file type icons for unusual files (fallback)", None),
 ];
