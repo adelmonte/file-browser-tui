@@ -148,6 +148,54 @@ pub struct NamePrompt {
     pub placeholder: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictButton {
+    /// Overwrite, or Write Into for folders.
+    Replace,
+    Skip,
+    Rename,
+    Cancel,
+    AllToggle,
+}
+
+/// Dolphin's "File Already Exists" dialog for a clash the file
+/// operation is waiting on.
+pub struct ConflictPrompt {
+    pub conflict: crate::fileops::Conflict,
+    /// The name used by Rename: a free one to start with.
+    pub input: String,
+    pub cursor_pos: usize,
+    pub invalid: bool,
+    /// Apply the choice to the job's later clashes too.
+    pub all: bool,
+    /// Size and date of the incoming and the existing item.
+    pub src_info: String,
+    pub dst_info: String,
+}
+
+impl ConflictPrompt {
+    pub fn new(conflict: crate::fileops::Conflict) -> Self {
+        let input = crate::fileops::free_name(&conflict.dst).file_name()
+            .map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let info = |p: &std::path::Path| {
+            let Ok(m) = std::fs::symlink_metadata(p) else { return String::new() };
+            let what = if m.is_dir() {
+                let n = std::fs::read_dir(p).map_or(0, |d| d.count());
+                format!("folder, {n} item{}", if n == 1 { "" } else { "s" })
+            } else {
+                crate::ui::properties::human_size(m.len())
+            };
+            match m.modified() {
+                Ok(t) => format!("{what}, modified {}", chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M")),
+                Err(_) => what,
+            }
+        };
+        let (src_info, dst_info) = (info(&conflict.src), info(&conflict.dst));
+        let cursor_pos = input.len();
+        Self { conflict, input, cursor_pos, invalid: false, all: false, src_info, dst_info }
+    }
+}
+
 pub struct RenameState {
     pub item_idx: usize,
     pub input: String,

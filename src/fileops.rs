@@ -1,7 +1,7 @@
 //! File operations (copy, move, trash, delete) on a background worker, with
 //! progress for the status bar and a report of what failed. Done here
-//! rather than by `gio`, so they work without GLib, never overwrite (name
-//! clashes get " (2)"-style names) and can show progress and errors.
+//! rather than by `gio`, so they work without GLib and can show progress,
+//! errors and Dolphin's "File Already Exists" choices for name clashes.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -76,11 +76,53 @@ impl Progress {
     }
 }
 
+/// A copy or move whose target name is taken, for the user to decide.
+#[derive(Debug, Clone)]
+pub struct Conflict {
+    pub op: Op,
+    pub src: PathBuf,
+    pub dst: PathBuf,
+    /// Both folders: the choice is writing into the existing one.
+    pub both_dirs: bool,
+    /// Both files (or links): the existing one can be replaced.
+    pub can_replace: bool,
+    /// Other items may clash too, so "apply to all" means something.
+    pub more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Choice {
+    /// Replace the existing file, or write into the existing folder.
+    Replace,
+    Skip,
+    /// Use this name instead (in the same folder).
+    Rename(String),
+    /// A free "name (2)" name.
+    AutoRename,
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    pub choice: Choice,
+    /// Do the same for the rest of the job's clashes of this kind.
+    pub all: bool,
+}
+
+/// Where a source goes, its clash (if any) settled.
+enum Place {
+    New(PathBuf),
+    Replace(PathBuf),
+    Merge(PathBuf),
+    Skip,
+}
+
 /// How a finished job went, for the status bar.
 #[derive(Debug, Clone)]
 pub struct Report {
     pub op: Op,
     pub done: usize,
+    pub skipped: usize,
     pub errors: Vec<String>,
     pub cancelled: bool,
 }
@@ -92,43 +134,67 @@ impl Report {
         if self.cancelled {
             return format!("Cancelled ({} done)", items(self.done));
         }
+        let done = match self.skipped {
+            0 => items(self.done),
+            n => format!("{}, skipped {n}", items(self.done)),
+        };
         match self.errors.as_slice() {
             [] if self.op == Op::EmptyTrash => past.to_string(),
-            [] => format!("{past} {}", items(self.done)),
-            [one] => format!("{past} {}; failed: {one}", items(self.done)),
-            [first, rest @ ..] => format!("{past} {}; {} failed: {first} (+{} more)", items(self.done), rest.len() + 1, rest.len()),
+            [] => format!("{past} {done}"),
+            [one] => format!("{past} {done}; failed: {one}"),
+            [first, rest @ ..] => format!("{past} {done}; {} failed: {first} (+{} more)", rest.len() + 1, rest.len()),
         }
     }
 }
 
 enum Msg {
     Progress(Progress),
+    Conflict(Conflict),
     Done(Report),
 }
+
+/// Settles a clash: the app's dialog, or a fixed answer in tests.
+type Ask<'a> = &'a dyn Fn(&Conflict) -> Resolution;
 
 pub struct FileOps {
     jobs: mpsc::Sender<Job>,
     rx: mpsc::Receiver<Msg>,
     cancel: Arc<AtomicBool>,
+    answers: mpsc::Sender<Resolution>,
     /// Queued or running jobs.
     pending: usize,
     pub progress: Option<Progress>,
+    /// A clash the worker is waiting on (see `resolve`).
+    pub conflict: Option<Conflict>,
 }
 
 impl FileOps {
     pub fn new() -> Self {
         let (jobs, job_rx) = mpsc::channel::<Job>();
         let (tx, rx) = mpsc::channel();
+        let (answers, answer_rx) = mpsc::channel::<Resolution>();
         let cancel = Arc::new(AtomicBool::new(false));
         let c = cancel.clone();
         std::thread::spawn(move || {
+            let ask_tx = tx.clone();
+            let ask = move |c: &Conflict| {
+                let _ = ask_tx.send(Msg::Conflict(c.clone()));
+                answer_rx.recv().unwrap_or(Resolution { choice: Choice::Cancel, all: false })
+            };
             while let Ok(job) = job_rx.recv() {
                 c.store(false, Ordering::Relaxed);
-                let report = Worker::new(job.op, &tx, &c).run(&job);
+                let report = Worker::new(job.op, &tx, &c, &ask).run(&job);
                 let _ = tx.send(Msg::Done(report));
             }
         });
-        Self { jobs, rx, cancel, pending: 0, progress: None }
+        Self { jobs, rx, cancel, answers, pending: 0, progress: None, conflict: None }
+    }
+
+    /// Answer the clash the worker is waiting on.
+    pub fn resolve(&mut self, answer: Resolution) {
+        if self.conflict.take().is_some() {
+            let _ = self.answers.send(answer);
+        }
     }
 
     fn submit(&mut self, op: Op, sources: Vec<PathBuf>, dest: Option<PathBuf>) {
@@ -160,8 +226,9 @@ impl FileOps {
     }
 
     /// Stop the running job after the current chunk.
-    pub fn cancel(&self) {
+    pub fn cancel(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+        self.resolve(Resolution { choice: Choice::Cancel, all: false });
     }
 
     pub fn busy(&self) -> bool {
@@ -174,6 +241,7 @@ impl FileOps {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Progress(p) => self.progress = Some(p),
+                Msg::Conflict(c) => self.conflict = Some(c),
                 Msg::Done(r) => {
                     self.pending = self.pending.saturating_sub(1);
                     self.progress = None;
@@ -188,6 +256,11 @@ impl FileOps {
 struct Worker<'a> {
     tx: &'a mpsc::Sender<Msg>,
     cancel: &'a AtomicBool,
+    ask: Ask<'a>,
+    /// "Apply to all" answers: for files, and for folders.
+    policy: [Option<Choice>; 2],
+    /// More than one item: later ones may clash too.
+    multi: bool,
     p: Progress,
     last_sent: Instant,
     report: Report,
@@ -196,14 +269,17 @@ struct Worker<'a> {
 const CHUNK: usize = 1 << 20;
 
 impl<'a> Worker<'a> {
-    fn new(op: Op, tx: &'a mpsc::Sender<Msg>, cancel: &'a AtomicBool) -> Self {
+    fn new(op: Op, tx: &'a mpsc::Sender<Msg>, cancel: &'a AtomicBool, ask: Ask<'a>) -> Self {
         let now = Instant::now();
         Self {
             tx,
             cancel,
+            ask,
+            policy: [None, None],
+            multi: false,
             p: Progress { op, scanning: true, total_bytes: 0, done_bytes: 0, total_items: 0, done_items: 0, current: String::new(), started: now },
             last_sent: now - Duration::from_secs(1),
-            report: Report { op, done: 0, errors: Vec::new(), cancelled: false },
+            report: Report { op, done: 0, skipped: 0, errors: Vec::new(), cancelled: false },
         }
     }
 
@@ -230,6 +306,7 @@ impl<'a> Worker<'a> {
 
     fn run(mut self, job: &Job) -> Report {
         let op = job.op;
+        self.multi = job.sources.len() > 1;
         // Byte totals only matter where bytes get copied
         if matches!(op, Op::Copy | Op::Move) {
             for s in &job.sources {
@@ -268,12 +345,13 @@ impl<'a> Worker<'a> {
                     let result = match op {
                         Op::Copy => self.copy_top(src, job.dest.as_deref().unwrap_or(Path::new("."))),
                         Op::Move => self.move_top(src, job.dest.as_deref().unwrap_or(Path::new("."))),
-                        Op::Trash => trash(src).map(|_| ()),
-                        Op::Delete => remove_any(src),
-                        Op::EmptyTrash => Ok(()),
+                        Op::Trash => trash(src).map(|_| true),
+                        Op::Delete => remove_any(src).map(|_| true),
+                        Op::EmptyTrash => Ok(true),
                     };
                     match result {
-                        Ok(()) => self.report.done += 1,
+                        Ok(true) => self.report.done += 1,
+                        Ok(false) => self.report.skipped += 1,
                         Err(e) if e.kind() == io::ErrorKind::Interrupted && self.report.cancelled => {}
                         Err(e) => self.fail(src, e),
                     }
@@ -287,62 +365,180 @@ impl<'a> Worker<'a> {
         self.report
     }
 
-    fn copy_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<()> {
+    /// Settle where `src` goes when it's meant for `target`: asking the
+    /// user (or following an "apply to all") if the name is taken.
+    fn place(&mut self, src: &Path, target: PathBuf, more: bool) -> io::Result<Place> {
+        let Ok(existing) = fs::symlink_metadata(&target) else { return Ok(Place::New(target)); };
+        let src_meta = fs::symlink_metadata(src)?;
+        // Pasting where it already is: a copy beside it, as nothing else makes sense
+        if existing.dev() == src_meta.dev() && existing.ino() == src_meta.ino() {
+            return Ok(Place::New(free_name(&target)));
+        }
+        let both_dirs = src_meta.is_dir() && existing.is_dir();
+        let can_replace = !src_meta.is_dir() && !existing.is_dir();
+        let kind = both_dirs as usize;
+        let choice = match self.policy[kind].clone() {
+            Some(c) => c,
+            None => {
+                let conflict = Conflict { op: self.p.op, src: src.to_path_buf(), dst: target.clone(), both_dirs, can_replace, more };
+                let answer = (self.ask)(&conflict);
+                if answer.all {
+                    // A typed name can't apply to others: they get free names
+                    self.policy[kind] = Some(match &answer.choice {
+                        Choice::Rename(_) => Choice::AutoRename,
+                        c => c.clone(),
+                    });
+                }
+                answer.choice
+            }
+        };
+        Ok(match choice {
+            Choice::Replace if both_dirs => Place::Merge(target),
+            Choice::Replace if can_replace => Place::Replace(target),
+            // A file and a folder: neither can stand in for the other
+            Choice::Replace | Choice::AutoRename => Place::New(free_name(&target)),
+            Choice::Skip => Place::Skip,
+            Choice::Rename(name) => return self.place(src, target.with_file_name(name), more),
+            Choice::Cancel => {
+                self.cancel.store(true, Ordering::Relaxed);
+                self.report.cancelled = true;
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+        })
+    }
+
+    /// Count a skipped item as done, so the progress still reaches the end.
+    fn skip(&mut self, src: &Path) {
+        let (bytes, items) = measure(src);
+        self.p.done_bytes += bytes;
+        self.p.done_items += items;
+        self.tick(false);
+    }
+
+    fn copy_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<bool> {
         let name = src.file_name().ok_or_else(|| io::Error::other("no file name"))?;
         if dest_dir.starts_with(src) {
             return Err(io::Error::other("can't copy a folder into itself"));
         }
-        let target = free_name(&dest_dir.join(name));
-        self.copy_tree(src, &target)
+        let place = self.place(src, dest_dir.join(name), self.multi)?;
+        self.copy_placed(src, place)
     }
 
-    fn move_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<()> {
+    /// Copy to where `place` says; false if skipped.
+    fn copy_placed(&mut self, src: &Path, place: Place) -> io::Result<bool> {
+        match place {
+            Place::New(t) => self.copy_tree(src, &t, false)?,
+            Place::Merge(t) => self.copy_tree(src, &t, true)?,
+            Place::Replace(t) => {
+                // Copied beside it first: the old file stays if this fails
+                let tmp = partial_name(&t);
+                let _ = fs::remove_file(&tmp);
+                self.copy_tree(src, &tmp, false)?;
+                if let Err(e) = fs::rename(&tmp, &t) {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(e);
+                }
+            }
+            Place::Skip => {
+                self.skip(src);
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn move_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<bool> {
         let name = src.file_name().ok_or_else(|| io::Error::other("no file name"))?;
         if src.parent() == Some(dest_dir) {
             // Already there
             let (bytes, items) = measure(src);
             self.p.done_bytes += bytes;
             self.p.done_items += items;
-            return Ok(());
+            return Ok(true);
         }
         if dest_dir.starts_with(src) {
             return Err(io::Error::other("can't move a folder into itself"));
         }
-        let target = free_name(&dest_dir.join(name));
+        let place = self.place(src, dest_dir.join(name), self.multi)?;
+        self.move_placed(src, place)
+    }
+
+    /// Move to where `place` says; false if skipped.
+    fn move_placed(&mut self, src: &Path, place: Place) -> io::Result<bool> {
+        let target = match place {
+            Place::Skip => {
+                self.skip(src);
+                return Ok(false);
+            }
+            Place::Merge(t) => {
+                // Each item into the existing folder, clashes asked in turn;
+                // the source folder goes once it's empty (skips keep it)
+                for e in fs::read_dir(src)? {
+                    if self.cancelled() {
+                        return Err(io::ErrorKind::Interrupted.into());
+                    }
+                    let e = e?;
+                    let result = self.place(&e.path(), t.join(e.file_name()), true)
+                        .and_then(|place| self.move_placed(&e.path(), place));
+                    if let Err(err) = result {
+                        if err.kind() == io::ErrorKind::Interrupted {
+                            return Err(err);
+                        }
+                        self.fail(&e.path(), err);
+                    }
+                }
+                let _ = fs::remove_dir(src);
+                return Ok(true);
+            }
+            Place::New(t) | Place::Replace(t) => t,
+        };
+        // A rename replaces a file atomically
         match fs::rename(src, &target) {
             Ok(()) => {
                 let (bytes, items) = measure(&target);
                 self.p.done_bytes += bytes;
                 self.p.done_items += items;
-                Ok(())
+                Ok(true)
             }
             // Another filesystem: copy, then remove the original
             Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
                 let errors = self.report.errors.len();
-                self.copy_tree(src, &target)?;
+                let replace = fs::symlink_metadata(&target).is_ok();
+                self.copy_placed(src, if replace { Place::Replace(target) } else { Place::New(target) })?;
                 // Anything inside that didn't copy keeps the original
                 if self.report.errors.len() > errors {
                     return Err(io::Error::other("not everything copied; original kept"));
                 }
-                remove_any(src)
+                remove_any(src)?;
+                Ok(true)
             }
             Err(e) => Err(e),
         }
     }
 
-    fn copy_tree(&mut self, src: &Path, dst: &Path) -> io::Result<()> {
+    /// Copy `src` to `dst`; with `merge`, `dst` is an existing folder to
+    /// write into, its clashing items asked about one by one.
+    fn copy_tree(&mut self, src: &Path, dst: &Path, merge: bool) -> io::Result<()> {
         let meta = fs::symlink_metadata(src)?;
         let ft = meta.file_type();
         if ft.is_symlink() {
             std::os::unix::fs::symlink(fs::read_link(src)?, dst)?;
         } else if ft.is_dir() {
-            fs::create_dir(dst)?;
+            if !merge {
+                fs::create_dir(dst)?;
+            }
             for e in fs::read_dir(src)? {
                 if self.cancelled() {
                     return Err(io::ErrorKind::Interrupted.into());
                 }
                 let e = e?;
-                if let Err(err) = self.copy_tree(&e.path(), &dst.join(e.file_name())) {
+                let target = dst.join(e.file_name());
+                let result = if merge {
+                    self.place(&e.path(), target, true).and_then(|place| self.copy_placed(&e.path(), place).map(|_| ()))
+                } else {
+                    self.copy_tree(&e.path(), &target, false)
+                };
+                if let Err(err) = result {
                     if err.kind() == io::ErrorKind::Interrupted {
                         return Err(err);
                     }
@@ -407,6 +603,12 @@ fn remove_any(path: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(path)
     }
+}
+
+/// A hidden sibling to copy into before replacing `path`.
+fn partial_name(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!(".{name}.part"))
 }
 
 /// `path`, or the first free "name (2).ext", "name (3).ext", ...
@@ -504,15 +706,26 @@ fn mount_top(path: &Path, dev: u64) -> PathBuf {
 mod tests {
     use super::*;
 
-    fn wait(ops: &mut FileOps) -> Report {
+    /// Run until done, answering each clash with `answer` (and noting it).
+    fn answering(ops: &mut FileOps, seen: &mut Vec<Conflict>, mut answer: impl FnMut(&Conflict) -> Resolution) -> Report {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            if let Some(r) = ops.poll().pop() {
+            let done = ops.poll().pop();
+            if let Some(c) = ops.conflict.clone() {
+                let a = answer(&c);
+                seen.push(c);
+                ops.resolve(a);
+            }
+            if let Some(r) = done {
                 return r;
             }
             assert!(Instant::now() < deadline, "job didn't finish");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    fn once(choice: Choice) -> Resolution {
+        Resolution { choice, all: false }
     }
 
     #[test]
@@ -526,31 +739,67 @@ mod tests {
         fs::write(src.join("note.txt"), "hi").unwrap();
         std::os::unix::fs::symlink("inner/a.txt", src.join("tree/link")).unwrap();
         fs::write(dst.join("note.txt"), "old").unwrap();
+        let mut seen = Vec::new();
 
+        // A clash asks; a free name keeps both
         let mut ops = FileOps::new();
         ops.copy(vec![src.join("tree"), src.join("note.txt")], &dst);
-        let r = wait(&mut ops);
+        let r = answering(&mut ops, &mut seen, |_| once(Choice::AutoRename));
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         assert_eq!(r.done, 2);
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].can_replace && !seen[0].both_dirs && seen[0].more);
         assert_eq!(fs::read(dst.join("tree/inner/a.txt")).unwrap().len(), 3 * CHUNK + 5);
         assert_eq!(fs::read_link(dst.join("tree/link")).unwrap(), PathBuf::from("inner/a.txt"));
         assert_eq!(fs::read_to_string(dst.join("note.txt")).unwrap(), "old");
         assert_eq!(fs::read_to_string(dst.join("note (2).txt")).unwrap(), "hi");
 
-        // Copy into itself is refused; a second copy of the folder gets a new name
+        // Copy into itself is refused; pasting where it is makes a copy beside it
         ops.copy(vec![src.clone()], &src.join("tree"));
-        assert_eq!(wait(&mut ops).errors.len(), 1);
+        assert_eq!(answering(&mut ops, &mut seen, |_| once(Choice::Cancel)).errors.len(), 1);
+        ops.copy(vec![dst.join("note.txt")], &dst);
+        answering(&mut ops, &mut seen, |_| panic!("asked about copying onto itself"));
+        assert!(dst.join("note (3).txt").exists());
+
+        // Writing into a folder: new items go in, clashes inside are asked
+        fs::write(src.join("tree/inner/a.txt"), "new a").unwrap();
+        fs::write(src.join("tree/extra.txt"), "extra").unwrap();
+        seen.clear();
         ops.copy(vec![src.join("tree")], &dst);
-        wait(&mut ops);
-        assert!(dst.join("tree (2)/inner/a.txt").exists());
+        let r = answering(&mut ops, &mut seen, |c| once(if c.both_dirs || c.src.ends_with("a.txt") { Choice::Replace } else { Choice::Skip }));
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(fs::read_to_string(dst.join("tree/inner/a.txt")).unwrap(), "new a");
+        assert_eq!(fs::read_to_string(dst.join("tree/extra.txt")).unwrap(), "extra");
+        assert!(seen[0].both_dirs && seen.iter().any(|c| c.src.ends_with("link")));
+        assert!(!dst.join("tree/inner/.a.txt.part").exists());
 
+        // A typed name; then skipping, which leaves the source where it is
+        ops.copy(vec![src.join("note.txt")], &dst);
+        answering(&mut ops, &mut seen, |_| once(Choice::Rename("custom.txt".into())));
+        assert_eq!(fs::read_to_string(dst.join("custom.txt")).unwrap(), "hi");
         ops.move_to(vec![src.join("note.txt")], &dst);
-        assert!(wait(&mut ops).errors.is_empty());
-        assert!(!src.join("note.txt").exists() && dst.join("note (3).txt").exists());
+        let r = answering(&mut ops, &mut seen, |_| once(Choice::Skip));
+        assert_eq!((r.done, r.skipped), (0, 1));
+        assert!(src.join("note.txt").exists());
+        assert_eq!(r.message(), "Moved 0 items, skipped 1");
 
-        ops.delete(vec![dst.join("tree (2)")]);
-        wait(&mut ops);
-        assert!(!dst.join("tree (2)").exists());
+        // Moving into a folder with "apply to all": asked once for folders
+        // and once for files, and the source is emptied
+        seen.clear();
+        ops.move_to(vec![src.join("tree")], &dst);
+        let r = answering(&mut ops, &mut seen, |_| Resolution { choice: Choice::Replace, all: true });
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(seen.iter().map(|c| c.both_dirs).collect::<Vec<_>>(), [true, false]);
+        assert!(!src.join("tree").exists());
+        assert_eq!(fs::read_to_string(dst.join("tree/inner/a.txt")).unwrap(), "new a");
+
+        // Cancel stops the job
+        ops.copy(vec![dst.join("note.txt")], &src);
+        fs::write(src.join("note.txt"), "x").unwrap();
+        ops.copy(vec![dst.join("note.txt")], &src);
+        let first = answering(&mut ops, &mut seen, |_| once(Choice::Cancel));
+        let second = if first.cancelled { first } else { answering(&mut ops, &mut seen, |_| once(Choice::Cancel)) };
+        assert!(second.cancelled);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -563,7 +812,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel();
         let cancel = AtomicBool::new(true);
         let job = Job { op: Op::Copy, sources: vec![root.join("big.bin")], dest: Some(root.join("dst")) };
-        let r = Worker::new(Op::Copy, &tx, &cancel).run(&job);
+        let r = Worker::new(Op::Copy, &tx, &cancel, &|_| once(Choice::Cancel)).run(&job);
         assert!(r.cancelled && r.done == 0 && r.errors.is_empty(), "{r:?}");
         assert!(!root.join("dst/big.bin").exists());
         assert_eq!(r.message(), "Cancelled (0 items done)");

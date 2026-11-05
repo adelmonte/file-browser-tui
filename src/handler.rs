@@ -119,6 +119,35 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
+    // A file operation waiting on a name clash. Alt+letter picks like
+    // Dolphin's mnemonics; typing edits the new name, Enter renames
+    if let Some(ref mut p) = app.conflict_prompt {
+        use crate::events::ConflictButton as B;
+        let alt = ev.modifiers.contains(KeyModifiers::ALT);
+        let can_replace = p.conflict.can_replace || p.conflict.both_dirs;
+        let button = match ev.code {
+            KeyCode::Esc => Some(B::Cancel),
+            KeyCode::Enter => Some(B::Rename),
+            KeyCode::Char(c) if alt => match c.to_ascii_lowercase() {
+                'o' | 'w' if can_replace => Some(B::Replace),
+                's' => Some(B::Skip),
+                'r' => Some(B::Rename),
+                'a' if p.conflict.more => Some(B::AllToggle),
+                _ => None,
+            },
+            _ => {
+                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+                    p.invalid = false;
+                }
+                None
+            }
+        };
+        if let Some(b) = button {
+            app.answer_conflict(b);
+        }
+        return false;
+    }
+
     // New folder/file/pasted content name prompt
     if let Some(ref mut p) = app.name_prompt {
         match ev.code {
@@ -364,7 +393,15 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     let col = ev.column;
     let row = ev.row;
 
-    // The name prompt is modal: only its buttons respond
+    // Dialogs are modal: only their buttons respond
+    if app.conflict_prompt.is_some() {
+        if ev.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some(&(_, b)) = app.conflict_buttons.iter().find(|(r, _)| contains(*r, col, row))
+        {
+            app.answer_conflict(b);
+        }
+        return;
+    }
     if app.name_prompt.is_some() {
         if ev.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some((create, cancel)) = app.prompt_buttons

@@ -122,6 +122,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.name_prompt.is_some() {
         render_name_prompt(f, app);
     }
+    app.conflict_buttons.clear();
+    if app.conflict_prompt.is_some() {
+        render_conflict_prompt(f, app);
+    }
     if app.confirm_delete.is_some() {
         render_confirm_delete(f, app);
     }
@@ -232,6 +236,107 @@ fn render_name_prompt(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(ok_label).style(Style::default().bg(theme::selection()).fg(theme::text_strong()).add_modifier(Modifier::BOLD)), ok);
     f.render_widget(Paragraph::new(cancel_label).style(Style::default().bg(theme::input()).fg(theme::text())), cancel);
     app.prompt_buttons = Some((ok, cancel));
+}
+
+/// Dolphin's "File Already Exists": what clashes with what, a field for a
+/// new name, Apply to All, and the choices (their Alt+letter underlined).
+fn render_conflict_prompt(f: &mut Frame, app: &mut App) {
+    use crate::events::ConflictButton as B;
+    use ratatui::text::Span;
+    let Some(ref p) = app.conflict_prompt else { return; };
+    let c = &p.conflict;
+    let name = |path: &std::path::Path| path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let dir = c.dst.parent().map(name).unwrap_or_default();
+    let title = if c.both_dirs { " Folder Already Exists " } else { " File Already Exists " };
+    let what = if c.dst.is_dir() { "A folder" } else { "A file" };
+
+    let term = f.area();
+    let w = 70u16.min(term.width);
+    let h = 11u16.min(term.height);
+    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let bg = Style::default().bg(theme::panel()).fg(theme::text());
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::border()))
+            .title(title)
+            .style(bg),
+        area,
+    );
+
+    let inner_w = w.saturating_sub(6) as usize;
+    let fit = |s: String| -> String {
+        if s.chars().count() <= inner_w { s } else { format!("{}\u{2026}", s.chars().take(inner_w.saturating_sub(1)).collect::<String>()) }
+    };
+    let field_w = inner_w;
+    let mut shown = p.input.clone();
+    shown.insert(p.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
+    let chars: Vec<char> = shown.chars().collect();
+    let cur = shown[..p.cursor_pos.min(p.input.len())].chars().count();
+    let start = (cur + 1).saturating_sub(field_w);
+    let visible: String = chars.iter().skip(start).take(field_w).collect();
+    let field_bg = if p.invalid { theme::get().error } else { theme::get().input };
+    let muted = Style::default().fg(theme::muted());
+    let verb = if c.op == crate::fileops::Op::Move { "Moving" } else { "Copying" };
+    let lines = vec![
+        Line::raw(fit(format!("  {what} named \"{}\" already exists in \"{dir}\".", name(&c.dst)))),
+        Line::raw(""),
+        Line::from(vec![Span::styled(format!("  {:<10}", verb), muted), Span::raw(fit(p.src_info.clone()))]),
+        Line::from(vec![Span::styled(format!("  {:<10}", "Existing"), muted), Span::raw(fit(p.dst_info.clone()))]),
+        Line::raw(""),
+        Line::raw("  New name:"),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::rgb(field_bg)).fg(theme::text_strong())),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).style(bg),
+        Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(2) },
+    );
+
+    // Buttons right-aligned, Rename (Enter) the default; Apply to All on the left
+    let y = area.bottom().saturating_sub(2);
+    let mut buttons: Vec<(&str, usize, B)> = Vec::new();
+    if c.both_dirs {
+        buttons.push(("Write Into", 0, B::Replace));
+    } else if c.can_replace {
+        buttons.push(("Overwrite", 0, B::Replace));
+    }
+    buttons.extend([("Skip", 0, B::Skip), ("Rename", 0, B::Rename), ("Cancel", usize::MAX, B::Cancel)]);
+    let mut x = area.right().saturating_sub(2);
+    let mut placed = Vec::new();
+    for &(label, key, b) in buttons.iter().rev() {
+        let bw = label.chars().count() as u16 + 2;
+        x = x.saturating_sub(bw + 1);
+        placed.push((Rect { x, y, width: bw, height: 1 }, label, key, b));
+    }
+    for (r, label, key, b) in placed {
+        let style = if b == B::Rename {
+            Style::default().bg(theme::selection()).fg(theme::text_strong()).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().bg(theme::input()).fg(theme::text())
+        };
+        let mut spans = vec![Span::styled(" ", style)];
+        for (i, ch) in label.chars().enumerate() {
+            let st = if i == key { style.add_modifier(Modifier::UNDERLINED) } else { style };
+            spans.push(Span::styled(ch.to_string(), st));
+        }
+        spans.push(Span::styled(" ", style));
+        f.render_widget(Paragraph::new(Line::from(spans)), r);
+        app.conflict_buttons.push((r, b));
+    }
+    if c.more {
+        let label = format!("[{}] Apply to all", if p.all { "x" } else { " " });
+        let r = Rect { x: area.x + 3, y, width: label.chars().count() as u16, height: 1 };
+        let spans: Vec<Span> = label.chars().enumerate()
+            .map(|(i, ch)| Span::styled(ch.to_string(), if i == 4 { Style::default().add_modifier(Modifier::UNDERLINED) } else { Style::default() }))
+            .collect();
+        f.render_widget(Paragraph::new(Line::from(spans)).style(bg), r);
+        app.conflict_buttons.push((r, B::AllToggle));
+    }
 }
 
 fn render_confirm_delete(f: &mut Frame, app: &App) {

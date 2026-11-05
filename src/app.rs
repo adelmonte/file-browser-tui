@@ -205,6 +205,9 @@ pub struct App {
     pub clipboard: Option<Clipboard>,
     pub confirm_delete: Option<ConfirmDeleteState>,
     pub name_prompt: Option<crate::events::NamePrompt>,
+    pub conflict_prompt: Option<crate::events::ConflictPrompt>,
+    /// The conflict dialog's buttons, as drawn: (rect, what it does).
+    pub conflict_buttons: Vec<(Rect, crate::events::ConflictButton)>,
     /// The open name prompt's Create and Cancel buttons.
     pub prompt_buttons: Option<(Rect, Rect)>,
 
@@ -410,6 +413,8 @@ impl App {
             clipboard: None,
             confirm_delete: None,
             name_prompt: None,
+            conflict_prompt: None,
+            conflict_buttons: Vec::new(),
             prompt_buttons: None,
             multi_selection: std::collections::HashSet::new(),
             expanded: std::collections::HashSet::new(),
@@ -759,6 +764,34 @@ impl App {
         });
     }
 
+    /// Answer the conflict dialog and close it.
+    pub fn answer_conflict(&mut self, button: crate::events::ConflictButton) {
+        use crate::events::ConflictButton as B;
+        use crate::fileops::Choice;
+        let Some(p) = &mut self.conflict_prompt else { return; };
+        let choice = match button {
+            B::Replace => Choice::Replace,
+            B::Skip => Choice::Skip,
+            B::Cancel => Choice::Cancel,
+            B::AllToggle => {
+                p.all = !p.all;
+                return;
+            }
+            B::Rename => {
+                let name = p.input.trim();
+                let taken = p.conflict.dst.with_file_name(name).symlink_metadata().is_ok();
+                if name.is_empty() || name.contains('/') || name == "." || name == ".." || taken {
+                    p.invalid = true;
+                    return;
+                }
+                Choice::Rename(name.to_string())
+            }
+        };
+        let all = p.all && p.conflict.more;
+        self.conflict_prompt = None;
+        self.fileops.resolve(crate::fileops::Resolution { choice, all });
+    }
+
     pub fn notify(&mut self, text: String) {
         self.notice = Some((text, std::time::Instant::now() + std::time::Duration::from_secs(8)));
     }
@@ -1016,6 +1049,10 @@ impl App {
         for report in self.fileops.poll() {
             self.notify(report.message());
             self.reload_dir();
+        }
+        if self.conflict_prompt.is_none() && let Some(c) = self.fileops.conflict.clone() {
+            self.menu = None;
+            self.conflict_prompt = Some(crate::events::ConflictPrompt::new(c));
         }
         self.sidebar_icons.drain_ready();
         let mime_updates = self.icon_cache.drain_ready();

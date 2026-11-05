@@ -47,7 +47,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let menu_rects = app.menu.as_ref()
         .map(|m| crate::ui::menu::covered(m, f.area(), app.picker.protocol_type() == ProtocolType::Kitty))
         .unwrap_or_default();
-    let dialog = app.show_help || app.properties.is_some() || app.name_prompt.is_some()
+    let dialog = app.show_help || app.properties.is_some() || app.name_prompt.is_some() || app.conflict_prompt.is_some()
         || app.confirm_delete.is_some();
 
     let font = app.picker.font_size();
