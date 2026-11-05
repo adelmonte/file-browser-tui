@@ -184,7 +184,8 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                 let target = if let Some(sel) = app.path_completion_sel {
                     app.path_completions.get(sel).cloned()
                 } else {
-                    Some(std::path::PathBuf::from(app.path_bar_input.trim()))
+                    // Components drop a trailing slash ("/home/me/" is /home/me)
+                    Some(std::path::Path::new(app.path_bar_input.trim()).components().collect())
                 };
                 app.cancel_path_edit();
                 if let Some(path) = target

@@ -1324,7 +1324,12 @@ impl App {
     /// Open the path bar for editing (Ctrl+L / Alt+D / click).
     pub fn start_path_edit(&mut self) {
         self.path_bar_editing = true;
-        self.path_bar_input = self.cwd.to_string_lossy().to_string();
+        // With the trailing slash the breadcrumbs show, ready for a child name
+        let mut input = self.cwd.to_string_lossy().to_string();
+        if !input.ends_with('/') {
+            input.push('/');
+        }
+        self.path_bar_input = input;
         self.path_bar_cursor = self.path_bar_input.len();
         self.path_completions.clear();
         self.path_completion_sel = None;
