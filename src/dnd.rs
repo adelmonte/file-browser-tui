@@ -240,26 +240,17 @@ pub enum DropOp {
 /// Run the chosen drop operation.
 pub fn perform(app: &mut App, op: DropOp) {
     let Some((paths, dest)) = app.dnd.job.take() else { return; };
-    for src in paths {
-        if src == dest || dest.starts_with(&src) {
-            continue;
-        }
-        match op {
-            DropOp::Link => {
+    let paths: Vec<PathBuf> = paths.into_iter().filter(|src| *src != dest && !dest.starts_with(src)).collect();
+    match op {
+        DropOp::Link => {
+            for src in paths {
                 if let Some(name) = src.file_name() {
-                    let _ = std::os::unix::fs::symlink(&src, dest.join(name));
+                    let _ = std::os::unix::fs::symlink(&src, crate::fileops::free_name(&dest.join(name)));
                 }
             }
-            DropOp::Move | DropOp::Copy => {
-                let verb = if op == DropOp::Move { "move" } else { "copy" };
-                let _ = std::process::Command::new("gio")
-                    .arg(verb).arg(&src).arg(&dest)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
-            }
         }
+        DropOp::Move => app.fileops.move_to(paths, &dest),
+        DropOp::Copy => app.fileops.copy(paths, &dest),
     }
 }
 

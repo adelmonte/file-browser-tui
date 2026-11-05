@@ -77,15 +77,13 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
         }
 
         MenuAction::Trash => {
-            if let Some(path) = target_path(app, target) {
-                spawn_detached("gio", &["trash".as_ref(), path.as_os_str()]);
-                app.selection = None;
-            }
+            let paths = action_paths(app, target);
+            app.fileops.trash(paths);
+            app.selection = None;
+            app.multi_selection.clear();
         }
 
-        MenuAction::EmptyTrash => {
-            spawn_detached("gio", &["trash".as_ref(), "--empty".as_ref()]);
-        }
+        MenuAction::EmptyTrash => app.fileops.empty_trash(),
 
         MenuAction::NewFolder => create_new(app, true),
         MenuAction::NewFile => create_new(app, false),
@@ -280,15 +278,12 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
         return;
     }
     let Some(clip) = app.clipboard.clone() else { return; };
-    let op = match clip.op {
-        ClipOp::Copy => "copy",
-        ClipOp::Cut => "move",
-    };
-    for src in &clip.paths {
-        spawn_detached("gio", &[op.as_ref(), src.as_os_str(), dest.as_os_str()]);
-    }
-    if clip.op == ClipOp::Cut {
-        app.clipboard = None;
+    match clip.op {
+        ClipOp::Copy => app.fileops.copy(clip.paths, dest),
+        ClipOp::Cut => {
+            app.fileops.move_to(clip.paths, dest);
+            app.clipboard = None;
+        }
     }
 }
 
@@ -300,9 +295,7 @@ fn paste_system(app: &mut App, dest: &Path) {
     {
         let paths = crate::dnd::parse_uri_list(&String::from_utf8_lossy(&list));
         if !paths.is_empty() {
-            for src in &paths {
-                spawn_detached("gio", &["copy".as_ref(), src.as_os_str(), dest.as_os_str()]);
-            }
+            app.fileops.copy(paths, dest);
             return;
         }
     }
@@ -411,22 +404,16 @@ pub fn rename_selection(app: &mut App) {
 
 pub fn trash_selection(app: &mut App) {
     let paths = selected_paths(app);
-    for path in paths {
-        spawn_detached("gio", &["trash".as_ref(), path.as_os_str()]);
-    }
+    app.fileops.trash(paths);
     app.selection = None;
     app.multi_selection.clear();
 }
 
 pub fn permanent_delete(app: &mut App) {
     if let Some(cd) = app.confirm_delete.take() {
-        for path in &cd.paths {
-            if path.is_dir() { let _ = std::fs::remove_dir_all(path); }
-            else { let _ = std::fs::remove_file(path); }
-        }
+        app.fileops.delete(cd.paths);
         app.selection = None;
         app.multi_selection.clear();
-        app.reload_dir();
     }
 }
 
@@ -562,13 +549,4 @@ fn run_custom(app: &App, idx: usize, target: MenuTarget) {
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
-
-fn spawn_detached(bin: &str, args: &[&std::ffi::OsStr]) {
-    let _ = Command::new(bin)
-        .args(args)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn();
-}
-
-
 

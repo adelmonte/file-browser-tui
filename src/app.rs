@@ -241,6 +241,11 @@ pub struct App {
     // Config & per-dir persistence
     pub config: Config,
     pub keymap: crate::keys::Keymap,
+    pub fileops: crate::fileops::FileOps,
+    /// Quit was pressed while a file operation ran; a second press quits.
+    pub quit_armed: Option<std::time::Instant>,
+    /// The status bar's cancel button while a file operation runs.
+    pub cancel_rect: Option<Rect>,
     pub dirstates: DirStates,
 
     // Kitty graphics bookkeeping
@@ -306,6 +311,9 @@ impl App {
         }
         let mut app = Self {
             keymap,
+            fileops: crate::fileops::FileOps::new(),
+            quit_armed: None,
+            cancel_rect: None,
             watched_path: cwd.clone(),
             sidebar_w: config.sidebar_w.clamp(10, 50),
             sidebar_dragging: false,
@@ -686,6 +694,18 @@ impl App {
 
     /// Open a KDE Connect device's storage, mounting it in the background
     /// first (takes a few seconds).
+    /// Quit, unless a file operation is running: then the first press warns
+    /// and a second within a few seconds cancels it and quits.
+    pub fn confirm_quit(&mut self) -> bool {
+        if !self.fileops.busy() || self.quit_armed.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(4)) {
+            self.fileops.cancel();
+            return true;
+        }
+        self.quit_armed = Some(std::time::Instant::now());
+        self.notify("A file operation is still running: quit again to cancel it and quit".into());
+        false
+    }
+
     pub fn notify(&mut self, text: String) {
         self.notice = Some((text, std::time::Instant::now() + std::time::Duration::from_secs(8)));
     }
@@ -873,6 +893,10 @@ impl App {
 
     /// Drain all background channels.
     pub fn drain_channels(&mut self) {
+        for report in self.fileops.poll() {
+            self.notify(report.message());
+            self.reload_dir();
+        }
         self.sidebar_icons.drain_ready();
         let mime_updates = self.icon_cache.drain_ready();
         for (path, mime) in mime_updates {
@@ -1260,11 +1284,11 @@ impl App {
         let dst = self.listing.entries.get(dst_idx).map(|e| e.path.clone());
         if let (Some(src), Some(dst)) = (src, dst)
             && dst.is_dir() {
-                let op = if copy { "copy" } else { "move" };
-                let _ = std::process::Command::new("gio")
-                    .args([op, src.to_str().unwrap_or(""), dst.to_str().unwrap_or("")])
-                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-                    .spawn();
+                if copy {
+                    self.fileops.copy(vec![src], &dst);
+                } else {
+                    self.fileops.move_to(vec![src], &dst);
+                }
             }
     }
 }

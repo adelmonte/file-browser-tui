@@ -4,6 +4,7 @@ mod config;
 mod dirstate;
 mod dnd;
 mod events;
+mod fileops;
 mod fs;
 mod handler;
 mod icons;

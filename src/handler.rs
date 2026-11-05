@@ -102,7 +102,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     crate::lineedit::bump_cursor();
     // Quit works regardless of any modal state
     if app.keymap.action(&ev) == Some(Action::Quit) {
-        return true;
+        return app.confirm_quit();
     }
 
     // Help overlay captures all keys
@@ -305,7 +305,7 @@ fn run_action(app: &mut App, action: Action) -> bool {
     // Menu actions on the selection, or the folder itself without one
     let target = app.selection.map_or(MenuTarget::Empty, MenuTarget::Entry);
     match action {
-        Action::Quit => return true,
+        Action::Quit => return app.confirm_quit(),
         Action::Help => app.show_help = true,
         Action::Search => app.open_search(),
         Action::SelectAll => {
@@ -417,6 +417,11 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             }
             if app.show_help {
                 app.show_help = false;
+                return;
+            }
+
+            if app.cancel_rect.is_some_and(|r| contains(r, col, row)) {
+                app.fileops.cancel();
                 return;
             }
 
