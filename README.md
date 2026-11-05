@@ -31,6 +31,9 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
   "File Already Exists" choices (Overwrite / Write Into, Skip, Rename, Apply to All).
 - **Undo** (`Ctrl+Z`) for copies, moves, renames, trashing and new folders or files;
   undoing a copy moves the copies to the trash rather than deleting them.
+- **Permissions** editor in Properties: read/write/execute for owner, group and others,
+  by click or keyboard, optionally applied to a folder's contents (only the bits you
+  changed, so files don't all become executable).
 - **Clipboard** that works with other file managers: cut/copy/paste files between the
   app and Dolphin, Nautilus etc., and paste copied text or images as a new file.
 - **Drag and drop**: rubber-band selection, dragging items onto folders and places, and

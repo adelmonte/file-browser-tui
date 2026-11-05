@@ -110,7 +110,30 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     }
 
     // Properties popup
-    if app.properties.is_some() {
+    if let Some(props) = &mut app.properties {
+        if let Some(p) = &mut props.perms {
+            let n = p.slots();
+            match ev.code {
+                KeyCode::Left => { p.cursor = p.cursor.saturating_sub(1); return false; }
+                KeyCode::Right => { p.cursor = (p.cursor + 1).min(n - 1); return false; }
+                KeyCode::Up => { p.cursor = if p.cursor == 9 { 6 } else { p.cursor.saturating_sub(3) }; return false; }
+                KeyCode::Down => { p.cursor = if p.cursor + 3 < 9 { p.cursor + 3 } else { n - 1 }; return false; }
+                KeyCode::Tab => { p.cursor = (p.cursor + 1) % n; return false; }
+                KeyCode::Char(' ') => { let i = p.cursor; p.toggle(i); return false; }
+                KeyCode::Enter if p.changed() => {
+                    match p.apply() {
+                        Ok(()) => {
+                            app.properties = None;
+                            app.notify("Permissions changed".into());
+                            app.reload_dir();
+                        }
+                        Err(e) => p.error = Some(e),
+                    }
+                    return false;
+                }
+                _ => {}
+            }
+        }
         if matches!(ev.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
             app.properties = None;
         }
@@ -462,8 +485,15 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 app.cancel_path_edit();
             }
 
-            if app.properties.is_some() {
-                app.properties = None;
+            if let Some(props) = &mut app.properties {
+                let s = app.last_terminal_size;
+                let area = crate::ui::properties::properties_rect(props, Rect { x: 0, y: 0, width: s.width, height: s.height });
+                let hit = props.hits.borrow().iter().find(|(r, _)| contains(*r, col, row)).map(|h| h.1);
+                match (hit, &mut props.perms) {
+                    (Some(i), Some(p)) => { p.cursor = i; p.toggle(i); }
+                    _ if contains(area, col, row) => {}
+                    _ => app.properties = None,
+                }
                 return;
             }
             if app.show_help {
