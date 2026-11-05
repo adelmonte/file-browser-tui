@@ -350,6 +350,11 @@ impl App {
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
         let (keymap, mut key_problems) = crate::keys::Keymap::new(&config.keys);
+        let (previews, unknown) = crate::thumbs::Previews::new(&config);
+        if !unknown.is_empty() {
+            let kinds: Vec<&str> = crate::thumbs::KINDS.iter().map(|k| k.0).collect();
+            key_problems.push(format!("thumbnails: unknown {} (known: {})", unknown.join(", "), kinds.join(", ")));
+        }
         let (prefetch_tx, prefetch_rx) = spawn_prefetch_lister();
         if let Some(t) = &config.theme {
             match t.clone().try_into::<crate::ui::theme::Theme>() {
@@ -402,9 +407,9 @@ impl App {
             cell_h,
             icon_rows,
             picker,
-            icon_cache: { crate::icons::set_theme(&config.icon_theme); IconCache::new(config.folder_previews) },
+            icon_cache: { crate::icons::set_theme(&config.icon_theme); crate::icons::resolver::set_folder_icons(&config.folder_icons); IconCache::new(config.folder_previews) },
             thumb_cache: ThumbCache::new(),
-            previews: crate::thumbs::Previews::new(&config),
+            previews,
             dir_event_rx,
             mount_event_rx,
             kdeconnect_rx,
@@ -1091,9 +1096,7 @@ impl App {
 
             if !is_media {
                 let icon_override = if entry.is_dir {
-                    self.config.folder_icons
-                        .get(entry.path.to_string_lossy().as_ref())
-                        .cloned()
+                    crate::icons::resolver::folder_icon(&entry.path)
                         .or_else(|| Self::xdg_folder_icon(&entry.path))
                 } else {
                     None
@@ -1153,7 +1156,7 @@ impl App {
                 Some(m) if self.previews.covers(&m) => thumbs.push((path, m)),
                 _ => {
                     let icon_override = if is_dir {
-                        self.config.folder_icons.get(path.to_string_lossy().as_ref()).cloned()
+                        crate::icons::resolver::folder_icon(&path)
                             .or_else(|| Self::xdg_folder_icon(&path))
                     } else {
                         None

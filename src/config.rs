@@ -36,14 +36,10 @@ pub struct Config {
     /// Show previews of a folder's images/videos on its icon, Dolphin-style.
     #[serde(default = "default_true")]
     pub folder_previews: bool,
-    /// Which file types show a preview of their content, by Dolphin's
-    /// thumbnailer plugin names: imagethumbnail, jpegthumbnail,
-    /// svgthumbnail, ffmpegthumbs (video), audiothumbnail (album art),
-    /// ebookthumbnail (EPUB covers), opendocumentthumbnail,
-    /// comicbookthumbnail (CBZ), gsthumbnail (PDF first page, needs
-    /// pdftoppm). Unset: follow Dolphin's own setting, or its defaults.
+    /// Which kinds of files show a thumbnail of their content (see
+    /// thumbs::KINDS); unset: all but PDFs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview_plugins: Option<Vec<String>>,
+    pub thumbnails: Option<Vec<String>>,
     /// Folders (and everything under them) whose thumbnails are made when
     /// shown but never written to disk; "~/" means the home folder.
     #[serde(default)]
@@ -151,7 +147,7 @@ impl Default for Config {
             folder_icons: HashMap::new(),
             context_menu: ContextMenuConfig::default(),
             folder_previews: true,
-            preview_plugins: None,
+            thumbnails: None,
             thumbnail_cache_exclude: Vec::new(),
             icon_theme: String::new(),
             keys: HashMap::new(),
@@ -240,11 +236,9 @@ fn template() -> String {
 # icon_theme = ""               # e.g. "Papirus-Dark"; empty = the desktop's (KDE, GTK or GNOME setting)
 sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
 
-# Which files show a preview of their content, by Dolphin's thumbnailer
-# names. Unset: follow Dolphin's own setting if there is one.
-# preview_plugins = ["imagethumbnail", "jpegthumbnail", "svgthumbnail",
-#     "ffmpegthumbs", "audiothumbnail", "ebookthumbnail",
-#     "opendocumentthumbnail", "comicbookthumbnail"]   # + "gsthumbnail" for PDFs
+# Which kinds of files show a thumbnail of their content: images, svg,
+# videos, audio (album art), ebooks, comics, documents (OpenDocument), pdf.
+# thumbnails = ["images", "svg", "videos", "audio", "ebooks", "comics", "documents"]
 # Folders whose thumbnails are made when shown but never saved to disk
 # (~/.cache/thumbnails), for privacy. Covers everything under them.
 # thumbnail_cache_exclude = ["~/Private"]
@@ -255,7 +249,7 @@ sidebar_w = 18                  # sidebar width in columns (also set by dragging
 
 # Custom icons for particular folders, by icon theme name.
 # [folder_icons]
-# "/home/me/Projects" = "folder-development"
+# "~/Projects" = "folder-development"
 
 # Extra right-click menu entries. %f is the item, %d its folder.
 # [[context_menu.custom]]
@@ -318,7 +312,7 @@ mod tests {
         assert!(t.keys.is_empty() && t.theme.is_none());
         // Uncommenting the documented lines gives valid settings
         let on: String = template().lines()
-            .filter(|l| l.starts_with("# ") && l.contains(" = ") && !l.contains("preview_plugins") && !l.contains("\"/home/me"))
+            .filter(|l| l.starts_with("# ") && l.contains(" = ") && !l.contains("thumbnails = [") && !l.contains("\"~/Projects"))
             .map(|l| format!("{}\n", &l[2..]))
             .collect();
         let keys: String = on.lines().filter(|l| crate::keys::ACTIONS.iter().any(|a| l.starts_with(&format!("{} ", a.0)))).map(|l| format!("{l}\n")).collect();

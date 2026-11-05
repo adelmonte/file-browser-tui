@@ -23,7 +23,7 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("fd", "fast file name search", None),
     ("rg", "search inside files", None),
     ("ffmpeg", "video thumbnails and audio album art", None),
-    ("pdftoppm", "PDF thumbnails (if enabled in preview_plugins)", None),
+    ("pdftoppm", "PDF thumbnails (if \"pdf\" is in thumbnails)", None),
     ("xdg-open", "opening files with their default app", None),
     ("tar", "Compress to tar.gz", None),
     ("zip", "Compress to zip", None),

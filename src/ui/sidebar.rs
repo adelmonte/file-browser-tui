@@ -268,8 +268,8 @@ pub fn contains(app: &App, col: u16, row: u16) -> bool {
 /// Theme icon name for a place: its custom folder icon, the configured
 /// hint, then XDG folders.
 fn place_icon(path: &str, hint: Option<&str>) -> String {
-    // A custom folder icon (Dolphin's .directory) wins, matching the grid
-    if let Some(custom) = crate::icons::resolver::directory_icon(std::path::Path::new(path)) {
+    // A custom folder icon (folder_icons) wins, matching the grid
+    if let Some(custom) = crate::icons::resolver::folder_icon(std::path::Path::new(path)) {
         return custom;
     }
     if let Some(h) = hint {

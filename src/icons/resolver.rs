@@ -91,17 +91,23 @@ pub fn resolve_icon_path(icon_names: &[String], is_dir: bool) -> Option<(PathBuf
         .or_else(|| super::theme::lookup(if is_dir { "folder" } else { "text-x-generic" }))
 }
 
-/// A custom folder icon set in Dolphin (Icon= in the folder's .directory).
-pub fn directory_icon(dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(dir.join(".directory")).ok()?;
-    let mut in_entry = false;
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_entry = line == "[Desktop Entry]";
-        } else if in_entry && let Some(v) = line.strip_prefix("Icon=") {
-            return Some(v.trim().to_string()).filter(|v| !v.is_empty());
-        }
-    }
-    None
+static FOLDER_ICONS: std::sync::OnceLock<std::collections::HashMap<PathBuf, String>> = std::sync::OnceLock::new();
+
+/// `folder_icons` from the config, keyed by path ("~/" is the home folder).
+pub fn set_folder_icons(icons: &std::collections::HashMap<String, String>) {
+    let home = dirs::home_dir().unwrap_or_default();
+    let _ = FOLDER_ICONS.set(icons.iter().map(|(k, v)| {
+        let path = match k.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None if k == "~" => home.clone(),
+            None => PathBuf::from(k),
+        };
+        (PathBuf::from(path.to_string_lossy().trim_end_matches('/')), v.clone())
+    }).collect());
+}
+
+/// The custom icon set for this folder in the config, if any.
+pub fn folder_icon(dir: &Path) -> Option<String> {
+    FOLDER_ICONS.get()?.get(dir).cloned()
 }
 

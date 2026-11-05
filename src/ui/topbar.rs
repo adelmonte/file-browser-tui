@@ -210,7 +210,7 @@ fn breadcrumbs(path: &Path, width: usize) -> Vec<(String, Option<PathBuf>)> {
 
 /// Theme icon for the current folder, shown at the start of the location bar.
 pub fn location_icon(app: &App) -> String {
-    crate::icons::resolver::directory_icon(&app.cwd)
+    crate::icons::resolver::folder_icon(&app.cwd)
         .or_else(|| App::xdg_folder_icon(&app.cwd))
         .unwrap_or_else(|| "folder".into())
 }

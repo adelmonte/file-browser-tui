@@ -203,9 +203,6 @@ impl IconCache {
                     if let Some(name) = req.icon_override {
                         icon_names.insert(0, name);
                     }
-                    if req.is_dir && let Some(name) = resolver::directory_icon(&req.path) {
-                        icon_names.insert(0, name);
-                    }
                     let resolved = resolver::resolve_icon_path(&icon_names, req.is_dir);
                     let is_link = req.path.symlink_metadata().is_ok_and(|m| m.is_symlink());
                     let mut image = resolved.and_then(|(icon_path, is_svg)| {

@@ -310,9 +310,25 @@ fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u6
     Ok(())
 }
 
-/// Enabled preview plugins (Dolphin's names, see `Config::preview_plugins`).
+/// Kinds of files shown as thumbnails of their content (`thumbnails` in
+/// the config).
 #[derive(Clone)]
 pub struct Previews(HashSet<String>);
+
+/// The kinds `thumbnails` accepts, and what each covers.
+pub const KINDS: &[(&str, &str)] = &[
+    ("images", "pictures (JPEG, PNG, WebP, GIF, ...)"),
+    ("svg", "SVG drawings"),
+    ("videos", "a frame of each video (ffmpeg)"),
+    ("audio", "album art embedded in audio files (ffmpeg)"),
+    ("ebooks", "EPUB covers"),
+    ("comics", "comic book (CBZ) covers"),
+    ("documents", "OpenDocument files (LibreOffice)"),
+    ("pdf", "the first page of PDFs (pdftoppm)"),
+];
+
+/// Everything but PDFs, which are slow to render.
+pub const DEFAULT_KINDS: &[&str] = &["images", "svg", "videos", "audio", "ebooks", "comics", "documents"];
 
 static GLOBAL: std::sync::OnceLock<Previews> = std::sync::OnceLock::new();
 /// `thumbnail_cache_exclude`, resolved.
@@ -327,17 +343,12 @@ pub fn previews() -> Option<&'static Previews> {
     GLOBAL.get()
 }
 
-/// Dolphin's defaults when it has never been configured.
-const DEFAULT_PLUGINS: &[&str] = &[
-    "imagethumbnail", "jpegthumbnail", "svgthumbnail", "ffmpegthumbs",
-    "audiothumbnail", "ebookthumbnail", "opendocumentthumbnail", "comicbookthumbnail",
-];
-
 impl Previews {
-    pub fn new(config: &crate::config::Config) -> Self {
-        let names: Vec<String> = config.preview_plugins.clone()
-            .or_else(dolphin_plugins)
-            .unwrap_or_else(|| DEFAULT_PLUGINS.iter().map(|s| s.to_string()).collect());
+    /// From the config; also returns the names it didn't know.
+    pub fn new(config: &crate::config::Config) -> (Self, Vec<String>) {
+        let names: Vec<String> = config.thumbnails.clone()
+            .unwrap_or_else(|| DEFAULT_KINDS.iter().map(|s| s.to_string()).collect());
+        let unknown = names.iter().filter(|n| !KINDS.iter().any(|(k, _)| k == n)).cloned().collect();
         let p = Self(names.into_iter().collect());
         let _ = GLOBAL.set(p.clone());
         let home = dirs::home_dir().unwrap_or_default();
@@ -349,42 +360,27 @@ impl Previews {
             };
             path.canonicalize().unwrap_or(path)
         }).collect());
-        p
+        (p, unknown)
     }
 
-    fn on(&self, plugin: &str) -> bool {
-        self.0.contains(plugin)
+    fn on(&self, kind: &str) -> bool {
+        self.0.contains(kind)
     }
 
     /// Whether files of this type are shown as a thumbnail of their content.
     pub fn covers(&self, mime: &str) -> bool {
         match mime {
-            "image/svg+xml" | "image/svg+xml-compressed" => self.on("svgthumbnail"),
-            "image/jpeg" => self.on("jpegthumbnail") || self.on("imagethumbnail"),
-            "application/epub+zip" => self.on("ebookthumbnail"),
-            "application/pdf" => self.on("gsthumbnail"),
-            "application/vnd.comicbook+zip" => self.on("comicbookthumbnail"),
-            m if m.starts_with("image/") => self.on("imagethumbnail"),
-            m if m.starts_with("video/") => self.on("ffmpegthumbs"),
-            m if m.starts_with("audio/") => self.on("audiothumbnail"),
-            m if m.starts_with("application/vnd.oasis.opendocument.") => self.on("opendocumentthumbnail"),
+            "image/svg+xml" | "image/svg+xml-compressed" => self.on("svg"),
+            "application/epub+zip" => self.on("ebooks"),
+            "application/pdf" => self.on("pdf"),
+            "application/vnd.comicbook+zip" => self.on("comics"),
+            m if m.starts_with("image/") => self.on("images"),
+            m if m.starts_with("video/") => self.on("videos"),
+            m if m.starts_with("audio/") => self.on("audio"),
+            m if m.starts_with("application/vnd.oasis.opendocument.") => self.on("documents"),
             _ => false,
         }
     }
-}
-
-/// `[PreviewSettings] Plugins=` from dolphinrc, if Dolphin was configured.
-fn dolphin_plugins() -> Option<Vec<String>> {
-    let text = std::fs::read_to_string(dirs::config_dir()?.join("dolphinrc")).ok()?;
-    let mut in_section = false;
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_section = line == "[PreviewSettings]";
-        } else if in_section && let Some(v) = line.strip_prefix("Plugins=") {
-            return Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
-        }
-    }
-    None
 }
 
 pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
