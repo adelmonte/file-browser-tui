@@ -48,6 +48,9 @@ pub struct Config {
     /// shown but never written to disk; "~/" means the home folder.
     #[serde(default)]
     pub thumbnail_cache_exclude: Vec<String>,
+    /// Icon theme by name (e.g. "Papirus-Dark"); empty: the desktop's.
+    #[serde(default)]
+    pub icon_theme: String,
     /// Interface colors by role as "#rrggbb" (see ui/theme.rs); unset
     /// roles keep the Nord defaults. Kept as written, so it round-trips.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -150,6 +153,7 @@ impl Default for Config {
             folder_previews: true,
             preview_plugins: None,
             thumbnail_cache_exclude: Vec::new(),
+            icon_theme: String::new(),
             keys: HashMap::new(),
             theme: None,
             read_only: false,
@@ -233,6 +237,7 @@ fn template() -> String {
 # icon_size_idx = 7             # 0 (smallest) to 19
 # folder_previews = true        # show a folder's pictures on its icon
 # terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
+# icon_theme = ""               # e.g. "Papirus-Dark"; empty = the desktop's (KDE, GTK or GNOME setting)
 sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
 
 # Which files show a preview of their content, by Dolphin's thumbnailer

@@ -34,6 +34,9 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
 
 pub fn run() -> i32 {
     let mut missing_required = false;
+    if let Ok(c) = crate::config::Config::load() {
+        crate::icons::set_theme(&c.icon_theme);
+    }
     println!("file-browser-tui {}\n", env!("CARGO_PKG_VERSION"));
 
     println!("Terminal");
@@ -54,6 +57,9 @@ pub fn run() -> i32 {
         missing_required = true;
         println!("  ! no usable clipboard tool for this session (Wayland: wl-clipboard, X11: xclip)");
     }
+
+    println!("\nIcons");
+    println!("  theme: {} (set icon_theme in the config to change)", crate::icons::theme_name());
 
     println!("\nFiles");
     let config = crate::config::Config::path();

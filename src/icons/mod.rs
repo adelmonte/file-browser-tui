@@ -14,6 +14,8 @@ use std::{
 use lru::LruCache;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
+pub use theme::{set_theme, theme_name};
+
 pub struct IconImageReady {
     pub path: PathBuf,
     pub image: Option<Arc<image::DynamicImage>>,

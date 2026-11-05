@@ -402,7 +402,7 @@ impl App {
             cell_h,
             icon_rows,
             picker,
-            icon_cache: IconCache::new(config.folder_previews),
+            icon_cache: { crate::icons::set_theme(&config.icon_theme); IconCache::new(config.folder_previews) },
             thumb_cache: ThumbCache::new(),
             previews: crate::thumbs::Previews::new(&config),
             dir_event_rx,

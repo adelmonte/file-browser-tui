@@ -66,19 +66,63 @@ fn base_dirs() -> Vec<PathBuf> {
     out
 }
 
-/// The configured theme: KDE's [Icons] Theme, else hicolor.
-fn user_theme() -> String {
-    let kdeglobals = dirs::config_dir().map(|d| d.join("kdeglobals")).unwrap_or_default();
-    let text = std::fs::read_to_string(kdeglobals).unwrap_or_default();
-    let mut in_icons = false;
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_icons = line == "[Icons]";
-        } else if in_icons && let Some(v) = line.strip_prefix("Theme=") {
-            return v.trim().to_string();
-        }
+/// `icon_theme` from the config: used instead of the desktop's theme.
+static OVERRIDE: OnceLock<String> = OnceLock::new();
+
+/// Use this icon theme rather than the desktop's (empty: the desktop's).
+/// Must be called before the first lookup.
+pub fn set_theme(name: &str) {
+    if !name.trim().is_empty() {
+        let _ = OVERRIDE.set(name.trim().to_string());
     }
-    "hicolor".into()
+}
+
+/// The theme icons come from (see `user_theme`).
+pub fn theme_name() -> String {
+    user_theme()
+}
+
+/// The icon theme to use: the config's, then the desktop's (KDE's
+/// kdeglobals, GTK's settings.ini, GNOME's gsettings), then the first of
+/// a few common themes that's installed, else hicolor.
+fn user_theme() -> String {
+    if let Some(name) = OVERRIDE.get() {
+        return name.clone();
+    }
+    let config = dirs::config_dir().unwrap_or_default();
+    let ini_value = |file: &str, section: &str, key: &str| -> Option<String> {
+        let text = std::fs::read_to_string(config.join(file)).ok()?;
+        let mut in_section = false;
+        for line in text.lines().map(str::trim) {
+            if line.starts_with('[') {
+                in_section = line == section;
+            } else if in_section
+                && let Some((k, v)) = line.split_once('=')
+                && k.trim() == key
+            {
+                return Some(v.trim().trim_matches('"').to_string()).filter(|v| !v.is_empty());
+            }
+        }
+        None
+    };
+    let gsettings = || -> Option<String> {
+        let out = std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "icon-theme"])
+            .stderr(std::process::Stdio::null())
+            .output().ok()?;
+        let v = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
+        (out.status.success() && !v.is_empty()).then_some(v)
+    };
+    let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.to_uppercase().contains("KDE"));
+    let gtk = || ini_value("gtk-4.0/settings.ini", "[Settings]", "gtk-icon-theme-name")
+        .or_else(|| ini_value("gtk-3.0/settings.ini", "[Settings]", "gtk-icon-theme-name"));
+    let kdeglobals = || ini_value("kdeglobals", "[Icons]", "Theme");
+    let found = if kde { kdeglobals().or_else(gtk) } else { gtk().or_else(kdeglobals) }
+        .or_else(gsettings);
+    let installed = |name: &str| base_dirs().iter().any(|d| d.join(name).join("index.theme").exists());
+    found.filter(|t| installed(t))
+        .or_else(|| ["breeze", "Papirus", "Adwaita"].into_iter().find(|t| installed(t)).map(str::to_string))
+        .unwrap_or_else(|| "hicolor".into())
 }
 
 /// index.theme sections: directory -> (Size, Scale), plus Inherits.
