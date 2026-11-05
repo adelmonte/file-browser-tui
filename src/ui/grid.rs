@@ -226,6 +226,7 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
         Style::default()
     };
 
+    let label_fg = if app.is_cut(&entry.path) { label_fg.add_modifier(Modifier::DIM) } else { label_fg };
     let label_lines = wrap_label(&entry.name, label_w, label_rows);
     Paragraph::new(lines_to_text_styled_centered(&label_lines, label_fg, cell_w as usize)).render(label_rect, buf);
 }
@@ -245,12 +246,13 @@ pub(crate) fn render_cell_image(
         && !app.thumb_cache.failed(&entry_path);
 
     let (cols, rows) = (icon_rect.width, icon_rect.height);
+    let dim = app.is_cut(&entry_path);
 
     let drew = {
         let proto = if is_media {
-            app.thumb_cache.get_mut(&app.picker, &entry_path, cols, rows, bg)
+            app.thumb_cache.get_mut(&app.picker, &entry_path, cols, rows, bg, dim)
         } else {
-            app.icon_cache.get_mut(&app.picker, &entry_path, cols, rows, bg)
+            app.icon_cache.get_mut(&app.picker, &entry_path, cols, rows, bg, dim)
         };
         if let Some(proto) = proto {
             Clear.render(icon_rect, buf);
@@ -270,7 +272,7 @@ pub(crate) fn render_cell_image(
     };
 
     if drew {
-        app.frame_images.insert(entry_path, (icon_rect, bg));
+        app.frame_images.insert(entry_path, (icon_rect, bg, dim));
     } else if std::time::Instant::now() >= app.icons_grace_until {
         // Placeholder nerd font icon, centered in the cell
         let entry = &app.listing.entries[entry_idx];
@@ -379,4 +381,6 @@ fn file_placeholder_icon(ext: &str) -> &'static str {
         _                                              => "\u{f15b}",
     }
 }
+
+
 

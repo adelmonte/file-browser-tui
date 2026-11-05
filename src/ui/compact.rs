@@ -55,6 +55,7 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default()
             };
+            let style = if app.is_cut(&entry.path) { style.add_modifier(ratatui::style::Modifier::DIM) } else { style };
 
             f.render_widget(
                 Paragraph::new(text).style(style),

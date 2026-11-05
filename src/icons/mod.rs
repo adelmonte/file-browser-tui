@@ -98,8 +98,25 @@ pub fn fit_to_cells(
     image::DynamicImage::ImageRgba8(canvas)
 }
 
-/// Protocol cache key: (path, box cols, box rows, bg color variant).
-type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>);
+/// Fade an image the way Dolphin shows cut items: halfway to `bg` when
+/// it's composited onto one, else half transparent.
+pub fn dim_image(img: &mut image::DynamicImage, bg: Option<(u8, u8, u8)>) {
+    if let image::DynamicImage::ImageRgba8(buf) = img {
+        for p in buf.pixels_mut() {
+            match bg {
+                Some((r, g, b)) => {
+                    for (c, t) in p.0.iter_mut().zip([r, g, b]) {
+                        *c = ((*c as u16 + t as u16) / 2) as u8;
+                    }
+                }
+                None => p.0[3] /= 2,
+            }
+        }
+    }
+}
+
+/// Protocol cache key: (path, box cols, box rows, bg color variant, dimmed).
+type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>, bool);
 
 pub struct IconCache {
     /// Raw rasterized icons keyed by path; protocols are rebuilt from these.
@@ -237,11 +254,15 @@ impl IconCache {
         cols: u16,
         rows: u16,
         bg: Option<(u8, u8, u8)>,
+        dim: bool,
     ) -> Option<&mut StatefulProtocol> {
-        let key = (path.to_path_buf(), cols, rows, bg);
+        let key = (path.to_path_buf(), cols, rows, bg, dim);
         if !self.protocols.contains(&key) {
             let img = self.images.get(path)?.as_ref()?;
-            let img = fit_to_cells(img, picker, cols, rows, bg, self.fit);
+            let mut img = fit_to_cells(img, picker, cols, rows, bg, self.fit);
+            if dim {
+                dim_image(&mut img, bg);
+            }
             self.protocols.put(key.clone(), picker.new_resize_protocol(img));
         }
         self.protocols.get_mut(&key)
@@ -276,3 +297,4 @@ impl IconCache {
         self.protocols.clear();
     }
 }
+

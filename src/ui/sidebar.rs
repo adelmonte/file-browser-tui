@@ -190,7 +190,7 @@ pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Optio
     let key = PathBuf::from(format!("sidebar-icon/{name}"));
     let px = (app.picker.font_size().height as f32 * ICON_ROWS) as u32;
     app.sidebar_icons.request(&key, true, px.max(24), Some(name.to_string()));
-    let Some(proto) = app.sidebar_icons.get_mut(&app.picker, &key, rect.width, rect.height, bg) else { return; };
+    let Some(proto) = app.sidebar_icons.get_mut(&app.picker, &key, rect.width, rect.height, bg, false) else { return; };
     f.render_widget(Clear, rect);
     if let Some(c) = bg {
         f.render_widget(Block::default().style(Style::default().bg(theme::rgb(c))), rect);

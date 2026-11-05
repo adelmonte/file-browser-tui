@@ -23,7 +23,7 @@ struct ThumbRequest {
     mime_type: String,
 }
 
-type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>);
+type ProtoKey = (PathBuf, u16, u16, Option<(u8, u8, u8)>, bool);
 
 pub struct ThumbCache {
     images: LruCache<PathBuf, image::DynamicImage>,
@@ -94,11 +94,15 @@ impl ThumbCache {
         cols: u16,
         rows: u16,
         bg: Option<(u8, u8, u8)>,
+        dim: bool,
     ) -> Option<&mut StatefulProtocol> {
-        let key = (path.to_path_buf(), cols, rows, bg);
+        let key = (path.to_path_buf(), cols, rows, bg, dim);
         if !self.protocols.contains(&key) {
             let img = self.images.get(path)?;
-            let img = fit_to_cells(img, picker, cols, rows, bg, GRID_FIT);
+            let mut img = fit_to_cells(img, picker, cols, rows, bg, GRID_FIT);
+            if dim {
+                crate::icons::dim_image(&mut img, bg);
+            }
             self.protocols.put(key.clone(), picker.new_resize_protocol(img));
         }
         self.protocols.get_mut(&key)

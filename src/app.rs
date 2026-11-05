@@ -84,8 +84,8 @@ pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16,
     (cell_w, icon_rows + 2, icon_rows, img_w)
 }
 
-/// Image identity rendered in a cell this frame: (rect, bg variant).
-pub type FrameImage = (Rect, Option<(u8, u8, u8)>);
+/// Image identity rendered in a cell this frame: (rect, bg variant, dimmed).
+pub type FrameImage = (Rect, Option<(u8, u8, u8)>, bool);
 
 // ---------------------------------------------------------------------------
 // App state
@@ -553,6 +553,11 @@ impl App {
         self.after_navigate();
     }
 
+    /// Cut and waiting to be pasted: drawn faded, like Dolphin.
+    pub fn is_cut(&self, path: &std::path::Path) -> bool {
+        self.clipboard.as_ref().is_some_and(|c| c.op == crate::events::ClipOp::Cut && c.paths.iter().any(|p| p == path))
+    }
+
     /// Go to `path`'s folder with it selected (search results' Open Path).
     pub fn reveal(&mut self, path: &std::path::Path) {
         let Some(parent) = path.parent() else { return; };
@@ -973,12 +978,12 @@ impl App {
     pub fn kitty_frame_diff(&mut self) -> (Vec<Rect>, bool) {
         let mut deletions: Vec<(PathBuf, Rect)> = Vec::new();
 
-        for (path, (rect, bg)) in &self.prev_frame_images {
+        for (path, (rect, bg, dim)) in &self.prev_frame_images {
             match self.frame_images.get(path) {
                 // Unchanged, or moved with the same variant (ratatui-image
                 // re-places moved images itself).
-                Some((nr, nbg)) if nbg == bg && nr == rect => {}
-                Some((nr, _)) if *nr != *rect => {}
+                Some((nr, nbg, ndim)) if nbg == bg && ndim == dim && nr == rect => {}
+                Some((nr, _, _)) if *nr != *rect => {}
                 // Variant changed (selection toggled) or image vanished
                 // (scrolled off, dir changed, occluded by an overlay).
                 _ => deletions.push((path.clone(), *rect)),
