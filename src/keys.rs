@@ -44,7 +44,7 @@ pub const ACTIONS: &[(&str, Action, &[&str], &str)] = &[
     ("help", Action::Help, &["F1"], "Show this help"),
     ("search", Action::Search, &["Ctrl+F"], "Search"),
     ("select_all", Action::SelectAll, &["Ctrl+A"], "Select all"),
-    ("edit_path", Action::EditPath, &["Ctrl+L", "F6"], "Edit the location"),
+    ("edit_path", Action::EditPath, &["Ctrl+L", "F6", "Alt+D"], "Edit the location"),
     ("back", Action::Back, &["Backspace", "Alt+Left"], "Back"),
     ("forward", Action::Forward, &["Alt+Right"], "Forward"),
     ("up", Action::Up, &["Alt+Up"], "Up a folder"),
