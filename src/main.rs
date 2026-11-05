@@ -10,6 +10,8 @@ mod handler;
 mod icons;
 mod keys;
 mod apps;
+mod check;
+mod clipboard;
 mod lineedit;
 mod mime;
 mod places;
@@ -31,6 +33,22 @@ use app::App;
 use config::Config;
 
 fn main() -> anyhow::Result<()> {
+    match std::env::args().nth(1).as_deref() {
+        Some("--check") => std::process::exit(check::run()),
+        Some("--version" | "-V") => {
+            println!("file-browser-tui {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("--help" | "-h") => {
+            println!("{}", HELP);
+            return Ok(());
+        }
+        Some(a) if a.starts_with('-') => {
+            eprintln!("file-browser-tui: unknown option {a} (see --help)");
+            std::process::exit(2);
+        }
+        _ => {}
+    }
     // Log to file (stdout is occupied by TUI)
     let log_file = std::fs::File::create("/tmp/file-browser-tui.log")?;
     tracing_subscriber::fmt()
@@ -134,6 +152,20 @@ fn main() -> anyhow::Result<()> {
 
     result
 }
+
+const HELP: &str = "\
+file-browser-tui: a Dolphin-like file manager for the terminal (best in kitty)
+
+Usage: file-browser-tui [PATH]
+  PATH        folder to open, or a file to open its folder with it selected
+
+Options:
+  --check     list the optional tools and features found on this system
+  --version   print the version
+  --help      print this help
+
+Config: ~/.config/file-browser-tui/config.toml (keys, theme, places, ...)
+In the app, F1 lists the keyboard shortcuts.";
 
 fn run(
     app: &mut App,

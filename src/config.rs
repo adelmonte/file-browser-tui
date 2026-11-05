@@ -181,6 +181,12 @@ impl Config {
     }
 }
 
+impl Config {
+    pub fn path() -> PathBuf {
+        config_path()
+    }
+}
+
 fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))

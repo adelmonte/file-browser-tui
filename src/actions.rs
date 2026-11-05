@@ -225,14 +225,7 @@ pub fn clip_selection(app: &mut App, op: ClipOp) {
     }
     // Also on the system clipboard, so other apps can paste the files
     let list: String = paths.iter().map(|p| crate::thumbs::file_uri(p) + "\r\n").collect();
-    if let Ok(mut child) = Command::new("wl-copy")
-        .args(["-t", "text/uri-list"])
-        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn()
-        && let Some(mut stdin) = child.stdin.take()
-    {
-        let _ = stdin.write_all(list.as_bytes());
-    }
+    crate::clipboard::write(Some("text/uri-list"), list.as_bytes());
     let n = paths.len();
     let what = if n == 1 { "1 item".to_string() } else { format!("{n} items") };
     app.notify(match op {
@@ -242,21 +235,8 @@ pub fn clip_selection(app: &mut App, op: ClipOp) {
     app.clipboard = Some(Clipboard { paths, op });
 }
 
-/// The system clipboard's MIME types (empty when there's nothing or no
-/// wl-paste).
 pub fn system_clipboard_types() -> Vec<String> {
-    wl_paste(&["--list-types"])
-        .map(|out| String::from_utf8_lossy(&out).lines().map(str::to_string).collect())
-        .unwrap_or_default()
-}
-
-fn wl_paste(args: &[&str]) -> Option<Vec<u8>> {
-    // A stuck clipboard owner mustn't hang the UI
-    let out = Command::new("timeout")
-        .arg("2").arg("wl-paste").args(args)
-        .stdin(Stdio::null()).stderr(Stdio::null())
-        .output().ok()?;
-    out.status.success().then_some(out.stdout)
+    crate::clipboard::types()
 }
 
 /// Paste into `dest`: our own copied/cut files, else the system clipboard's
@@ -268,7 +248,7 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
     let ours = app.clipboard.as_ref().is_some_and(|clip| {
         let types = system_clipboard_types();
         types.is_empty()
-            || wl_paste(&["-t", "text/uri-list"])
+            || crate::clipboard::read(Some("text/uri-list"))
                 .map(|l| crate::dnd::parse_uri_list(&String::from_utf8_lossy(&l)))
                 .is_some_and(|paths| paths == clip.paths)
     });
@@ -291,7 +271,7 @@ fn paste_system(app: &mut App, dest: &Path) {
     let types = system_clipboard_types();
     let has = |t: &str| types.iter().any(|x| x == t);
     if has("text/uri-list")
-        && let Some(list) = wl_paste(&["-t", "text/uri-list"])
+        && let Some(list) = crate::clipboard::read(Some("text/uri-list"))
     {
         let paths = crate::dnd::parse_uri_list(&String::from_utf8_lossy(&list));
         if !paths.is_empty() {
@@ -302,9 +282,9 @@ fn paste_system(app: &mut App, dest: &Path) {
     let image = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"]
         .into_iter().find(|t| has(t));
     let (data, stem, ext) = if let Some(t) = image {
-        (wl_paste(&["-t", t]), "pasted picture", t.trim_start_matches("image/").replace("jpeg", "jpg"))
+        (crate::clipboard::read(Some(t)), "pasted picture", t.trim_start_matches("image/").replace("jpeg", "jpg"))
     } else if types.iter().any(|t| t.starts_with("text/") || t == "UTF8_STRING" || t == "STRING") {
-        (wl_paste(&["--no-newline"]), "pasted text", "txt".to_string())
+        (crate::clipboard::read(None), "pasted text", "txt".to_string())
     } else {
         (None, "", String::new())
     };
@@ -356,19 +336,15 @@ pub fn commit_paste_name(app: &mut App) {
     }
 }
 
-/// Copy text to the system clipboard: OSC 52 (works in Kitty) + wl-copy fallback.
+/// Copy text to the system clipboard: OSC 52 (works in Kitty) + the
+/// desktop's clipboard tool.
 fn copy_to_clipboard(text: &str) {
     let b64 = base64_encode(text.as_bytes());
     let mut out = std::io::stdout();
     let _ = write!(out, "\x1b]52;c;{b64}\x07");
     let _ = out.flush();
 
-    if let Ok(mut child) = Command::new("wl-copy")
-        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn()
-        && let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
+    crate::clipboard::write(None, text.as_bytes());
 }
 
 fn base64_encode(data: &[u8]) -> String {
