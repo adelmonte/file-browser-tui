@@ -119,11 +119,11 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
-    // Clipboard content naming prompt
-    if let Some(ref mut p) = app.paste_name {
+    // New folder/file/pasted content name prompt
+    if let Some(ref mut p) = app.name_prompt {
         match ev.code {
-            KeyCode::Esc => { app.paste_name = None; }
-            KeyCode::Enter => { actions::commit_paste_name(app); }
+            KeyCode::Esc => { app.name_prompt = None; }
+            KeyCode::Enter => { actions::commit_name_prompt(app); }
             _ => {
                 if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
                     p.invalid = false;
@@ -362,6 +362,20 @@ fn run_action(app: &mut App, action: Action) -> bool {
 pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     let col = ev.column;
     let row = ev.row;
+
+    // The name prompt is modal: only its buttons respond
+    if app.name_prompt.is_some() {
+        if ev.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some((create, cancel)) = app.prompt_buttons
+        {
+            if contains(create, col, row) {
+                actions::commit_name_prompt(app);
+            } else if contains(cancel, col, row) {
+                app.name_prompt = None;
+            }
+        }
+        return;
+    }
 
     match ev.kind {
         MouseEventKind::Down(MouseButton::Left) if app.rename_state.is_some() => {
@@ -765,6 +779,7 @@ fn handle_topbar_click(app: &mut App, col: u16, row: u16) {
         app.start_path_edit();
     }
 }
+
 
 
 

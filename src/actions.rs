@@ -314,31 +314,41 @@ fn paste_system(app: &mut App, dest: &Path) {
         }
         name = format!("{stem} ({n}).{ext}");
     }
-    app.paste_name = Some(crate::events::PasteNameState {
+    open_name_prompt(app, crate::events::PromptKind::Paste(data), dest, name);
+}
+
+fn open_name_prompt(app: &mut App, kind: crate::events::PromptKind, dest: &Path, placeholder: String) {
+    app.name_prompt = Some(crate::events::NamePrompt {
+        kind,
         dest: dest.to_path_buf(),
-        data,
         cursor_pos: 0,
         input: String::new(),
         invalid: false,
-        placeholder: name,
+        placeholder,
     });
 }
 
-/// Write the named clipboard content; a bad or taken name keeps the prompt.
-pub fn commit_paste_name(app: &mut App) {
-    let Some(state) = &mut app.paste_name else { return; };
+/// Create what the name prompt is for; a bad or taken name keeps it open.
+pub fn commit_name_prompt(app: &mut App) {
+    use crate::events::PromptKind;
+    let Some(state) = &mut app.name_prompt else { return; };
     let name = if state.input.trim().is_empty() { state.placeholder.as_str() } else { state.input.trim() };
     let path = state.dest.join(name);
-    if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.exists() {
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.symlink_metadata().is_ok() {
         state.invalid = true;
         return;
     }
-    if let Err(e) = std::fs::write(&path, &state.data) {
-        tracing::error!("paste: {e}");
+    let result = match &state.kind {
+        PromptKind::NewFolder => std::fs::create_dir(&path),
+        PromptKind::NewFile => std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map(|_| ()),
+        PromptKind::Paste(data) => std::fs::write(&path, data),
+    };
+    if let Err(e) = result {
+        tracing::error!("create {}: {e}", path.display());
         state.invalid = true;
         return;
     }
-    app.paste_name = None;
+    app.name_prompt = None;
     if path.parent() == Some(app.cwd.as_path()) {
         app.reload_dir();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -423,25 +433,14 @@ fn unique_name(dir: &Path, base: &str) -> PathBuf {
     unreachable!()
 }
 
+/// Ask for the new folder's or file's name (created on confirming).
 fn create_new(app: &mut App, is_dir: bool) {
     let base = if is_dir { "New Folder" } else { "New File" };
-    let path = unique_name(&app.cwd, base);
-    let result = if is_dir {
-        std::fs::create_dir(&path)
-    } else {
-        std::fs::File::create(&path).map(|_| ())
-    };
-    if let Err(e) = result {
-        tracing::error!("create {base}: {e}");
-        return;
-    }
-    app.reload_dir();
-    // Select the new item and jump straight into rename
-    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    if let Some(idx) = app.listing.entries.iter().position(|e| e.name == name) {
-        app.selection = Some(idx);
-        app.rename_state = Some(RenameState::fresh(idx, &name));
-    }
+    let suggestion = unique_name(&app.cwd, base);
+    let name = suggestion.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let kind = if is_dir { crate::events::PromptKind::NewFolder } else { crate::events::PromptKind::NewFile };
+    let cwd = app.cwd.clone();
+    open_name_prompt(app, kind, &cwd, name);
 }
 
 fn compress(app: &mut App, target: MenuTarget, targz: bool) {

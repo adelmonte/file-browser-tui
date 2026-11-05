@@ -200,7 +200,9 @@ pub struct App {
     pub show_help: bool,
     pub clipboard: Option<Clipboard>,
     pub confirm_delete: Option<ConfirmDeleteState>,
-    pub paste_name: Option<crate::events::PasteNameState>,
+    pub name_prompt: Option<crate::events::NamePrompt>,
+    /// The open name prompt's Create and Cancel buttons.
+    pub prompt_buttons: Option<(Rect, Rect)>,
 
     // Multi-selection
     pub multi_selection: std::collections::HashSet<usize>,
@@ -395,7 +397,8 @@ impl App {
             click_tracker: ClickTracker::default(),
             clipboard: None,
             confirm_delete: None,
-            paste_name: None,
+            name_prompt: None,
+            prompt_buttons: None,
             multi_selection: std::collections::HashSet::new(),
             expanded: std::collections::HashSet::new(),
             dir_counts: HashMap::new(),
@@ -1247,7 +1250,7 @@ impl App {
         };
 
         let name = state.input.as_str();
-        if name == entry.name || (name.is_empty() && state.placeholder.is_some()) {
+        if name == entry.name {
             self.rename_state = None;
             return;
         }

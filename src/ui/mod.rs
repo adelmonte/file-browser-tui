@@ -118,8 +118,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         help::render_help(f, app);
     }
-    if app.paste_name.is_some() {
-        render_paste_name(f, app);
+    app.prompt_buttons = None;
+    if app.name_prompt.is_some() {
+        render_name_prompt(f, app);
     }
     if app.confirm_delete.is_some() {
         render_confirm_delete(f, app);
@@ -166,10 +167,16 @@ fn confirm_delete_rect(term: Rect) -> Rect {
     }
 }
 
-/// Dolphin's "Paste Clipboard Contents" prompt: a file name for clipboard
-/// text or an image.
-fn render_paste_name(f: &mut Frame, app: &App) {
-    let Some(ref p) = app.paste_name else { return; };
+/// Dolphin's Create Folder / Create File / Paste Clipboard Contents
+/// dialogs: a name field with Create and Cancel buttons.
+fn render_name_prompt(f: &mut Frame, app: &mut App) {
+    use crate::events::PromptKind;
+    let Some(ref p) = app.name_prompt else { return; };
+    let (title, label, verb) = match p.kind {
+        PromptKind::NewFolder => (" New Folder ", "Name for the new folder:", "Create"),
+        PromptKind::NewFile => (" New File ", "Name for the new file:", "Create"),
+        PromptKind::Paste(_) => (" Paste Clipboard Contents ", "Filename for clipboard content:", "Save"),
+    };
     let term = f.area();
     let w = 52u16.min(term.width);
     let h = 7u16.min(term.height);
@@ -182,7 +189,7 @@ fn render_paste_name(f: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::border()))
-            .title(" Paste Clipboard Contents ")
+            .title(title)
             .style(bg),
         area,
     );
@@ -204,19 +211,27 @@ fn render_paste_name(f: &mut Frame, app: &App) {
     }
 
     let lines = vec![
-        Line::raw("  Filename for clipboard content:"),
+        Line::raw(format!("  {label}")),
         Line::raw(""),
         Line::from(vec![
             ratatui::text::Span::raw("  "),
             ratatui::text::Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::rgb(field_bg)).fg(field_fg)),
         ]),
-        Line::raw(""),
-        Line::styled("  [Enter]  Save     [Esc]  Cancel", Style::default().add_modifier(Modifier::BOLD)),
     ];
     f.render_widget(
         Paragraph::new(lines).style(bg),
         Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(2) },
     );
+
+    // Buttons, right-aligned like a dialog's: the default one highlighted
+    let y = area.bottom().saturating_sub(2);
+    let ok_label = format!(" {verb} ");
+    let cancel_label = " Cancel ";
+    let cancel = Rect { x: area.right().saturating_sub(3 + cancel_label.len() as u16), y, width: cancel_label.len() as u16, height: 1 };
+    let ok = Rect { x: cancel.x.saturating_sub(2 + ok_label.len() as u16), y, width: ok_label.len() as u16, height: 1 };
+    f.render_widget(Paragraph::new(ok_label).style(Style::default().bg(theme::selection()).fg(theme::text_strong()).add_modifier(Modifier::BOLD)), ok);
+    f.render_widget(Paragraph::new(cancel_label).style(Style::default().bg(theme::input()).fg(theme::text())), cancel);
+    app.prompt_buttons = Some((ok, cancel));
 }
 
 fn render_confirm_delete(f: &mut Frame, app: &App) {

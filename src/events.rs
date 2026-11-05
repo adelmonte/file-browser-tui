@@ -125,11 +125,21 @@ impl ClickTracker {
 // Inline rename state
 // ---------------------------------------------------------------------------
 
+/// What a name prompt creates once confirmed.
 #[derive(Debug, Clone)]
-/// Naming clipboard text or an image before it's saved as a file.
-pub struct PasteNameState {
+pub enum PromptKind {
+    NewFolder,
+    NewFile,
+    /// Clipboard text or an image, saved as a file.
+    Paste(Vec<u8>),
+}
+
+/// Dolphin's Create Folder / Create File / Paste Clipboard Contents
+/// dialogs: nothing is created until it's confirmed.
+#[derive(Debug, Clone)]
+pub struct NamePrompt {
+    pub kind: PromptKind,
     pub dest: std::path::PathBuf,
-    pub data: Vec<u8>,
     pub input: String,
     pub cursor_pos: usize,
     /// Last commit was rejected (bad name or file exists); cleared on edit.
@@ -144,9 +154,6 @@ pub struct RenameState {
     pub cursor_pos: usize,
     /// Last commit was rejected (bad name or target exists); cleared on edit.
     pub invalid: bool,
-    /// A just-created item: the field starts empty with its name greyed,
-    /// and committing it empty keeps that name.
-    pub placeholder: Option<String>,
 }
 
 impl RenameState {
@@ -157,11 +164,6 @@ impl RenameState {
             input: current_name.to_string(),
             cursor_pos: len,
             invalid: false,
-            placeholder: None,
         }
-    }
-
-    pub fn fresh(item_idx: usize, name: &str) -> Self {
-        Self { item_idx, input: String::new(), cursor_pos: 0, invalid: false, placeholder: Some(name.to_string()) }
     }
 }
