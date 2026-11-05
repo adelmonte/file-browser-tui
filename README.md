@@ -33,7 +33,10 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
   app and Dolphin, Nautilus etc., and paste copied text or images as a new file.
 - **Drag and drop**: rubber-band selection, dragging items onto folders and places, and
   (in kitty) dropping files in from other programs.
-- **Right-click menus**: Open With (your desktop's apps), Open Terminal Here, Compress,
+- **Archives**: Extract Here with Dolphin's autodetected subfolder (a single top-level
+  folder lands beside the archive, loose files get a folder named after it), or Extract
+  Into a named folder; zip, tar.*, 7z, rar, iso and more. Compress to tar.gz or zip.
+- **Right-click menus**: Open With (your desktop's apps), Open Terminal Here,
   Send to Device (KDE Connect), Properties, and your own actions. Existing KDE service
   menus are imported on first run.
 - **Configurable**: keyboard shortcuts, every interface color, icon theme, folder icons,
@@ -57,6 +60,7 @@ Optional tools, used when present (run `file-browser-tui --check` to see what's 
 | `ffmpeg` (`ffmpegthumbnailer` if you prefer it) | video thumbnails, audio cover art |
 | `poppler` (`pdftoppm`) | PDF thumbnails (add `"pdf"` to `thumbnails`, see below) |
 | `xdg-utils` | opening files with their default app |
+| `libarchive` (`bsdtar`) | Extract (`7z`, `unrar`, `unzip` are used if it can't) |
 | `zip` | Compress → zip |
 | `kdeconnect` | Send to Device, browsing phones |
 | `udisks2` | unmounting and safely removing drives |

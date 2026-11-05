@@ -90,6 +90,8 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
 
         MenuAction::CompressTarGz => compress(app, target, true),
         MenuAction::CompressZip => compress(app, target, false),
+        MenuAction::ExtractHere => extract(app, target, false),
+        MenuAction::ExtractToFolder => extract(app, target, true),
 
         MenuAction::Properties => {
             if let Some(path) = target_path(app, target) {
@@ -454,6 +456,25 @@ fn compress(app: &mut App, target: MenuTarget, targz: bool) {
         let out = unique_name(&parent, &format!("{name}.zip"));
         let out_name = out.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         crate::launch::detach(Command::new("zip").current_dir(&parent).args(["-r", &out_name, &name]));
+    }
+}
+
+fn extract(app: &mut App, target: MenuTarget, own_folder: bool) {
+    let archives: Vec<PathBuf> = action_paths(app, target).into_iter()
+        .filter(|p| crate::archive::is_archive(p))
+        .collect();
+    for archive in archives {
+        let name = archive.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        app.notify(format!("Extracting {name}\u{2026}"));
+        let tx = app.job_tx.clone();
+        std::thread::spawn(move || {
+            let folder = own_folder.then(|| crate::archive::stem(&archive));
+            let notice = match crate::archive::extract(&archive, folder.as_deref()) {
+                Ok(made) => format!("Extracted {name} to {}", made.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+                Err(e) => format!("Couldn't extract {name}: {e}"),
+            };
+            let _ = tx.send(notice);
+        });
     }
 }
 

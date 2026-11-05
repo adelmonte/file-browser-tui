@@ -11,6 +11,7 @@ mod icons;
 mod keys;
 mod launch;
 mod apps;
+mod archive;
 mod check;
 mod clipboard;
 mod lineedit;

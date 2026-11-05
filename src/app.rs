@@ -211,6 +211,9 @@ pub struct App {
     /// Eject buttons drawn this frame: (rect, index into `devices`).
     pub eject_rects: Vec<(Rect, usize)>,
     unmount_tx: mpsc::Sender<(String, Result<(), String>)>,
+    /// Background jobs (extracting, ...) report here with a notice to show.
+    pub job_tx: mpsc::Sender<String>,
+    job_rx: mpsc::Receiver<String>,
     unmount_rx: mpsc::Receiver<(String, Result<(), String>)>,
     pub sidebar_w: u16,
     pub sidebar_dragging: bool,
@@ -347,6 +350,7 @@ impl App {
         let places = crate::places::places_from_config(&config.places);
         let devices = crate::places::default_devices();
         let (unmount_tx, unmount_rx) = mpsc::channel();
+        let (job_tx, job_rx) = mpsc::channel();
         let dirstates = DirStates::load();
 
         let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
@@ -444,6 +448,8 @@ impl App {
             devices,
             eject_rects: Vec::new(),
             unmount_tx,
+            job_tx,
+            job_rx,
             unmount_rx,
             menu: None,
             dnd: Default::default(),
@@ -1222,6 +1228,9 @@ impl App {
         if let Ok(ev) = self.mount_event_rx.try_recv() {
             let MountEvent::Updated(devs) = ev;
             self.devices = devs;
+        }
+        while let Ok(notice) = self.job_rx.try_recv() {
+            self.notify(notice);
         }
         while let Ok((name, result)) = self.unmount_rx.try_recv() {
             match result {

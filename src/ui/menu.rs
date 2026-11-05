@@ -39,6 +39,9 @@ pub enum MenuAction {
     NewFolder,
     NewFile,
     CompressTarGz,
+    /// Extract the archive(s): autodetecting a folder, or into one named after it.
+    ExtractHere,
+    ExtractToFolder,
     CompressZip,
     Properties,
     AddToPlaces,
@@ -213,6 +216,13 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             items.push(MenuItem::new("\u{f044}  Rename", MenuAction::Rename));
             items.push(MenuItem::new("\u{f1f8}  Move to Trash", MenuAction::Trash));
             items.push(MenuItem::sep());
+            if !is_dir && crate::archive::is_archive(&entry.path) {
+                let folder = crate::archive::stem(&entry.path);
+                items.push(MenuItem::sub("\u{f187}  Extract", vec![
+                    MenuItem::new("Here, Autodetect Subfolder", MenuAction::ExtractHere),
+                    MenuItem::new(&format!("Into \"{folder}\""), MenuAction::ExtractToFolder),
+                ]));
+            }
             items.push(MenuItem::sub("\u{f1c6}  Compress", vec![
                 MenuItem::new("tar.gz", MenuAction::CompressTarGz),
                 MenuItem::new("zip", MenuAction::CompressZip),
