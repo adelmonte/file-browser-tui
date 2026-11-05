@@ -2,7 +2,7 @@ use chrono::{DateTime, Local};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Cell, Row, Table},
 };
@@ -35,7 +35,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         None
     };
-    let header_style = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
+    let header_style = Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD);
     // Clickable headers; the active sort column shows its direction
     let arrow = if app.sort.ascending { " \u{25b4}" } else { " \u{25be}" };
     let title = |label: &str, field: SortField| {
@@ -76,7 +76,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let name = Line::from(vec![
                 Span::raw(format!(" {}", "  ".repeat(e.depth as usize))),
-                Span::styled(expander, Style::default().fg(theme::MUTED)),
+                Span::styled(expander, Style::default().fg(theme::muted())),
                 Span::raw(format!("   {}", e.name)),
             ]);
             let size = if e.is_dir {
@@ -104,14 +104,14 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
 
             let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
             let row_style = if is_selected {
-                Style::default().bg(theme::SEL_BG).fg(Color::White)
+                Style::default().bg(theme::selection()).fg(theme::text_strong())
             } else if hovered == Some(i) {
-                Style::default().bg(theme::HOVER_BG)
+                Style::default().bg(theme::hover())
             } else {
                 Style::default()
             };
             let row_style = if app.is_cut(&e.path) { row_style.add_modifier(Modifier::DIM) } else { row_style };
-            let muted = if is_selected { Style::default() } else { Style::default().fg(theme::MUTED) };
+            let muted = if is_selected { Style::default() } else { Style::default().fg(theme::muted()) };
 
             Row::new(vec![
                 Cell::from(name),
@@ -147,8 +147,8 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         let rule = (area.width as usize).saturating_sub(label.chars().count() + 3);
         f.render_widget(
             ratatui::widgets::Paragraph::new(Line::from(vec![
-                Span::styled(format!(" {label} "), Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("\u{2500}".repeat(rule), Style::default().fg(theme::BORDER)),
+                Span::styled(format!(" {label} "), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD)),
+                Span::styled("\u{2500}".repeat(rule), Style::default().fg(theme::border())),
             ])),
             Rect { x: area.x, y, width: area.width, height: 1 },
         );
@@ -161,9 +161,9 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         let depth = app.listing.entries[i].depth;
         let is_selected = app.selection == Some(i) || app.multi_selection.contains(&i);
         let bg = if is_selected {
-            Some(theme::SEL)
+            Some(theme::get().selection)
         } else if hovered == Some(i) {
-            Some(theme::HOVER)
+            Some(theme::get().hover)
         } else {
             None
         };

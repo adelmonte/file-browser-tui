@@ -17,7 +17,7 @@ use ratatui::{
 use crate::ui::theme;
 
 const PROPS_W: u16 = 58;
-const PROPS_BG: Color = theme::FIELD_BG;
+fn props_bg() -> Color { theme::panel() }
 
 pub struct PropertiesState {
     pub rows: Vec<(String, String)>,
@@ -182,9 +182,9 @@ pub fn render_properties(f: &mut Frame, state: &PropertiesState) {
         Line::from(vec![
             Span::styled(
                 format!(" {k:<label_w$}"),
-                Style::default().bg(PROPS_BG).add_modifier(Modifier::BOLD | Modifier::DIM),
+                Style::default().bg(props_bg()).add_modifier(Modifier::BOLD | Modifier::DIM),
             ),
-            Span::styled(val, Style::default().bg(PROPS_BG)),
+            Span::styled(val, Style::default().bg(props_bg())),
         ])
     }).collect();
 
@@ -194,8 +194,8 @@ pub fn render_properties(f: &mut Frame, state: &PropertiesState) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .title(" Properties (Esc to close) ")
-                .border_style(Style::default().fg(theme::BORDER).bg(PROPS_BG))
-                .style(Style::default().bg(PROPS_BG)),
+                .border_style(Style::default().fg(theme::border()).bg(props_bg()))
+                .style(Style::default().bg(props_bg())),
         ),
         area,
     );

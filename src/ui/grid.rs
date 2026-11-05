@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Text},
     widgets::{Block, Clear, Paragraph, StatefulWidget, Widget},
 };
@@ -76,7 +76,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let entries_len = app.listing.entries.len();
     if entries_len == 0 {
         f.render_widget(
-            Paragraph::new("Folder is empty").style(Style::default().fg(theme::MUTED)),
+            Paragraph::new("Folder is empty").style(Style::default().fg(theme::muted())),
             Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
         );
         return;
@@ -181,11 +181,11 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
     // The icon image is composited onto the same bg color, so the
     // highlight runs behind the icon as one full-cell rectangle.
     let cell_bg: Option<(u8, u8, u8)> = if is_selected {
-        Some(theme::SEL)
+        Some(theme::get().selection)
     } else if is_drag_target {
-        Some(theme::NORD14)
+        Some(theme::get().drop_target)
     } else if hovered == Some(entry_idx) {
-        Some(theme::HOVER)
+        Some(theme::get().hover)
     } else {
         None
     };
@@ -206,12 +206,12 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
     if let Some(ref rename) = app.rename_state
         && rename.item_idx == entry_idx {
             // Thin bar marks the cursor inside the wrapped name
-            let bg = if rename.invalid { theme::NORD11 } else { theme::SEL };
-            let style = Style::default().bg(rgb(bg)).fg(Color::White).add_modifier(Modifier::BOLD);
+            let bg = if rename.invalid { theme::get().error } else { theme::get().selection };
+            let style = Style::default().bg(rgb(bg)).fg(theme::text_strong()).add_modifier(Modifier::BOLD);
             // Empty new item: cursor, then its default name greyed
             let (shown, style) = match &rename.placeholder {
                 Some(p) if rename.input.is_empty() =>
-                    (format!("{}{p}", crate::lineedit::bar_cursor()), style.fg(theme::MUTED).remove_modifier(Modifier::BOLD)),
+                    (format!("{}{p}", crate::lineedit::bar_cursor()), style.fg(theme::muted()).remove_modifier(Modifier::BOLD)),
                 _ => {
                     let mut shown = rename.input.clone();
                     shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
@@ -226,11 +226,11 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
         }
 
     let label_fg = if is_selected {
-        Style::default().bg(theme::SEL_BG).fg(Color::White)
+        Style::default().bg(theme::selection()).fg(theme::text_strong())
     } else if is_drag_target {
-        Style::default().bg(rgb(theme::NORD14)).fg(Color::Black)
+        Style::default().bg(rgb(theme::get().drop_target)).fg(theme::drop_target_text())
     } else if hovered == Some(entry_idx) {
-        Style::default().bg(theme::HOVER_BG)
+        Style::default().bg(theme::hover())
     } else {
         Style::default()
     };

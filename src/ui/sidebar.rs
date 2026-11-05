@@ -32,7 +32,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     if area.width > 0 && area.height > 0 {
         let x = area.right() - 1;
         let hot = app.sidebar_dragging || app.mouse_pos.is_some_and(|(c, r)| c == x && r >= area.y);
-        let color = if hot { theme::ACCENT } else { theme::BORDER };
+        let color = if hot { theme::accent() } else { theme::border() };
         let h = area.height.min(3);
         let grip = Rect { x, y: area.y + (area.height - h) / 2, width: 1, height: h };
         f.render_widget(Paragraph::new(vec![Line::from("\u{2503}"); h as usize]).style(Style::default().fg(color)), grip);
@@ -103,7 +103,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         }
         if y >= bottom { break; }
         f.render_widget(
-            Paragraph::new(Span::styled(format!(" {title}"), Style::default().fg(theme::MUTED))),
+            Paragraph::new(Span::styled(format!(" {title}"), Style::default().fg(theme::muted()))),
             Rect { x: inner.x, y, width, height: 1 },
         );
         y += 1;
@@ -118,11 +118,11 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let is_drop = matches!((drag, row.target),
                 (Some(d), SidebarTarget::Place(j)) if d.target == Some(j) && d.from != j);
             let bg = if is_drop {
-                Some(theme::HOVER)
+                Some(theme::get().hover)
             } else if row.current {
-                Some(theme::SEL)
+                Some(theme::get().selection)
             } else if hover == Some(row.target) {
-                Some(theme::HOVER)
+                Some(theme::get().hover)
             } else {
                 None
             };
@@ -132,11 +132,11 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             // Drop target of a place being dragged: accent bar on its left
             if is_drop {
                 f.render_widget(
-                    Paragraph::new(vec![Line::from("\u{258c}"); h as usize]).style(Style::default().fg(theme::ACCENT)),
+                    Paragraph::new(vec![Line::from("\u{258c}"); h as usize]).style(Style::default().fg(theme::accent())),
                     Rect { width: 1, ..rect },
                 );
             }
-            let fg = if row.dim { theme::MUTED_RGB } else if row.current { (255, 255, 255) } else { theme::TEXT_RGB };
+            let fg = if row.dim { theme::get().muted } else if row.current { theme::text_strong_rgb() } else { theme::get().text };
 
             draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: icon_w, height: h }, bg);
             let text_x = inner.x + 1 + icon_w + 1;
@@ -176,11 +176,11 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
 /// name (Dolphin's free-space indicator); red when nearly full.
 fn usage_bar(usage: f32, width: u16) -> Line<'static> {
     let filled = ((usage.clamp(0.0, 1.0) * width as f32).round() as usize).min(width as usize);
-    let color = if usage > 0.9 { theme::rgb(theme::NORD11) } else { theme::ACCENT };
+    let color = if usage > 0.9 { theme::rgb(theme::get().error) } else { theme::accent() };
     Line::from(vec![
         // Upper one-quarter block (kitty draws these itself)
         Span::styled("\u{1fb82}".repeat(filled), Style::default().fg(color)),
-        Span::styled("\u{1fb82}".repeat(width as usize - filled), Style::default().fg(theme::BORDER)),
+        Span::styled("\u{1fb82}".repeat(width as usize - filled), Style::default().fg(theme::border())),
     ])
 }
 

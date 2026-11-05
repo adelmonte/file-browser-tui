@@ -12,8 +12,8 @@ use strum::IntoEnumIterator;
 use crate::app::{App, SortField, ViewMode};
 use crate::ui::{kitty, theme};
 
-const MENU_BG: Color = theme::FIELD_BG;
-const MENU_SEL: Color = theme::rgb(theme::NORD9);
+fn menu_bg() -> Color { theme::panel() }
+fn menu_sel() -> Color { theme::rgb(theme::get().highlight) }
 
 // ---------------------------------------------------------------------------
 // Menu data model
@@ -505,11 +505,11 @@ pub fn highlight_rects(menu: &MenuState) -> (Option<Rect>, Option<Rect>) {
 }
 
 /// Background colors behind menu icons: (normal, highlighted).
-pub const ICON_BG: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD9);
+pub fn icon_bg() -> ((u8, u8, u8), (u8, u8, u8)) { (theme::get().panel, theme::get().highlight) }
 /// Panel drawn under the menu on Kitty (see ui::underlay): fill, outline.
-pub const PANEL: ((u8, u8, u8), (u8, u8, u8)) = (theme::NORD0, theme::NORD3);
+pub fn panel() -> ((u8, u8, u8), (u8, u8, u8)) { (theme::get().panel, theme::get().border) }
 /// Selection highlight in panel menus.
-pub const HIGHLIGHT: (u8, u8, u8) = theme::NORD9;
+pub fn highlight() -> (u8, u8, u8) { theme::get().highlight }
 
 /// `tall`: Kitty draws the background, outline and highlight as images
 /// under the cells, and the text centered across two-row items. Returns
@@ -544,18 +544,18 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
     let inner_w = rect.width.saturating_sub(2) as usize;
     let lines: Vec<Line> = items.iter().enumerate().map(|(i, item)| {
         if item.separator {
-            return Line::styled("\u{2500}".repeat(inner_w), Style::default().fg(theme::BORDER).bg(MENU_BG));
+            return Line::styled("\u{2500}".repeat(inner_w), Style::default().fg(theme::border()).bg(menu_bg()));
         }
         let arrow = if item.submenu.is_empty() { "" } else { " \u{f0da}" };
         let pad = inner_w
             .saturating_sub(item.label.chars().count() + arrow.chars().count() + 1);
         let text = format!(" {}{}{}", item.label, " ".repeat(pad), arrow);
 
-        let mut style = Style::default().bg(MENU_BG);
+        let mut style = Style::default().bg(menu_bg());
         if !item.enabled {
             style = style.add_modifier(Modifier::DIM);
         } else if selected == Some(i) {
-            style = style.bg(MENU_SEL).fg(Color::White).add_modifier(Modifier::BOLD);
+            style = style.bg(menu_sel()).fg(theme::text_strong()).add_modifier(Modifier::BOLD);
         }
         Line::from(Span::styled(text, style))
     }).collect();
@@ -563,8 +563,8 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme::BORDER).bg(MENU_BG))
-        .style(Style::default().bg(MENU_BG));
+        .border_style(Style::default().fg(theme::border()).bg(menu_bg()))
+        .style(Style::default().bg(menu_bg()));
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
@@ -577,17 +577,17 @@ fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<u
         if item.separator {
             let w = rect.width.saturating_sub(2);
             f.render_widget(
-                Paragraph::new("\u{2500}".repeat(w as usize)).style(Style::default().fg(theme::BORDER)),
+                Paragraph::new("\u{2500}".repeat(w as usize)).style(Style::default().fg(theme::border())),
                 Rect { x: rect.x + 1, y, width: w, height: 1 },
             );
             continue;
         }
         let fg = if !item.enabled {
-            theme::MUTED_RGB
+            theme::get().muted
         } else if selected == Some(i) {
-            (255, 255, 255)
+            theme::text_strong_rgb()
         } else {
-            theme::TEXT_RGB
+            theme::get().text
         };
         let arrow_w = if item.submenu.is_empty() { 0 } else { 2 };
         let mut emit = |x: u16, w: u16, text: &str| {

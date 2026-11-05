@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
@@ -32,9 +32,9 @@ pub fn render_drag_ghost(f: &mut Frame, app: &App) {
     let display = format!(" {} ", name);
 
     let (bg, fg) = if hover_target.is_some() {
-        (theme::rgb(theme::NORD14), Color::Black)  // valid drop target
+        (theme::rgb(theme::get().drop_target), theme::drop_target_text())  // valid drop target
     } else {
-        (theme::rgb(theme::NORD2), Color::White)   // neutral ghost
+        (theme::rgb(theme::get().ghost), theme::text_strong())   // neutral ghost
     };
 
     f.render_widget(Clear, area);

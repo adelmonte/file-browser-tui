@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::{Style},
     widgets::{Block, Paragraph},
 };
 
@@ -51,7 +51,7 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
             let text = format!(" {icon} {name}");
 
             let style = if is_selected {
-                Style::default().bg(theme::SEL_BG).fg(Color::White)
+                Style::default().bg(theme::selection()).fg(theme::text_strong())
             } else {
                 Style::default()
             };

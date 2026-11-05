@@ -18,7 +18,7 @@ pub mod underlay;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
@@ -84,7 +84,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         let lit = menu::highlight_rects(&m);
         app.menu = Some(m);
         if panel {
-            let (fill, line) = menu::PANEL;
+            let (fill, line) = menu::panel();
             underlay::panel(app, 2, rect, fill, line);
             if sub.width > 0 {
                 underlay::panel(app, 3, sub, fill, line);
@@ -93,15 +93,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
             let inset = underlay::highlight_inset(app);
             for (slot, r) in [(4, lit.0), (5, lit.1)] {
                 if let Some(r) = r {
-                    underlay::highlight(app, slot, r, inset, inset, menu::HIGHLIGHT);
+                    underlay::highlight(app, slot, r, inset, inset, menu::highlight());
                 }
             }
         }
         for (icon, rect, hot) in slots {
             let bg = match (panel, hot) {
                 (true, _) => None,
-                (false, true) => Some(menu::ICON_BG.1),
-                (false, false) => Some(menu::ICON_BG.0),
+                (false, true) => Some(menu::icon_bg().1),
+                (false, false) => Some(menu::icon_bg().0),
             };
             sidebar::draw_icon(f, app, &icon, rect, bg);
         }
@@ -143,9 +143,9 @@ fn render_band(f: &mut Frame, app: &mut App) {
     let r = app.band.as_ref()
         .map(|&(a, b, _)| band_rect(a, b).intersection(app.grid_area))
         .filter(|r| r.width > 0 && r.height > 0);
-    if !underlay::selection_band(app, r, theme::NORD9) && let Some(r) = r {
+    if !underlay::selection_band(app, r, theme::get().highlight) && let Some(r) = r {
         f.render_widget(
-            Block::default().borders(ratatui::widgets::Borders::ALL).border_style(Style::default().fg(theme::rgb(theme::NORD9))),
+            Block::default().borders(ratatui::widgets::Borders::ALL).border_style(Style::default().fg(theme::rgb(theme::get().highlight))),
             r,
         );
     }
@@ -174,14 +174,14 @@ fn render_paste_name(f: &mut Frame, app: &App) {
     let w = 52u16.min(term.width);
     let h = 7u16.min(term.height);
     let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
-    let bg = Style::default().bg(theme::FIELD_BG).fg(theme::TEXT);
+    let bg = Style::default().bg(theme::panel()).fg(theme::text());
 
     f.render_widget(Clear, area);
     f.render_widget(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border()))
             .title(" Paste Clipboard Contents ")
             .style(bg),
         area,
@@ -195,12 +195,12 @@ fn render_paste_name(f: &mut Frame, app: &App) {
     let cur = shown[..p.cursor_pos.min(p.input.len())].chars().count();
     let start = (cur + 1).saturating_sub(field_w);
     let mut visible: String = chars.iter().skip(start).take(field_w).collect();
-    let field_bg = if p.invalid { theme::NORD11 } else { theme::INPUT };
-    let mut field_fg = Color::White;
+    let field_bg = if p.invalid { theme::get().error } else { theme::get().input };
+    let mut field_fg = theme::text_strong();
     if p.input.is_empty() {
         // Greyed suggestion, used if nothing is typed
         visible = format!("{}{}", crate::lineedit::bar_cursor(), p.placeholder).chars().take(field_w).collect();
-        field_fg = theme::MUTED;
+        field_fg = theme::muted();
     }
 
     let lines = vec![
@@ -234,9 +234,9 @@ fn render_confirm_delete(f: &mut Frame, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::rgb(theme::NORD11)))
+            .border_style(Style::default().fg(theme::rgb(theme::get().error)))
             .title(" Permanently Delete ")
-            .style(Style::default().bg(Color::Rgb(59, 20, 20)).fg(Color::White)),
+            .style(Style::default().bg(theme::danger_bg()).fg(theme::text_strong())),
         area,
     );
 
@@ -259,7 +259,7 @@ fn render_confirm_delete(f: &mut Frame, app: &App) {
     ];
 
     f.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(Color::Rgb(59, 20, 20)).fg(Color::White)),
+        Paragraph::new(lines).style(Style::default().bg(theme::danger_bg()).fg(theme::text_strong())),
         inner,
     );
 }

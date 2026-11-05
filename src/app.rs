@@ -297,7 +297,13 @@ impl App {
         let view_mode = config.default_view;
         let (cell_w, cell_h, icon_rows, img_w) = icon_dims(icon_size_idx, picker.font_size());
 
-        let (keymap, key_problems) = crate::keys::Keymap::new(&config.keys);
+        let (keymap, mut key_problems) = crate::keys::Keymap::new(&config.keys);
+        if let Some(t) = &config.theme {
+            match t.clone().try_into::<crate::ui::theme::Theme>() {
+                Ok(t) => crate::ui::theme::set(t),
+                Err(e) => key_problems.push(format!("[theme]: {}", e.message())),
+            }
+        }
         let mut app = Self {
             keymap,
             watched_path: cwd.clone(),
@@ -408,7 +414,7 @@ impl App {
         app.apply_dir_state();
         app.reload_dir();
         if !key_problems.is_empty() {
-            app.notify(format!("Config [keys]: {}", key_problems.join("; ")));
+            app.notify(format!("Config: {}", key_problems.join("; ")));
         }
         Ok(app)
     }

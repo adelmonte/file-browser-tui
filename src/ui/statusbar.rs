@@ -11,7 +11,7 @@ use crate::ui::{details::format_size, theme};
 
 pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
 
-    let muted = Style::default().fg(theme::MUTED);
+    let muted = Style::default().fg(theme::muted());
     let sep = || Span::styled("  ·  ", muted);
     let entries = &app.listing.entries;
 
@@ -74,7 +74,7 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     if let Some((text, until)) = &app.notice
         && std::time::Instant::now() < *until
     {
-        left = vec![Span::raw(" "), Span::styled(text.clone(), Style::default().fg(theme::rgb(theme::NORD13)))];
+        left = vec![Span::raw(" "), Span::styled(text.clone(), Style::default().fg(theme::rgb(theme::get().warning)))];
     }
 
     let mut right: Vec<Span> = Vec::new();

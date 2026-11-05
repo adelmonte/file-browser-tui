@@ -12,7 +12,7 @@ use crate::app::{App, TOPBAR_H};
 use crate::ui::menu::{self, MenuKind};
 use crate::ui::{theme, underlay};
 
-const PATH_BG: Color = theme::INPUT_BG;
+fn path_bg() -> Color { theme::input() }
 
 /// Dolphin-style toolbar on the window background: icon buttons, a rounded
 /// location field with the folder's icon and clickable breadcrumbs, then
@@ -53,11 +53,11 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());
     let button = |f: &mut Frame, rect: Rect, label: &str, enabled: bool, active: bool| {
         let hovered = hover.is_some_and(|(c, r)| enabled && contains(rect, c, r));
-        let mut style = Style::default().fg(if enabled { theme::TEXT } else { theme::BORDER });
+        let mut style = Style::default().fg(if enabled { theme::text() } else { theme::border() });
         if active {
-            style = style.bg(theme::SEL_BG).fg(Color::White);
+            style = style.bg(theme::selection()).fg(theme::text_strong());
         } else if hovered {
-            style = style.bg(theme::HOVER_BG);
+            style = style.bg(theme::hover());
         }
         f.render_widget(Paragraph::new(label.to_string()).style(style), rect);
     };
@@ -82,12 +82,12 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
     }
     let body = Rect { x: field.x + 1, width: field.width - 2, ..field };
     // A rounded box a little taller than the text row (Kitty), else cell bg
-    if !underlay::field(app, 0, field, theme::INPUT) {
-        f.render_widget(Block::default().style(Style::default().bg(PATH_BG)), field);
+    if !underlay::field(app, 0, field, theme::get().input) {
+        f.render_widget(Block::default().style(Style::default().bg(path_bg())), field);
     }
 
     if app.path_bar_editing {
-        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(Color::White)));
+        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(theme::text_strong())));
         f.render_widget(Paragraph::new(line), body);
         return;
     }
@@ -109,9 +109,9 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         let rect = Rect { x, width: w, ..crumbs_area };
         let hovered = target.is_some() && hover.is_some_and(|(c, r)| contains(rect, c, r));
         let style = if hovered {
-            Style::default().fg(Color::White).add_modifier(Modifier::UNDERLINED)
+            Style::default().fg(theme::text_strong()).add_modifier(Modifier::UNDERLINED)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(theme::text_strong())
         };
         f.render_widget(Paragraph::new(Span::styled(label, style)), rect);
         if let Some(path) = target {
@@ -168,11 +168,11 @@ pub fn render_path_completions(f: &mut Frame, app: &mut App) {
     let mut state = ListState::default().with_selected(app.path_completion_sel);
     f.render_stateful_widget(
         List::new(items)
-            .style(Style::default().bg(PATH_BG))
+            .style(Style::default().bg(path_bg()))
             .block(Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER))
+                .border_style(Style::default().fg(theme::border()))
                 .title(" Path "))
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
         area,

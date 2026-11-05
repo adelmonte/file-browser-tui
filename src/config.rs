@@ -44,6 +44,10 @@ pub struct Config {
     /// pdftoppm). Unset: follow Dolphin's own setting, or its defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_plugins: Option<Vec<String>>,
+    /// Interface colors by role as "#rrggbb" (see ui/theme.rs); unset
+    /// roles keep the Nord defaults. Kept as written, so it round-trips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<toml::Value>,
     /// Keyboard shortcuts by action name, e.g. `rename = ["F2", "Alt+R"]`;
     /// replaces that action's defaults, `[]` unbinds it (see keys.rs).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -142,6 +146,7 @@ impl Default for Config {
             folder_previews: true,
             preview_plugins: None,
             keys: HashMap::new(),
+            theme: None,
             read_only: false,
         }
     }

@@ -48,7 +48,7 @@ pub fn render(f: &mut Frame, app: &mut App, main: Rect) {
     let track = height as f32;
     let thumb_h = (track * viewport / content).clamp(1.5, track);
     let thumb_y = (track - thumb_h) * (pos / (content - viewport)).clamp(0.0, 1.0);
-    let color = if app.scrollbar_dragging { theme::NORD9 } else { (110, 121, 143) };
+    let color = if app.scrollbar_dragging { theme::get().highlight } else { theme::get().scrollbar };
     app.scrollbar = Some(Geom { x, top, height, content, viewport });
 
     let font = app.picker.font_size();

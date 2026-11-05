@@ -54,7 +54,7 @@ pub fn render_help(f: &mut Frame, app: &App) {
             Line::raw("")
         } else if desc.is_empty() {
             // Section header
-            Line::from(Span::styled(key, Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)))
+            Line::from(Span::styled(key, Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD)))
         } else {
             Line::from(vec![
                 Span::styled(format!("{:<26}", key), Style::default().add_modifier(Modifier::BOLD)),
@@ -65,11 +65,11 @@ pub fn render_help(f: &mut Frame, app: &App) {
 
     f.render_widget(
         Paragraph::new(lines)
-            .style(Style::default().bg(theme::FIELD_BG))
+            .style(Style::default().bg(theme::panel()))
             .block(Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER))
+                .border_style(Style::default().fg(theme::border()))
                 .title(" Keys (any key closes) ")),
         area,
     );

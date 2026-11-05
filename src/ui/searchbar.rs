@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph},
 };
@@ -17,9 +17,9 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let chip = |label: &str, on: bool| {
         let style = if on {
-            Style::default().bg(theme::SEL_BG).fg(Color::White)
+            Style::default().bg(theme::selection()).fg(theme::text_strong())
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         };
         Span::styled(format!(" {label} "), style)
     };
@@ -38,7 +38,7 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     let mut spans = Vec::new();
     for (i, (label, on)) in chips.iter().enumerate() {
         if i == 2 {
-            spans.push(Span::styled(sep, Style::default().fg(theme::BORDER)));
+            spans.push(Span::styled(sep, Style::default().fg(theme::border())));
             x += sep.chars().count() as u16;
         } else {
             spans.push(Span::raw(" "));
@@ -60,20 +60,20 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
     search.field_rect = outer;
     let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
-    let mut line = vec![Span::styled("\u{f002} ", Style::default().fg(theme::ACCENT))];
+    let mut line = vec![Span::styled("\u{f002} ", Style::default().fg(theme::accent()))];
     if search.focused {
-        line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(Color::White)));
+        line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(theme::text_strong())));
     } else {
-        line.push(Span::styled(search.query.clone(), Style::default().fg(Color::White)));
+        line.push(Span::styled(search.query.clone(), Style::default().fg(theme::text_strong())));
     }
     if search.query.is_empty() && !search.focused {
-        line.push(Span::styled("Search\u{2026}", Style::default().fg(theme::MUTED)));
+        line.push(Span::styled("Search\u{2026}", Style::default().fg(theme::muted())));
     } else if search.query.is_empty() {
         let hint = match search.mode {
             SearchMode::Name => "file name",
             SearchMode::Content => "text inside files",
         };
-        line.push(Span::styled(format!(" {hint}  (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::MUTED)));
+        line.push(Span::styled(format!(" {hint}  (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::muted())));
     }
     let field_style = if search.focused {
         Style::default().add_modifier(Modifier::BOLD)
@@ -81,8 +81,8 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default()
     };
     // A rounded box a little taller than the text row (Kitty), else cell bg
-    if !underlay::field(app, 1, outer, theme::INPUT) {
-        f.render_widget(Block::default().style(Style::default().bg(theme::INPUT_BG)), outer);
+    if !underlay::field(app, 1, outer, theme::get().input) {
+        f.render_widget(Block::default().style(Style::default().bg(theme::input())), outer);
     }
     f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
 }
