@@ -44,6 +44,10 @@ pub struct Config {
     /// pdftoppm). Unset: follow Dolphin's own setting, or its defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_plugins: Option<Vec<String>>,
+    /// Folders (and everything under them) whose thumbnails are made when
+    /// shown but never written to disk; "~/" means the home folder.
+    #[serde(default)]
+    pub thumbnail_cache_exclude: Vec<String>,
     /// Interface colors by role as "#rrggbb" (see ui/theme.rs); unset
     /// roles keep the Nord defaults. Kept as written, so it round-trips.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,6 +149,7 @@ impl Default for Config {
             context_menu: ContextMenuConfig::default(),
             folder_previews: true,
             preview_plugins: None,
+            thumbnail_cache_exclude: Vec::new(),
             keys: HashMap::new(),
             theme: None,
             read_only: false,
@@ -235,6 +240,9 @@ sidebar_w = 18                  # sidebar width in columns (also set by dragging
 # preview_plugins = ["imagethumbnail", "jpegthumbnail", "svgthumbnail",
 #     "ffmpegthumbs", "audiothumbnail", "ebookthumbnail",
 #     "opendocumentthumbnail", "comicbookthumbnail"]   # + "gsthumbnail" for PDFs
+# Folders whose thumbnails are made when shown but never saved to disk
+# (~/.cache/thumbnails), for privacy. Covers everything under them.
+# thumbnail_cache_exclude = ["~/Private"]
 
 # [sort]
 # field = "name"                # name, size, modified, created, accessed or type

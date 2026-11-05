@@ -37,23 +37,24 @@ pub fn load_icon(path: &Path, is_svg: bool, target_px: u32) -> anyhow::Result<Dy
     }
 
     let tmp = cached.with_extension("tmp.png");
-    let status = Command::new("rsvg-convert")
-        .args([
-            "-w", &target_px.to_string(),
-            "-h", &target_px.to_string(),
-            "-o", tmp.to_string_lossy().as_ref(),
-            path.to_string_lossy().as_ref(),
-        ])
-        .stderr(Stdio::null())
-        .status()?;
-
-    if !status.success() {
-        let _ = std::fs::remove_file(&tmp);
-        anyhow::bail!("rsvg-convert failed for {:?}", path);
-    }
-
+    rasterize_svg(path, target_px, &tmp)?;
     std::fs::rename(&tmp, &cached)?;
     Ok(image::open(&cached)?)
+}
+
+/// Render an SVG to a `px`-square PNG at `out` with rsvg-convert.
+pub fn rasterize_svg(path: &Path, px: u32, out: &Path) -> anyhow::Result<()> {
+    let status = Command::new("rsvg-convert")
+        .args(["-w", &px.to_string(), "-h", &px.to_string(), "-o"])
+        .arg(out)
+        .arg(path)
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        let _ = std::fs::remove_file(out);
+        anyhow::bail!("rsvg-convert failed for {:?}", path);
+    }
+    Ok(())
 }
 
 fn raster_cache_path(svg_path: &Path, target_px: u32) -> PathBuf {

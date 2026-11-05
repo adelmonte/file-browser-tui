@@ -61,6 +61,10 @@ impl ThumbCache {
         }
     }
 
+    pub fn loading(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Whether making a thumbnail for this path already failed.
     pub fn failed(&self, path: &Path) -> bool {
         self.failed.contains(path)
@@ -187,6 +191,12 @@ fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u6
 pub struct Previews(HashSet<String>);
 
 static GLOBAL: std::sync::OnceLock<Previews> = std::sync::OnceLock::new();
+/// `thumbnail_cache_exclude`, resolved.
+static NO_DISK: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+
+fn keep_off_disk(abs: &Path) -> bool {
+    NO_DISK.get().is_some_and(|dirs| dirs.iter().any(|d| abs.starts_with(d)))
+}
 
 /// The startup preview settings, for background workers (folder previews).
 pub fn previews() -> Option<&'static Previews> {
@@ -206,6 +216,15 @@ impl Previews {
             .unwrap_or_else(|| DEFAULT_PLUGINS.iter().map(|s| s.to_string()).collect());
         let p = Self(names.into_iter().collect());
         let _ = GLOBAL.set(p.clone());
+        let home = dirs::home_dir().unwrap_or_default();
+        let _ = NO_DISK.set(config.thumbnail_cache_exclude.iter().map(|d| {
+            let path = match d.strip_prefix("~/") {
+                Some(rest) => home.join(rest),
+                None if d == "~" => home.clone(),
+                None => PathBuf::from(d),
+            };
+            path.canonicalize().unwrap_or(path)
+        }).collect());
         p
     }
 
@@ -251,6 +270,10 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
     let root = thumbnails_root();
     let src_mtime = mtime_secs(&abs);
 
+    if keep_off_disk(&abs) {
+        return generate_in_memory(&abs, mime_type);
+    }
+
     // Reuse any valid thumbnail another app (or we) already made, any size
     for dir in SIZE_DIRS {
         let candidate = root.join(dir).join(&name);
@@ -275,25 +298,7 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
     let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = large.join(format!("{name}.{}-{seq}.tmp.png", std::process::id()));
 
-    let generated = if mime_type.starts_with("video/") {
-        generator::video_thumb(&abs, &tmp)
-    } else if mime_type.starts_with("image/svg") {
-        crate::icons::raster::load_icon(&abs, true, 256)
-    } else if mime_type.starts_with("image/") {
-        generator::image_thumb(&abs)
-    } else if mime_type.starts_with("audio/") {
-        generator::audio_thumb(&abs, &tmp)
-    } else if mime_type == "application/epub+zip" {
-        generator::epub_thumb(&abs)
-    } else if mime_type == "application/pdf" {
-        generator::pdf_thumb(&abs, &tmp)
-    } else if mime_type == "application/vnd.comicbook+zip" {
-        generator::comic_thumb(&abs)
-    } else if mime_type.starts_with("application/vnd.oasis.opendocument.") {
-        generator::opendocument_thumb(&abs)
-    } else {
-        anyhow::bail!("no thumbnailer for {mime_type}");
-    };
+    let generated = generate(&abs, mime_type, &tmp);
     let img = match generated {
         Ok(img) => img,
         Err(e) => {
@@ -319,3 +324,43 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
 }
 
 
+
+/// Run the thumbnailer for this type (some write their result to `tmp`).
+fn generate(abs: &Path, mime_type: &str, tmp: &Path) -> anyhow::Result<image::DynamicImage> {
+    if mime_type.starts_with("video/") {
+        generator::video_thumb(abs, tmp)
+    } else if mime_type.starts_with("image/svg") {
+        crate::icons::raster::load_icon(abs, true, 256)
+    } else if mime_type.starts_with("image/") {
+        generator::image_thumb(abs)
+    } else if mime_type.starts_with("audio/") {
+        generator::audio_thumb(abs, tmp)
+    } else if mime_type == "application/epub+zip" {
+        generator::epub_thumb(abs)
+    } else if mime_type == "application/pdf" {
+        generator::pdf_thumb(abs, tmp)
+    } else if mime_type == "application/vnd.comicbook+zip" {
+        generator::comic_thumb(abs)
+    } else if mime_type.starts_with("application/vnd.oasis.opendocument.") {
+        generator::opendocument_thumb(abs)
+    } else {
+        anyhow::bail!("no thumbnailer for {mime_type}")
+    }
+}
+
+/// A thumbnail for an excluded folder: made fresh, with any scratch file
+/// in the (RAM-backed) runtime dir and gone right after.
+fn generate_in_memory(abs: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let tmp = dir.join(format!("file-browser-tui-thumb-{}-{seq}.png", std::process::id()));
+    let result = if mime_type.starts_with("image/svg") {
+        // Past the icon rasterizer, whose cache is on disk
+        crate::icons::raster::rasterize_svg(abs, 256, &tmp).and_then(|()| Ok(image::open(&tmp)?))
+    } else {
+        generate(abs, mime_type, &tmp)
+    };
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
