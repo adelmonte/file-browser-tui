@@ -60,7 +60,8 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     let outer = Rect { x: area.x + 1, y: area.y, width: chips_x.saturating_sub(area.x + 2), height: 1 };
     search.field_rect = outer;
     let field = Rect { x: outer.x + 1, width: outer.width.saturating_sub(2), ..outer };
-    let mut line = vec![Span::styled("\u{f002} ", Style::default().fg(theme::accent()))];
+    // Laid out like the location bar: a 2-column icon, a space, the text
+    let mut line = Vec::new();
     if search.focused {
         line.extend(crate::lineedit::spans(&search.query, search.cursor, Style::default().fg(theme::text_strong())));
     } else {
@@ -73,7 +74,7 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
             SearchMode::Name => "file name",
             SearchMode::Content => "text inside files",
         };
-        line.push(Span::styled(format!(" {hint}  (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::muted())));
+        line.push(Span::styled(format!("{hint} (Tab: name/content, Shift+Tab: scope)"), Style::default().fg(theme::muted())));
     }
     let field_style = if search.focused {
         Style::default().add_modifier(Modifier::BOLD)
@@ -84,5 +85,10 @@ pub fn render_searchbar(f: &mut Frame, app: &mut App, area: Rect) {
     if !underlay::field(app, 1, outer, theme::get().input) {
         f.render_widget(Block::default().style(Style::default().bg(theme::input())), outer);
     }
-    f.render_widget(Paragraph::new(Line::from(line)).style(field_style), field);
+    let icon_rect = Rect { width: 2.min(field.width), ..field };
+    let text_rect = Rect { x: field.x + 3, width: field.width.saturating_sub(3), ..field };
+    f.render_widget(Paragraph::new(Line::from(line)).style(field_style), text_rect);
+    // The glyph stands in until (or unless) the theme's icon loads over it
+    f.render_widget(Paragraph::new(Span::styled("\u{f002}", Style::default().fg(theme::accent()))), icon_rect);
+    crate::ui::sidebar::draw_icon(f, app, "edit-find", icon_rect, None);
 }
