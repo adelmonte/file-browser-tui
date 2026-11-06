@@ -2119,6 +2119,7 @@ impl App {
         self.path_bar_input = input;
         self.path_bar_cursor = self.path_bar_input.len();
         self.path_bar_all = true;
+        crate::lineedit::forget();
         self.path_completions.clear();
         self.path_completion_sel = None;
     }

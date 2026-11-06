@@ -157,7 +157,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                 _ => None,
             },
             _ => {
-                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+                if lineedit::edit_undoable("conflict", &mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
                     p.invalid = false;
                 }
                 None
@@ -169,7 +169,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
-    // New folder/file/pasted content name prompt
+    // Passphrase: plain editing, no undo history to keep it in
     if let Some(ref mut p) = app.unlock_prompt {
         match ev.code {
             KeyCode::Esc if !p.busy => app.unlock_prompt = None,
@@ -183,12 +183,13 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         }
         return false;
     }
+    // New folder/file/pasted content name prompt
     if let Some(ref mut p) = app.name_prompt {
         match ev.code {
             KeyCode::Esc => { app.name_prompt = None; }
             KeyCode::Enter => { actions::commit_name_prompt(app); }
             _ => {
-                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+                if lineedit::edit_undoable("prompt", &mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
                     p.invalid = false;
                 }
             }
@@ -231,7 +232,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
             KeyCode::Esc => { app.rename_state = None; }
             KeyCode::Enter => { app.commit_rename(); }
             _ => {
-                if lineedit::edit(&mut rename.input, &mut rename.cursor_pos, ev) == Edit::Changed {
+                if lineedit::edit_undoable("rename", &mut rename.input, &mut rename.cursor_pos, ev) == Edit::Changed {
                     rename.invalid = false;
                 }
             }
@@ -243,6 +244,16 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     if app.path_bar_editing {
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
         let alt = ev.modifiers.contains(KeyModifiers::ALT);
+        if lineedit::undo_key("path", &mut app.path_bar_input, &mut app.path_bar_cursor, ev) {
+            app.path_bar_all = false;
+            app.update_path_completions();
+            return false;
+        }
+        let before = (app.path_bar_input.clone(), app.path_bar_cursor);
+        let typed = match ev.code {
+            KeyCode::Char(c) if !ctrl && !alt => Some(c),
+            _ => None,
+        };
         match ev.code {
             KeyCode::Esc => app.cancel_path_edit(),
             KeyCode::Char('a') if ctrl => {
@@ -350,6 +361,9 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
                 }
             }
         }
+        if app.path_bar_editing {
+            lineedit::record("path", before, &app.path_bar_input, typed);
+        }
         return false;
     }
 
@@ -368,7 +382,7 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
             KeyCode::Tab => { search.toggle_mode(); app.search_changed(); }
             KeyCode::BackTab => { search.toggle_scope(); app.search_changed(); }
             _ => {
-                if lineedit::edit(&mut search.query, &mut search.cursor, ev) == Edit::Changed {
+                if lineedit::edit_undoable("search", &mut search.query, &mut search.cursor, ev) == Edit::Changed {
                     app.search_changed();
                 }
             }

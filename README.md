@@ -147,7 +147,7 @@ lists them all, including any you've changed.
 | `Shift+click` / `Ctrl+click` | select a range / add or remove one |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste |
 | `Ctrl+Alt+C` | copy the location |
-| `Ctrl+Z` | undo |
+| `Ctrl+Z` | undo (in a text field, undoes typing; `Ctrl+Shift+Z` redoes) |
 | `F2` | rename |
 | `F10` | new folder |
 | `Delete` / `Shift+Delete` | move to trash / delete permanently |

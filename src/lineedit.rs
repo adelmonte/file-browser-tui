@@ -1,5 +1,6 @@
 //! Emacs/readline-style editing for one-line text fields (path bar, rename,
-//! search): C-a/C-e, C-b/C-f, M-b/M-f, C-u/C-k, C-w, M-d, C-d, C-y, C-t.
+//! search): C-a/C-e, C-b/C-f, M-b/M-f, C-u/C-k, C-w, M-d, C-d, C-y, C-t,
+//! plus Ctrl+Z / Ctrl+Shift+Z to undo and redo.
 
 use std::sync::Mutex;
 
@@ -160,6 +161,84 @@ pub fn edit(text: &mut String, cursor: &mut usize, ev: KeyEvent) -> Edit {
     Edit::Moved
 }
 
+/// Undo history of the field being edited. A field opening with other text
+/// than the history last saw starts a new one, so undo never reaches into
+/// an earlier field's typing.
+struct History {
+    field: &'static str,
+    undo: Vec<(String, usize)>,
+    redo: Vec<(String, usize)>,
+    /// The text after the last recorded change.
+    last: String,
+    /// The last change was typing a character: the next one joins it.
+    typing: bool,
+}
+
+static HISTORY: Mutex<Option<History>> = Mutex::new(None);
+
+/// Drop the undo history (a field opening afresh).
+pub fn forget() {
+    *HISTORY.lock().unwrap() = None;
+}
+
+/// Note a change to `field` from `before` (text, cursor) to `after`.
+/// Consecutive typing is one step, ended by a `/` or space.
+pub fn record(field: &'static str, before: (String, usize), after: &str, typed: Option<char>) {
+    if before.0 == after {
+        return;
+    }
+    let mut guard = HISTORY.lock().unwrap();
+    let h = guard.get_or_insert_with(|| History { field, undo: Vec::new(), redo: Vec::new(), last: String::new(), typing: false });
+    if h.field != field || h.last != before.0 {
+        *h = History { field, undo: Vec::new(), redo: Vec::new(), last: String::new(), typing: false };
+    }
+    if !(h.typing && typed.is_some()) {
+        h.undo.push(before);
+    }
+    h.redo.clear();
+    h.typing = typed.is_some_and(|c| c != '/' && c != ' ');
+    h.last = after.to_string();
+}
+
+/// Ctrl+Z (undo) or Ctrl+Shift+Z (redo) on `field`; true if it was one of
+/// those keys.
+pub fn undo_key(field: &'static str, text: &mut String, cursor: &mut usize, ev: KeyEvent) -> bool {
+    let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
+    let shift = ev.modifiers.contains(KeyModifiers::SHIFT);
+    let redo = match ev.code {
+        KeyCode::Char('z') if ctrl => shift,
+        KeyCode::Char('Z') if ctrl => true,
+        _ => return false,
+    };
+    let mut guard = HISTORY.lock().unwrap();
+    let Some(h) = guard.as_mut().filter(|h| h.field == field && h.last == *text) else { return true; };
+    let (from, to) = if redo { (&mut h.redo, &mut h.undo) } else { (&mut h.undo, &mut h.redo) };
+    if let Some((t, c)) = from.pop() {
+        to.push((std::mem::replace(text, t), *cursor));
+        *cursor = c.min(text.len());
+        h.last = text.clone();
+        h.typing = false;
+    }
+    true
+}
+
+/// `edit`, with undo: Ctrl+Z and Ctrl+Shift+Z, and changes recorded.
+pub fn edit_undoable(field: &'static str, text: &mut String, cursor: &mut usize, ev: KeyEvent) -> Edit {
+    if undo_key(field, text, cursor, ev) {
+        return Edit::Changed;
+    }
+    let before = (text.clone(), *cursor);
+    let result = edit(text, cursor, ev);
+    if result == Edit::Changed {
+        let typed = match ev.code {
+            KeyCode::Char(c) if !ev.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => Some(c),
+            _ => None,
+        };
+        record(field, before, text, typed);
+    }
+    result
+}
+
 /// The text as spans with a block cursor at `cursor`.
 /// Last keypress/click, so text cursors stay solid while typing and blink
 /// when idle (milliseconds since START).
@@ -223,5 +302,32 @@ mod tests {
         edit(&mut t, &mut c, key(KeyCode::Char('e'), ctrl));
         edit(&mut t, &mut c, key(KeyCode::Char('u'), ctrl));
         assert_eq!((t.as_str(), c), ("", 0));
+    }
+
+    #[test]
+    fn undo_and_redo() {
+        let (ctrl, none) = (KeyModifiers::CONTROL, KeyModifiers::NONE);
+        let mut t = "/home/".to_string();
+        let mut c = t.len();
+        for ch in "me/Docs".chars() {
+            edit_undoable("test", &mut t, &mut c, key(KeyCode::Char(ch), none));
+        }
+        edit_undoable("test", &mut t, &mut c, key(KeyCode::Char('w'), ctrl));
+        assert_eq!(t, "/home/me/");
+        let z = key(KeyCode::Char('z'), ctrl);
+        edit_undoable("test", &mut t, &mut c, z);
+        assert_eq!(t, "/home/me/Docs");
+        // Typing is undone a word at a time, each ended by its slash
+        edit_undoable("test", &mut t, &mut c, z);
+        assert_eq!(t, "/home/me/");
+        edit_undoable("test", &mut t, &mut c, z);
+        assert_eq!((t.as_str(), c), ("/home/", 6));
+        edit_undoable("test", &mut t, &mut c, key(KeyCode::Char('z'), ctrl | KeyModifiers::SHIFT));
+        assert_eq!(t, "/home/me/");
+        // Another field (or this one reopened with other text): no history
+        let mut other = "notes.txt".to_string();
+        let mut oc = 0;
+        edit_undoable("test", &mut other, &mut oc, z);
+        assert_eq!(other, "notes.txt");
     }
 }
