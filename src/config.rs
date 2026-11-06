@@ -275,7 +275,7 @@ fn template() -> String {
 # show_hidden = false
 # folders_first = true
 # show_in_groups = true         # Details view: Dolphin's "Show in Groups"
-# icon_size_idx = 7             # 0 (smallest) to 19
+# icon_size_idx = 3             # icon height: 0 (smallest) to 19, also set with Ctrl+Plus/Minus
 # folder_previews = true        # show a folder's pictures on its icon
 # terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
 # home_page = "~"               # the folder it opens in and Alt+Home goes to
