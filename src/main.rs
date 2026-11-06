@@ -223,6 +223,7 @@ fn run(
 
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();
+    let mut last_active = std::time::Instant::now();
 
     'frames: loop {
         // Drain background results (icons, thumbs, dir events, mount events)
@@ -272,13 +273,25 @@ fn run(
         app.queue_all_visible_icons();
 
         // Wait up to a frame for input, then take everything already
-        // queued before drawing again: a burst of wheel events is one frame
-        let frame = Duration::from_millis(16);
-        let batch_start = std::time::Instant::now();
+        // queued before drawing again: a burst of wheel events is one frame.
+        // Idle a while (no input, nothing loading or moving), frames slow to
+        // 10 a second, enough for cursor blinks and notices; input still
+        // ends the wait at once
+        if app.animating() {
+            last_active = std::time::Instant::now();
+        }
+        let frame = if last_active.elapsed() < Duration::from_millis(300) {
+            Duration::from_millis(16)
+        } else {
+            Duration::from_millis(100)
+        };
         let mut timeout = frame;
+        let mut first_event: Option<std::time::Instant> = None;
         while event::poll(timeout)? {
             timeout = Duration::ZERO;
-            if batch_start.elapsed() > frame {
+            last_active = std::time::Instant::now();
+            // A steady stream of events still gets a frame every 16 ms
+            if first_event.get_or_insert_with(std::time::Instant::now).elapsed() > Duration::from_millis(16) {
                 break;
             }
             let ev = event::read()?;

@@ -1493,6 +1493,18 @@ impl App {
     /// Queue icon loads for all visible entries.
     /// Icons and thumbnails for every view on screen: when split, the other
     /// side's wishes are gathered first and planned after this side's.
+    /// Something is moving or arriving on its own (icons loading, a smooth
+    /// scroll, a file operation, a search, a drag): frames go at full rate.
+    pub fn animating(&self) -> bool {
+        self.icon_cache.loading() || self.sidebar_icons.loading() || self.thumb_cache.loading()
+            || (self.scroll_pos - self.scroll_target).abs() > 0.01
+            || self.fileops.busy()
+            || self.search.as_ref().is_some_and(|s| s.running)
+            || self.band.is_some()
+            || !matches!(self.drag_state, DragState::Idle)
+            || self.dnd.collecting()
+    }
+
     pub fn queue_all_visible_icons(&mut self) {
         self.other_thumb_jobs.clear();
         if self.split() {
