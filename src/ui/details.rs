@@ -54,15 +54,11 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
     let lines: Vec<DRow> = app.details_rows.iter().skip(app.scroll_offset).take(visible).cloned().collect();
     let shown: Vec<usize> = lines.iter().filter_map(|l| if let DRow::Entry(i) = l { Some(*i) } else { None }).collect();
 
-    // Folder "sizes" are item counts, read for the visible rows only
-    let show_hidden = app.show_hidden;
-    for e in shown.iter().map(|&i| &app.listing.entries[i]).filter(|e| e.is_dir) {
-        app.dir_counts.entry(e.path.clone()).or_insert_with(|| {
-            std::fs::read_dir(&e.path).ok().map(|rd| rd.filter_map(|d| d.ok())
-                .filter(|d| show_hidden || !d.file_name().to_string_lossy().starts_with('.'))
-                .count())
-        });
-    }
+    // Folder "sizes" are item counts, read in the background for the
+    // visible rows only
+    let folders: Vec<std::path::PathBuf> = shown.iter().map(|&i| &app.listing.entries[i])
+        .filter(|e| e.is_dir).map(|e| e.path.clone()).collect();
+    app.want_counts(&folders);
 
     let rows: Vec<Row> = lines.iter()
         .map(|line| {
@@ -80,7 +76,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::raw(format!("   {}", e.name)),
             ]);
             let size = if e.is_dir {
-                match app.dir_counts.get(&e.path).copied().flatten() {
+                match app.dir_counts.get(&e.path).and_then(|&(n, _)| n) {
                     Some(1) => "1 item".to_string(),
                     Some(n) => format!("{n} items"),
                     None => "\u{2014}".to_string(),

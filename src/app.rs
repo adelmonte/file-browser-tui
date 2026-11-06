@@ -167,7 +167,7 @@ per_view! {
     details_headers: Vec<(Rect, SortField)>,
     multi_selection: std::collections::HashSet<usize>,
     expanded: std::collections::HashSet<PathBuf>,
-    dir_counts: HashMap<PathBuf, Option<usize>>,
+    dir_counts: HashMap<PathBuf, (Option<usize>, u64)>,
     selection_anchor: Option<usize>,
     grid_cols: u16,
     icon_bands: Vec<IconBand>,
@@ -345,7 +345,7 @@ pub struct App {
     /// Folders expanded in place in the Details view.
     pub expanded: std::collections::HashSet<PathBuf>,
     /// Item counts shown as folder sizes in Details (None = unreadable).
-    pub dir_counts: HashMap<PathBuf, Option<usize>>,
+    pub dir_counts: HashMap<PathBuf, (Option<usize>, u64)>,
     pub selection_anchor: Option<usize>,
 
     // Path bar editing
@@ -409,6 +409,14 @@ pub struct App {
     thumb_depth: HashMap<PathBuf, Vec<(PathBuf, String)>>,
     prefetched_px: u32,
     prefetch_tx: mpsc::Sender<(PathBuf, bool)>,
+    /// Details view folder item counts, read in the background: (folder,
+    /// with hidden files, generation) out, the count back.
+    count_tx: mpsc::Sender<(PathBuf, bool, u64)>,
+    count_rx: mpsc::Receiver<(PathBuf, bool, u64, Option<usize>)>,
+    /// Counts older than this are shown but read again (bumped on reload).
+    pub count_gen: u64,
+    /// Generation last asked for, per folder, so each is asked once.
+    pub count_asked: HashMap<PathBuf, u64>,
     prefetch_rx: mpsc::Receiver<Vec<PrefetchItem>>,
     pub dirstates: DirStates,
 
@@ -492,6 +500,7 @@ impl App {
             key_problems.push(format!("thumbnails: unknown {} (known: {})", unknown.join(", "), kinds.join(", ")));
         }
         let (prefetch_tx, prefetch_rx) = spawn_prefetch_lister();
+        let (count_tx, count_rx) = spawn_counter();
         if let Some(t) = &config.theme {
             match t.clone().try_into::<crate::ui::theme::Theme>() {
                 Ok(t) => crate::ui::theme::set(t),
@@ -507,6 +516,10 @@ impl App {
             thumb_depth: HashMap::new(),
             prefetched_px: 0,
             prefetch_tx,
+            count_tx,
+            count_rx,
+            count_gen: 0,
+            count_asked: HashMap::new(),
             prefetch_rx,
             watched_path: cwd.clone(),
             sidebar_w: config.sidebar_w.clamp(10, 50),
@@ -677,7 +690,12 @@ impl App {
         if self.grouped() {
             listing.entries = crate::ui::groups::arrange(listing.entries, self.sort.field, self.sort.ascending);
         }
-        self.dir_counts.clear();
+        // Counts stay on screen while they're read again: a reload (a file
+        // changed here) mustn't blank the size column
+        self.count_gen += 1;
+        if self.dir_counts.len() > 5000 {
+            self.dir_counts.clear();
+        }
         self.icons_grace_until = std::time::Instant::now() + std::time::Duration::from_millis(300);
 
         self.restore_mimes(&mut listing.entries);
@@ -1720,6 +1738,12 @@ impl App {
                 (Err(e), None) => self.notify(format!("Couldn't mount {device}: {e}")),
             }
         }
+        while let Ok((path, hidden, generation, n)) = self.count_rx.try_recv() {
+            // Counted with the hidden-files setting that's still on
+            if hidden == self.show_hidden {
+                self.dir_counts.insert(path, (n, generation));
+            }
+        }
         while let Ok(notice) = self.job_rx.try_recv() {
             self.notify(notice);
         }
@@ -2166,6 +2190,40 @@ impl App {
                 }
             }
     }
+}
+
+/// Ask for item counts of folders shown in Details, unless already known
+/// for this generation or asked for.
+impl App {
+    pub fn want_counts(&mut self, folders: &[PathBuf]) {
+        for path in folders {
+            let fresh = self.dir_counts.get(path).is_some_and(|&(_, g)| g >= self.count_gen);
+            if fresh || self.count_asked.get(path) == Some(&self.count_gen) {
+                continue;
+            }
+            self.count_asked.insert(path.clone(), self.count_gen);
+            let _ = self.count_tx.send((path.clone(), self.show_hidden, self.count_gen));
+        }
+    }
+}
+
+/// Background counter of folder items (Details view sizes), so a slow or
+/// dead network folder never stalls drawing.
+#[allow(clippy::type_complexity)]
+fn spawn_counter() -> (mpsc::Sender<(PathBuf, bool, u64)>, mpsc::Receiver<(PathBuf, bool, u64, Option<usize>)>) {
+    let (tx, rx) = mpsc::channel::<(PathBuf, bool, u64)>();
+    let (out_tx, out_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok((path, hidden, generation)) = rx.recv() {
+            let n = std::fs::read_dir(&path).ok().map(|rd| rd.filter_map(|d| d.ok())
+                .filter(|d| hidden || !d.file_name().to_string_lossy().starts_with('.'))
+                .count());
+            if out_tx.send((path, hidden, generation, n)).is_err() {
+                break;
+            }
+        }
+    });
+    (tx, out_rx)
 }
 
 /// Background lister for prefetching: a folder's first items roughly as
