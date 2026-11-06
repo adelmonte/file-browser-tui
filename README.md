@@ -6,10 +6,17 @@
 
 A Dolphin-like file manager for [kitty](https://sw.kovidgoyal.net/kitty/), built with
 [ratatui](https://ratatui.rs). It has Dolphin's look and habits: a places sidebar, an
-icon grid with real thumbnails, breadcrumbs, right-click menus and Dolphin's shortcuts.
-It uses kitty's graphics to draw your icon theme, thumbnails and translucent menus
-right in the terminal, and follows the freedesktop standards for the thumbnail cache,
-trash, file types and default apps. Everything else is set in its own config file.
+icon grid with real thumbnails, a clickable path bar, right-click menus and Dolphin's
+shortcuts. It uses kitty's graphics to draw your icon theme, thumbnails and rounded
+menus right in the terminal, and follows the freedesktop standards for the thumbnail
+cache, trash, file types and default apps. Everything else is set in its own config
+file.
+
+It's as much a mouse app as a keyboard one. Click, double-click, Shift- and
+Ctrl-click to select, drag a box around items, drag files onto folders, places or the
+other side of a split, right-click anything for its menu, middle-click a folder to open
+it in a tab, scroll with the wheel, and drag the sidebar's edge or the scrollbar. Every
+action also has a keyboard shortcut.
 
 ## Features
 
@@ -28,7 +35,8 @@ trash, file types and default apps. Everything else is set in its own config fil
 - **Places sidebar**: drag to reorder, right-click to add or remove. Drives show how
   full they are, and removable drives and network mounts get an eject button.
   Phones paired with KDE Connect show up too.
-- **Location bar**: clickable breadcrumbs, or type a path with completion
+- **Location bar**: each folder in the path is clickable (click `Pictures` in
+  `/home/me/Pictures/Wallpapers/` to go there), or type a path with completion
   (`Ctrl+L`, `F6`, `Alt+D`).
 - **Search** by file name or inside files, in the current folder or below.
 - **File operations**: copy, move, trash and delete, with a progress bar, time left and
@@ -56,7 +64,7 @@ trash, file types and default apps. Everything else is set in its own config fil
 
 - [kitty](https://sw.kovidgoyal.net/kitty/) 0.40 or newer (0.47 or newer to drop files in
   from other programs). The app is made for kitty: icons, thumbnails, menus and
-  centered labels are drawn with kitty's graphics and text sizing. Other terminals
+  centered labels are drawn with kitty's graphics and text sizing protocols. Other terminals
   can start it, but without any of the images.
 - A [Nerd Font](https://www.nerdfonts.com/) for menu and toolbar symbols.
 - An icon theme (Breeze, Papirus, Adwaita, ...) and `rsvg-convert` (librsvg) to draw
