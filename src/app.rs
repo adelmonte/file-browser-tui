@@ -1487,21 +1487,7 @@ impl App {
 
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).
     pub fn xdg_folder_icon(path: &std::path::Path) -> Option<String> {
-        macro_rules! check {
-            ($expr:expr, $name:literal) => {
-                if $expr.as_deref() == Some(path) { return Some($name.into()); }
-            };
-        }
-        check!(dirs::home_dir(),     "user-home");
-        check!(dirs::download_dir(), "folder-download");
-        check!(dirs::audio_dir(),    "folder-music");
-        check!(dirs::picture_dir(),  "folder-pictures");
-        check!(dirs::video_dir(),    "folder-videos");
-        check!(dirs::document_dir(), "folder-documents");
-        check!(dirs::desktop_dir(),  "user-desktop");
-        check!(dirs::template_dir(), "folder-templates");
-        check!(dirs::public_dir(),   "folder-publicshare");
-        None
+        crate::icons::resolver::xdg_icon(path).map(str::to_string)
     }
 
     /// Queue icon loads for all visible entries.

@@ -111,3 +111,23 @@ pub fn folder_icon(dir: &Path) -> Option<String> {
     FOLDER_ICONS.get()?.get(dir).cloned()
 }
 
+/// The icon of a standard folder (home, Downloads, Music, ...), if `dir` is
+/// one. Looked up once: each `dirs` lookup but home reads user-dirs.dirs
+/// from disk, and this runs for every folder on screen every frame.
+pub fn xdg_icon(dir: &Path) -> Option<&'static str> {
+    static XDG: std::sync::OnceLock<Vec<(PathBuf, &'static str)>> = std::sync::OnceLock::new();
+    XDG.get_or_init(|| {
+        [
+            (dirs::home_dir(), "user-home"),
+            (dirs::desktop_dir(), "user-desktop"),
+            (dirs::download_dir(), "folder-download"),
+            (dirs::audio_dir(), "folder-music"),
+            (dirs::picture_dir(), "folder-pictures"),
+            (dirs::video_dir(), "folder-videos"),
+            (dirs::document_dir(), "folder-documents"),
+            (dirs::template_dir(), "folder-templates"),
+            (dirs::public_dir(), "folder-publicshare"),
+        ].into_iter().filter_map(|(d, icon)| Some((d?, icon))).collect()
+    }).iter().find(|(d, _)| d == dir).map(|&(_, icon)| icon)
+}
+

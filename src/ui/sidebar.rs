@@ -284,19 +284,7 @@ fn place_icon(path: &str, hint: Option<&str>) -> String {
     if let Some(h) = hint {
         return h.to_string();
     }
-    let p = std::path::Path::new(path);
-    let xdg = [
-        (dirs::home_dir(), "user-home"),
-        (dirs::desktop_dir(), "user-desktop"),
-        (dirs::download_dir(), "folder-download"),
-        (dirs::audio_dir(), "folder-music"),
-        (dirs::picture_dir(), "folder-pictures"),
-        (dirs::video_dir(), "folder-videos"),
-        (dirs::document_dir(), "folder-documents"),
-        (dirs::template_dir(), "folder-templates"),
-        (dirs::public_dir(), "folder-publicshare"),
-    ];
-    if let Some((_, name)) = xdg.iter().find(|(d, _)| d.as_deref() == Some(p)) {
+    if let Some(name) = crate::icons::resolver::xdg_icon(std::path::Path::new(path)) {
         return name.to_string();
     }
     if path.contains("Trash") { "user-trash".into() } else { "folder".into() }
