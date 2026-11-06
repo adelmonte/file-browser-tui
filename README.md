@@ -174,8 +174,8 @@ fields and dialogs, like typing a name, stay fixed.)
 new_folder = ["F10", "Alt+F"]
 rename = ["F2", "Alt+R"]
 up = ["Alt+Up", "Shift+Backspace"]
-move_down = ["Down", "J"]
-move_up = ["Up", "K"]
+move_down = ["Down", "j"]
+move_up = ["Up", "k"]
 ```
 
 ### Colors
