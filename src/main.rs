@@ -35,6 +35,7 @@ use app::App;
 use config::Config;
 
 fn main() -> anyhow::Result<()> {
+    let launched = std::time::Instant::now();
     match std::env::args().nth(1).as_deref() {
         Some("--check") => std::process::exit(check::run()),
         Some("--kitty") => {
@@ -105,9 +106,10 @@ fn main() -> anyhow::Result<()> {
     });
 
     tracing::info!(
-        "Protocol: {:?}, font_size: {:?}",
+        "Protocol: {:?}, font_size: {:?} (terminal answered after {:?})",
         picker.protocol_type(),
-        picker.font_size()
+        picker.font_size(),
+        launched.elapsed()
     );
 
     // Background event channels
@@ -151,7 +153,8 @@ fn main() -> anyhow::Result<()> {
     if is_kitty {
         dnd::enable();
     }
-    let result = run(&mut app, &mut terminal, dir_watcher.as_ref());
+    tracing::info!("app ready after {:?}", launched.elapsed());
+    let result = run(&mut app, &mut terminal, dir_watcher.as_ref(), launched);
     if is_kitty {
         dnd::disable();
     }
@@ -198,6 +201,7 @@ fn run(
     app: &mut App,
     terminal: &mut ratatui::DefaultTerminal,
     dir_watcher: Option<&fs::watcher::DirWatcher>,
+    launched: std::time::Instant,
 ) -> anyhow::Result<()> {
     // Bootstrap layout before first render so queue_visible_icons has correct areas
     let sz = terminal.size()?;
@@ -221,6 +225,10 @@ fn run(
         app.drain_channels();
     }
 
+    tracing::info!(
+        "first frame after {:?} (still loading: icons {}, sidebar {}, thumbnails {}, devices {})",
+        launched.elapsed(), app.icon_cache.loading(), app.sidebar_icons.loading(), app.thumb_cache.loading(), !app.devices_ready
+    );
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();
     let mut last_active = std::time::Instant::now();
