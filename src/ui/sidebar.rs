@@ -122,6 +122,15 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                 app.eject_rects.push((r, i));
                 text_w -= 3;
             }
+            // A menu over the end of the row (the View menu over the
+            // sidebar's right edge) cuts the name short where it starts; the
+            // name keeps its look rather than turning plain
+            let row_rect = Rect { x: text_x, y, width: text_w, height: h };
+            if let Some(mx) = menu_rects.iter().filter(|m| m.intersects(row_rect)).map(|m| m.x).min()
+                && mx > text_x
+            {
+                text_w = text_w.min(mx - text_x);
+            }
             let name: String = row.name.chars().take(text_w as usize).collect();
             let name_y = y;
             let name_rect = Rect { x: text_x, y, width: text_w, height: h };
