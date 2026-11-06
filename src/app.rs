@@ -421,6 +421,11 @@ pub struct App {
     /// Kitty sized text wanted this frame, with the cells it covers: written
     /// after the frame only if new, and only where nothing was drawn over it.
     pub post_text: Vec<(Rect, String)>,
+    /// Kitty image ids sent for each item's icon or thumbnail, freed when
+    /// it leaves the screen.
+    pub kitty_ids: HashMap<PathBuf, Vec<u32>>,
+    /// Ids to free after this frame.
+    pub kitty_free: Vec<u32>,
     /// What `post_text` put on screen last frame (still there, as ratatui
     /// leaves those cells alone); cleared when the screen is.
     pub post_text_shown: std::collections::HashSet<(Rect, String)>,
@@ -621,6 +626,8 @@ impl App {
             kitty_transmits: Vec::new(),
             post_draw: Vec::new(),
             post_text: Vec::new(),
+            kitty_ids: HashMap::new(),
+            kitty_free: Vec::new(),
             post_text_shown: std::collections::HashSet::new(),
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
@@ -1830,6 +1837,8 @@ impl App {
         self.prev_frame_images = std::mem::take(&mut self.frame_images);
 
         if delete_all {
+            // Every protocol goes, so every image sent for one can be freed
+            self.kitty_free.extend(self.kitty_ids.drain().flat_map(|(_, ids)| ids));
             // Deleted along with everything else; re-placed next frame
             self.underlays.clear();
             self.band_uploaded = None;
@@ -1843,6 +1852,10 @@ impl App {
         for (path, _) in &deletions {
             self.icon_cache.invalidate(path);
             self.thumb_cache.invalidate(path);
+            // Built and sent anew when it's back: free what kitty holds
+            if let Some(ids) = self.kitty_ids.remove(path) {
+                self.kitty_free.extend(ids);
+            }
         }
         (deletions.into_iter().map(|(_, r)| r).collect(), false)
     }

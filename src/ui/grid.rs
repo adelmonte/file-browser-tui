@@ -357,7 +357,19 @@ pub(crate) fn render_cell_image(
             // Per-cell placeholders: overlays drawn later cover the image
             // cell by cell instead of the image having to be hidden.
             if app.picker.protocol_type() == ProtocolType::Kitty {
+                let sent = app.kitty_transmits.len();
                 kitty::split_placeholder_rows(buf, icon_rect, &mut app.kitty_transmits);
+                // Note the images sent for this item, to free them in kitty
+                // when it leaves the screen
+                let ids: Vec<u32> = app.kitty_transmits[sent..].iter().filter_map(|t| kitty::image_id(t)).collect();
+                if !ids.is_empty() {
+                    let known = app.kitty_ids.entry(entry_path.clone()).or_default();
+                    for id in ids {
+                        if !known.contains(&id) {
+                            known.push(id);
+                        }
+                    }
+                }
             }
             true
         } else {

@@ -254,6 +254,10 @@ fn run(
         // Clean up Kitty placements for images that vanished or changed
         // this frame (occluded by overlays, scrolled away, dir changed, ...)
         let (deletions, delete_all) = app.kitty_frame_diff();
+        if is_kitty && !app.kitty_free.is_empty() {
+            let mut out = std::io::stdout().lock();
+            let _ = ui::kitty::free_images(&mut out, &std::mem::take(&mut app.kitty_free));
+        }
         if is_kitty && (delete_all || !deletions.is_empty()) {
             let mut out = std::io::stdout().lock();
             if delete_all {

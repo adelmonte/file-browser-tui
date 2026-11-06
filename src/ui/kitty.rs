@@ -17,6 +17,24 @@ pub fn delete_at(out: &mut impl Write, rects: &[Rect]) -> std::io::Result<()> {
     out.flush()
 }
 
+/// The image id in a transmission (`\x1b_G...,i=123,...`).
+pub fn image_id(transmit: &str) -> Option<u32> {
+    let start = transmit.find("\x1b_G")? + 3;
+    let keys = &transmit[start..transmit[start..].find(';').map_or(transmit.len(), |e| start + e)];
+    keys.split(',').find_map(|kv| kv.strip_prefix("i=")?.parse().ok())
+}
+
+/// Free images' data in kitty (uppercase `I`: placements and stored data).
+/// Placeholder images keep their data until freed; never freeing them
+/// fills kitty's 320 MB quota, and then kitty drops older images, which may
+/// still be on screen.
+pub fn free_images(out: &mut impl Write, ids: &[u32]) -> std::io::Result<()> {
+    for id in ids {
+        write!(out, "\x1b_Ga=d,d=I,i={id},q=2\x1b\\")?;
+    }
+    Ok(())
+}
+
 /// Delete every visible placement (bulk changes: navigation, view switch, resize).
 /// Kitty text sizing protocol (OSC 66): write `text` at normal size,
 /// vertically centered in a block `rows` tall, at cell (`x`, `y`). Returns
@@ -155,6 +173,12 @@ static DIACRITICS: [char; 297] = [
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn image_id_from_transmission() {
+        assert_eq!(super::image_id("\x1b_Gq=2,i=487046015,a=T,U=1,f=32,m=1;AAAA"), Some(487046015));
+        assert_eq!(super::image_id("\x1b_Gq=2,m=0;i=5"), None);
+    }
+
     #[test]
     fn centered_text_keeps_a_spare_column() {
         let (s, used) = super::centered_text(0, 0, 2, 20, "A very long place name", (0, 0, 0), None);
