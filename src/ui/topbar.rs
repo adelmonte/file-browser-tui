@@ -97,10 +97,9 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         app.path_field_x = crumbs_area.x;
         let style = Style::default().fg(theme::text_strong());
         let line = if app.path_bar_all {
-            Line::from(vec![
-                Span::styled(app.path_bar_input.clone(), style.bg(theme::selection())),
-                Span::styled(crate::lineedit::bar_cursor().to_string(), style),
-            ])
+            // In the menus' highlight color, without a cursor, so it reads
+            // as selected text and not as a field to type at the end of
+            Line::from(Span::styled(app.path_bar_input.clone(), style.bg(theme::rgb(theme::get().highlight))))
         } else {
             Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, style))
         };
