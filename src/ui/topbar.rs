@@ -94,7 +94,16 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
 
     let crumbs_area = Rect { x: body.x + 3, width: body.width.saturating_sub(3), ..body };
     if app.path_bar_editing {
-        let line = Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, Style::default().fg(theme::text_strong())));
+        app.path_field_x = crumbs_area.x;
+        let style = Style::default().fg(theme::text_strong());
+        let line = if app.path_bar_all {
+            Line::from(vec![
+                Span::styled(app.path_bar_input.clone(), style.bg(theme::selection())),
+                Span::styled(crate::lineedit::bar_cursor().to_string(), style),
+            ])
+        } else {
+            Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, style))
+        };
         f.render_widget(Paragraph::new(line), crumbs_area);
         return;
     }

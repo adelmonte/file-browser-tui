@@ -241,24 +241,92 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
 
     // Path bar editing
     if app.path_bar_editing {
+        let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = ev.modifiers.contains(KeyModifiers::ALT);
         match ev.code {
             KeyCode::Esc => app.cancel_path_edit(),
+            KeyCode::Char('a') if ctrl => {
+                app.path_bar_all = true;
+                app.path_bar_cursor = app.path_bar_input.len();
+            }
+            KeyCode::Char('c' | 'x') if ctrl => {
+                // The whole location, without the slash added for typing
+                let text = app.path_bar_input.trim();
+                let text = if text.len() > 1 { text.trim_end_matches('/') } else { text };
+                crate::clipboard::write(None, text.as_bytes());
+                if ev.code == KeyCode::Char('x') {
+                    app.path_bar_input.clear();
+                    app.path_bar_cursor = 0;
+                    app.path_bar_all = false;
+                    app.update_path_completions();
+                } else {
+                    app.notify("Location copied".into());
+                }
+            }
+            KeyCode::Char('v') if ctrl => {
+                if let Some(data) = crate::clipboard::read(None) {
+                    let text: String = String::from_utf8_lossy(&data).trim().chars().filter(|c| !c.is_control()).collect();
+                    // A copied file:// link pastes as its path
+                    let text = text.strip_prefix("file://").map(|p| crate::dnd::percent_decode(p).to_string_lossy().to_string()).unwrap_or(text);
+                    if app.path_bar_all {
+                        app.path_bar_input.clear();
+                        app.path_bar_cursor = 0;
+                        app.path_bar_all = false;
+                    }
+                    app.path_bar_input.insert_str(app.path_bar_cursor, &text);
+                    app.path_bar_cursor += text.len();
+                    app.update_path_completions();
+                }
+            }
             KeyCode::Enter => {
                 let target = if let Some(sel) = app.path_completion_sel {
                     app.path_completions.get(sel).cloned()
                 } else {
-                    // Components drop a trailing slash ("/home/me/" is /home/me)
-                    Some(std::path::Path::new(app.path_bar_input.trim()).components().collect())
+                    // What's typed, or the folder it most likely means
+                    crate::fs::pathmatch::resolve(std::path::Path::new(app.path_bar_input.trim()))
                 };
-                app.cancel_path_edit();
-                if let Some(path) = target
-                    && path.is_dir() { app.navigate_to(path); }
+                match target {
+                    Some(path) => {
+                        app.cancel_path_edit();
+                        app.navigate_to(path);
+                    }
+                    None => app.notify(format!("No folder like {}", app.path_bar_input.trim())),
+                }
+            }
+            _ if app.path_bar_all && !matches!(ev.code, KeyCode::Up | KeyCode::Down | KeyCode::Tab) => {
+                // The selection goes; arrows land at its ends, typing or
+                // deleting replaces it
+                app.path_bar_all = false;
+                let len = app.path_bar_input.len();
+                match ev.code {
+                    KeyCode::Right | KeyCode::End => app.path_bar_cursor = len,
+                    KeyCode::Char('e' | 'f') if ctrl => app.path_bar_cursor = len,
+                    KeyCode::Left | KeyCode::Home => app.path_bar_cursor = 0,
+                    KeyCode::Char('b') if ctrl => app.path_bar_cursor = 0,
+                    KeyCode::Backspace | KeyCode::Delete => {
+                        app.path_bar_input.clear();
+                        app.path_bar_cursor = 0;
+                        app.update_path_completions();
+                    }
+                    KeyCode::Char(_) if !ctrl && !alt => {
+                        app.path_bar_input.clear();
+                        app.path_bar_cursor = 0;
+                        lineedit::edit(&mut app.path_bar_input, &mut app.path_bar_cursor, ev);
+                        app.update_path_completions();
+                    }
+                    _ => {
+                        if lineedit::edit(&mut app.path_bar_input, &mut app.path_bar_cursor, ev) == Edit::Changed {
+                            app.update_path_completions();
+                        }
+                    }
+                }
             }
             KeyCode::Tab => {
                 let sel = app.path_completion_sel.unwrap_or(0);
                 if let Some(p) = app.path_completions.get(sel).cloned() {
                     app.path_bar_input = p.to_string_lossy().to_string() + "/";
                     app.path_bar_cursor = app.path_bar_input.len();
+                    app.path_bar_all = false;
                     app.update_path_completions();
                 }
             }
@@ -950,7 +1018,14 @@ fn handle_topbar_click(app: &mut App, col: u16, row: u16) {
     {
         if path != app.cwd { app.navigate_to(path); }
     } else if contains(app.topbar_path_rect, col, row) {
-        app.start_path_edit();
+        if app.path_bar_editing {
+            // A click in the text drops the selection and puts the cursor there
+            app.path_bar_all = false;
+            let n = col.saturating_sub(app.path_field_x) as usize;
+            app.path_bar_cursor = app.path_bar_input.char_indices().nth(n).map_or(app.path_bar_input.len(), |(i, _)| i);
+        } else {
+            app.start_path_edit();
+        }
     }
 }
 

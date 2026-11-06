@@ -352,6 +352,11 @@ pub struct App {
     pub path_bar_editing: bool,
     pub path_bar_input: String,
     pub path_bar_cursor: usize,
+    /// The whole path is selected (as it opens, or after Ctrl+A): typing
+    /// replaces it, Ctrl+C copies it, arrows drop the selection.
+    pub path_bar_all: bool,
+    /// Column where the path text starts, for clicks that place the cursor.
+    pub path_field_x: u16,
     pub path_completions: Vec<PathBuf>,
     pub path_completion_sel: Option<usize>,
     /// Actual rendered completion dropdown rect (for hit-testing).
@@ -584,6 +589,8 @@ impl App {
             path_bar_editing: false,
             path_bar_input: String::new(),
             path_bar_cursor: 0,
+            path_bar_all: false,
+            path_field_x: 0,
             path_completions: Vec::new(),
             path_completion_sel: None,
             completions_rect: Rect::default(),
@@ -2086,41 +2093,18 @@ impl App {
         self.selection = self.listing.entries.iter().position(|e| e.path == new_path);
     }
 
-    /// Recompute path completions from the current `path_bar_input`.
+    /// Recompute path completions from the current `path_bar_input`:
+    /// folders in the typed parent (itself matched loosely) whose names
+    /// start with, contain or roughly spell the last part, best first.
     pub fn update_path_completions(&mut self) {
-        let input = self.path_bar_input.as_str();
-        let path = std::path::Path::new(input);
-
-        let (dir, prefix): (&std::path::Path, &str) = if input.ends_with('/') {
-            (path, "")
-        } else {
-            let parent = path.parent().unwrap_or(std::path::Path::new("/"));
-            let pfx = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            (parent, pfx)
+        let input = self.path_bar_input.trim();
+        let (parent, last) = match input.rsplit_once('/') {
+            Some((p, l)) => (if p.is_empty() { "/" } else { p }, l),
+            None => ("/", input),
         };
-
-        self.path_completions = if dir.exists() {
-            let prefix_lc = prefix.to_lowercase();
-            let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-                .map(|rd| {
-                    rd.filter_map(|e| e.ok())
-                        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                        .map(|e| e.path())
-                        .filter(|p| {
-                            p.file_name()
-                                .and_then(|n| n.to_str())
-                                .map(|n| n.to_lowercase().starts_with(&prefix_lc))
-                                .unwrap_or(false)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            entries.sort();
-            entries.truncate(10);
-            entries
-        } else {
-            vec![]
-        };
+        self.path_completions = crate::fs::pathmatch::resolve(std::path::Path::new(parent))
+            .map(|dir| crate::fs::pathmatch::candidates(&dir, last, 10))
+            .unwrap_or_default();
         self.path_completion_sel = None;
     }
 
@@ -2134,12 +2118,14 @@ impl App {
         }
         self.path_bar_input = input;
         self.path_bar_cursor = self.path_bar_input.len();
+        self.path_bar_all = true;
         self.path_completions.clear();
         self.path_completion_sel = None;
     }
 
     pub fn cancel_path_edit(&mut self) {
         self.path_bar_editing = false;
+        self.path_bar_all = false;
         self.path_bar_input.clear();
         self.path_completions.clear();
         self.path_completion_sel = None;

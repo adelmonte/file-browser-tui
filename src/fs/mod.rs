@@ -1,4 +1,5 @@
 pub mod mounts;
+pub mod pathmatch;
 pub mod watcher;
 
 use std::{

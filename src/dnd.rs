@@ -315,7 +315,7 @@ pub fn parse_uri_list(text: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-fn percent_decode(s: &str) -> std::ffi::OsString {
+pub fn percent_decode(s: &str) -> std::ffi::OsString {
     use std::os::unix::ffi::OsStringExt;
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());

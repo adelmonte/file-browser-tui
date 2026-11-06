@@ -40,7 +40,9 @@ action also has a keyboard shortcut.
   last folder that's still there.
 - **Location bar**: each folder in the path is clickable (click `Pictures` in
   `/home/me/Pictures/Wallpapers/` to go there), or type a path with completion
-  (`Ctrl+L`, `F6`, `Alt+D`).
+  (`Ctrl+L`, `F6`, `Alt+D`). It opens with the path selected: `Ctrl+C` copies it,
+  typing replaces it, `→` adds to the end; `Ctrl+A` selects it again. Close is good
+  enough: `~/.cac` goes to `.cache`, `/hme/me/dcuments` to `Documents`.
 - **Search** by file name or inside files, in the current folder or below.
 - **File operations**: copy, move, trash and delete, with a progress bar, time left and
   cancel. Name clashes ask like Dolphin does: Overwrite (or Write Into for folders),
