@@ -224,6 +224,7 @@ fn run(
     let is_kitty = app.picker.protocol_type() == ProtocolType::Kitty;
     let mut title_path = std::path::PathBuf::new();
     let mut last_active = std::time::Instant::now();
+    let mut last_frame_hash = 0u64;
 
     'frames: loop {
         // Drain background results (icons, thumbs, dir events, mount events)
@@ -237,7 +238,20 @@ fn run(
             let mut out = std::io::stdout().lock();
             let _ = out.write_all(b"\x1b[?2026h");
         }
-        terminal.draw(|f| ui::render(f, app))?;
+        let frame_hash = {
+            use std::hash::{Hash, Hasher};
+            let done = terminal.draw(|f| ui::render(f, app))?;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            done.buffer.hash(&mut h);
+            h.finish()
+        };
+        // Anything that changed the picture (an icon or preview arriving,
+        // a list filling in) keeps frames at full rate for a while, so work
+        // still coming in shows at once rather than at the idle pace
+        if frame_hash != last_frame_hash || !app.post_draw.is_empty() {
+            last_active = std::time::Instant::now();
+        }
+        last_frame_hash = frame_hash;
         // Window title follows the current folder, like Dolphin's
         if app.cwd != title_path {
             title_path = app.cwd.clone();
