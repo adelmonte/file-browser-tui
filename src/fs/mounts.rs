@@ -252,6 +252,9 @@ pub fn spawn_mount_watcher(tx: mpsc::Sender<MountEvent>) {
         let dev_watch = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC).ok()
             .filter(|i| i.add_watch("/dev", AddWatchFlags::IN_CREATE | AddWatchFlags::IN_DELETE).is_ok());
         let mut last: Option<Vec<(String, MountKind, String)>> = None;
+        if let Ok(devices) = parse_mountinfo() {
+            let _ = tx.send(MountEvent::Updated(devices));
+        }
 
         loop {
             let mut fds = vec![PollFd::new(

@@ -215,7 +215,7 @@ fn run(
     ui::sidebar::request_icons(app);
     let started = std::time::Instant::now();
     while started.elapsed() < Duration::from_millis(150)
-        && (app.icon_cache.loading() || app.sidebar_icons.loading() || app.thumb_cache.loading())
+        && (app.icon_cache.loading() || app.sidebar_icons.loading() || app.thumb_cache.loading() || !app.devices_ready)
     {
         std::thread::sleep(Duration::from_millis(2));
         app.drain_channels();

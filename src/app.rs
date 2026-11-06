@@ -426,6 +426,8 @@ pub struct App {
     pub kitty_ids: HashMap<PathBuf, Vec<u32>>,
     /// Ids to free after this frame.
     pub kitty_free: Vec<u32>,
+    /// The mount watcher's first device list has arrived.
+    pub devices_ready: bool,
     /// What `post_text` put on screen last frame (still there, as ratatui
     /// leaves those cells alone); cleared when the screen is.
     pub post_text_shown: std::collections::HashSet<(Rect, String)>,
@@ -628,6 +630,7 @@ impl App {
             post_text: Vec::new(),
             kitty_ids: HashMap::new(),
             kitty_free: Vec::new(),
+            devices_ready: false,
             post_text_shown: std::collections::HashSet::new(),
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
@@ -1698,17 +1701,16 @@ impl App {
 
         if let Some(MountEvent::Updated(devs)) = self.mount_event_rx.try_iter().last() {
             self.devices = devs;
+            self.devices_ready = true;
             self.leave_if_gone();
             self.with_other_pane(|a| a.leave_if_gone());
         }
         while let Ok((device, result)) = self.mounted_rx.try_recv() {
             let prompt = self.unlock_prompt.as_mut().filter(|p| p.device == device);
             match (result, prompt) {
+                // The device list follows from the mount watcher
                 (Ok(path), _) => {
                     self.unlock_prompt = None;
-                    if let Ok(devs) = crate::fs::mounts::parse_mountinfo() {
-                        self.devices = devs;
-                    }
                     self.navigate_to(path);
                 }
                 (Err(e), Some(p)) => {
@@ -1725,9 +1727,6 @@ impl App {
             match result {
                 Ok(()) => self.notify(format!("{name} can now be safely removed")),
                 Err(e) => self.notify(format!("Couldn't unmount {name}: {e}")),
-            }
-            if let Ok(devs) = crate::fs::mounts::parse_mountinfo() {
-                self.devices = devs;
             }
         }
 

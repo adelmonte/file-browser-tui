@@ -22,8 +22,9 @@ pub fn places_from_config(configs: &[PlaceConfig]) -> Vec<PlaceEntry> {
     configs.iter().map(PlaceEntry::from).collect()
 }
 
+/// Until the mount watcher's first list (sent as it starts): reading
+/// mounts checks each one's free space, which can hang on a dead network
+/// mount, so that's never done on the main thread.
 pub fn default_devices() -> Vec<DeviceEntry> {
-    crate::fs::mounts::parse_mountinfo().unwrap_or_else(|_| {
-        vec![DeviceEntry::new("Root".into(), "/".into())]
-    })
+    vec![DeviceEntry::new("Root".into(), "/".into())]
 }
