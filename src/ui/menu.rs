@@ -573,8 +573,8 @@ pub fn highlight() -> (u8, u8, u8) { theme::get().highlight }
 
 /// `tall`: Kitty draws the background, outline and highlight as images
 /// under the cells, and the text centered across two-row items. Returns
-/// escape sequences to write after the frame.
-pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) -> Vec<String> {
+/// kitty text to write after the frame, with the cells each covers.
+pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) -> Vec<(Rect, String)> {
     let term = f.area();
     menu.tall = tall;
     let rect = menu_rect(menu, term);
@@ -594,7 +594,7 @@ pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) -> Vec<Strin
     out
 }
 
-fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, tall: bool, out: &mut Vec<String>) {
+fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, tall: bool, out: &mut Vec<(Rect, String)>) {
     f.render_widget(Clear, rect);
     if tall {
         render_tall(f, rect, items, selected, out);
@@ -628,7 +628,7 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
-fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<String>) {
+fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<(Rect, String)>) {
     let (text_x, right) = (rect.x + 2, rect.right().saturating_sub(2));
     for (i, (item, (y, h))) in items.iter().zip(item_rows(rect, items, true)).enumerate() {
         if y + h > rect.bottom() {
@@ -659,7 +659,7 @@ fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<u
                     buf[(cx, cy)].set_symbol(" ").set_diff_option(CellDiffOption::Skip);
                 }
             }
-            out.push(seq);
+            out.push((Rect { x, y, width: used, height: h }, seq));
         };
         // Icon items keep their leading spaces free for the image
         let label = item.label.trim_start();

@@ -104,7 +104,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Some(mut m) = app.menu.take() {
         let panel = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
         let text = menu::render_menu(f, &mut m, panel);
-        app.post_draw.extend(text);
+        app.post_text.extend(text);
         let slots = menu::icon_slots(&m);
         let (rect, sub) = (m.rect, m.submenu_rect);
         let lit = menu::highlight_rects(&m);
@@ -159,21 +159,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         render_confirm_delete(f, app);
     }
 
-    // Sized text goes out only when it's new, and never over something
-    // drawn on top of its cells this frame (those cells are no longer ours)
-    let buf = f.buffer_mut();
-    let mut shown = std::collections::HashSet::new();
-    for (rect, seq) in std::mem::take(&mut app.post_text) {
-        let ours = rect.positions().all(|p| buf.cell(p).is_some_and(|c| c.diff_option == ratatui::buffer::CellDiffOption::Skip));
-        if !ours {
-            continue;
-        }
-        if !app.post_text_shown.contains(&(rect, seq.clone())) {
-            app.post_draw.push(seq.clone());
-        }
-        shown.insert((rect, seq));
-    }
-    app.post_text_shown = shown;
+    write_sized_text(f, app);
 
     // Image uploads lifted out of placeholder cells go out before this
     // frame's cell updates, so the placeholders always have an image.
@@ -186,6 +172,61 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         let _ = out.flush();
     }
+}
+
+/// Kitty sized text (sidebar names, menu items) after the frame. Each block
+/// is one multicell character on screen: kitty erases it when any of its
+/// cells is written, but ratatui writes none of them when the cells were
+/// skipped last frame and are skipped again (a menu's text where a name
+/// was), so the old block stays and new text written onto it is pushed
+/// aside. Hence: blocks covered by something drawn later are dropped;
+/// blocks gone or changed since last frame are blanked first wherever
+/// their cells are still skipped; then new blocks, and any unchanged one
+/// that blanking touched, are written.
+fn write_sized_text(f: &mut Frame, app: &mut App) {
+    use ratatui::buffer::CellDiffOption;
+    let buf = f.buffer_mut();
+    let skipped = |x: u16, y: u16| buf.cell((x, y)).is_some_and(|c| c.diff_option == CellDiffOption::Skip);
+    let wanted: Vec<(Rect, String)> = std::mem::take(&mut app.post_text).into_iter()
+        .filter(|(r, _)| r.positions().all(|p| skipped(p.x, p.y)))
+        .collect();
+    let keep: std::collections::HashSet<&(Rect, String)> = wanted.iter().collect();
+
+    let mut blank = String::new();
+    let mut blanked: Vec<Rect> = Vec::new();
+    for old in &app.post_text_shown {
+        if keep.contains(old) {
+            continue;
+        }
+        let r = old.0;
+        for y in r.top()..r.bottom() {
+            let mut x = r.left();
+            while x < r.right() {
+                if !skipped(x, y) {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < r.right() && skipped(x, y) {
+                    x += 1;
+                }
+                let _ = std::fmt::Write::write_fmt(&mut blank, format_args!("\x1b[{};{}H{}", y + 1, start + 1, " ".repeat((x - start) as usize)));
+                blanked.push(Rect { x: start, y, width: x - start, height: 1 });
+            }
+        }
+    }
+    if !blank.is_empty() {
+        app.post_draw.push(format!("\x1b[0m{blank}"));
+    }
+    let mut shown = std::collections::HashSet::new();
+    for (rect, seq) in wanted {
+        let pair = (rect, seq);
+        if !app.post_text_shown.contains(&pair) || blanked.iter().any(|b| b.intersects(pair.0)) {
+            app.post_draw.push(pair.1.clone());
+        }
+        shown.insert(pair);
+    }
+    app.post_text_shown = shown;
 }
 
 /// The rubber-band rectangle: a translucent box on Kitty, an outline elsewhere.
