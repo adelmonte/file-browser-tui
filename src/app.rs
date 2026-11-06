@@ -108,6 +108,88 @@ pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16,
     (cell_w, icon_rows + layout.icon_label_lines, icon_rows, img_w)
 }
 
+// ---------------------------------------------------------------------------
+// Tabs and split view
+// ---------------------------------------------------------------------------
+
+/// Declares `ViewState`, the state a folder view (a tab, or one side of a
+/// split) keeps of its own, and `App::swap_view` exchanging it with the
+/// active view's. The app's own fields are always the active view, so
+/// everything else works on it unchanged; other views wait in `tabs`.
+macro_rules! per_view {
+    ($($field:ident: $ty:ty),* $(,)?) => {
+        pub struct ViewState {
+            $(pub $field: $ty,)*
+            /// The folder's mtime when this view was last active, to see on
+            /// return whether its listing went stale.
+            seen_mtime: Option<std::time::SystemTime>,
+            /// Not loaded yet (opened in the background).
+            fresh: bool,
+        }
+
+        impl App {
+            fn swap_view(&mut self, v: &mut ViewState) {
+                $(std::mem::swap(&mut self.$field, &mut v.$field);)*
+            }
+        }
+    };
+}
+
+per_view! {
+    cwd: PathBuf,
+    history_back: Vec<PathBuf>,
+    history_forward: Vec<PathBuf>,
+    left_selection: HashMap<PathBuf, PathBuf>,
+    listing: DirListing,
+    selection: Option<usize>,
+    scroll_offset: usize,
+    scroll_pos: f32,
+    scroll_target: f32,
+    scroll_tick: std::time::Instant,
+    scroll_sub: u16,
+    scroll_seen: usize,
+    free_space: Option<u64>,
+    view_mode: ViewMode,
+    sort: SortState,
+    show_hidden: bool,
+    folders_first: bool,
+    show_groups: bool,
+    details_rows: Vec<crate::ui::groups::DRow>,
+    scrollbar: Option<crate::ui::scrollbar::Geom>,
+    item_rects: Vec<(usize, Rect)>,
+    icon_size_idx: usize,
+    img_w: u16,
+    cell_w: u16,
+    grid_pitch: u16,
+    cell_h: u16,
+    icon_rows: u16,
+    search: Option<SearchState>,
+    details_headers: Vec<(Rect, SortField)>,
+    multi_selection: std::collections::HashSet<usize>,
+    expanded: std::collections::HashSet<PathBuf>,
+    dir_counts: HashMap<PathBuf, Option<usize>>,
+    selection_anchor: Option<usize>,
+    grid_cols: u16,
+    icon_bands: Vec<IconBand>,
+    icon_layout_key: (u16, u16, bool, SortField, u64),
+    listing_gen: u64,
+    icon_groups: bool,
+    grid_area: Rect,
+    main_area: Rect,
+}
+
+/// A tab: one view, or two side by side (split). `active` is the pane
+/// keyboard and menus act on; its slot is empty while it's the app's own
+/// state.
+pub struct Tab {
+    pub panes: Vec<Option<ViewState>>,
+    pub active: usize,
+}
+
+fn dir_mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 /// Image identity rendered in a cell this frame: (rect, bg variant, dimmed).
 pub type FrameImage = (Rect, Option<(u8, u8, u8)>, bool);
 
@@ -202,6 +284,17 @@ pub struct App {
     /// Finished operations that can be undone, newest last: a label for
     /// the menu, and the steps.
     pub undo_stack: Vec<(String, Vec<crate::fileops::Undo>)>,
+    /// Open tabs (always at least one) and which is shown.
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,
+    /// This frame's pane areas in the active tab (one, or two when split).
+    pub pane_rects: Vec<Rect>,
+    /// This frame's tab bar: each tab's area and its close button.
+    pub tab_rects: Vec<(usize, Rect, Rect)>,
+    /// The inactive pane's thumbnail wishes, planned along with the
+    /// active one's (see `queue_visible_icons`).
+    other_thumb_jobs: Vec<(PathBuf, String, crate::thumbs::Priority)>,
+    collecting_thumb_jobs: bool,
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
     pub place_drag: Option<crate::events::PlaceDrag>,
@@ -442,6 +535,12 @@ impl App {
             kdeconnect_mount_rx: None,
             notice: None,
             undo_stack: Vec::new(),
+            tabs: vec![Tab { panes: vec![None], active: 0 }],
+            active_tab: 0,
+            pane_rects: Vec::new(),
+            tab_rects: Vec::new(),
+            other_thumb_jobs: Vec::new(),
+            collecting_thumb_jobs: false,
             sidebar_icons: IconCache::new(false)
                 .with_fit(crate::icons::Fit {
                     max_h: 1.0,
@@ -852,6 +951,203 @@ impl App {
         self.fileops.resolve(crate::fileops::Resolution { choice, all });
     }
 
+    /// A new view of `cwd` with the current view's settings, to be loaded.
+    fn fresh_view(&self, cwd: PathBuf) -> ViewState {
+        ViewState {
+            cwd,
+            history_back: Vec::new(),
+            history_forward: Vec::new(),
+            left_selection: HashMap::new(),
+            listing: DirListing::default(),
+            selection: None,
+            scroll_offset: 0,
+            scroll_pos: 0.0,
+            scroll_target: 0.0,
+            scroll_tick: std::time::Instant::now(),
+            scroll_sub: 0,
+            scroll_seen: 0,
+            free_space: None,
+            view_mode: self.view_mode,
+            sort: self.sort.clone(),
+            show_hidden: self.show_hidden,
+            folders_first: self.folders_first,
+            show_groups: self.show_groups,
+            details_rows: Vec::new(),
+            scrollbar: None,
+            item_rects: Vec::new(),
+            icon_size_idx: self.icon_size_idx,
+            img_w: self.img_w,
+            cell_w: self.cell_w,
+            grid_pitch: self.grid_pitch,
+            cell_h: self.cell_h,
+            icon_rows: self.icon_rows,
+            search: None,
+            details_headers: Vec::new(),
+            multi_selection: Default::default(),
+            expanded: Default::default(),
+            dir_counts: HashMap::new(),
+            selection_anchor: None,
+            grid_cols: self.grid_cols,
+            icon_bands: Vec::new(),
+            icon_layout_key: (0, 0, false, SortField::Name, u64::MAX),
+            listing_gen: 0,
+            icon_groups: self.icon_groups,
+            grid_area: self.grid_area,
+            main_area: self.main_area,
+            seen_mtime: None,
+            fresh: true,
+        }
+    }
+
+    /// Make `v` the active view; returns the one it replaces. Anything
+    /// half-done in the old one (a rename, a menu, a drag) is dropped.
+    fn checkout(&mut self, mut v: ViewState) -> ViewState {
+        self.rename_state = None;
+        self.menu = None;
+        self.drag_state = DragState::Idle;
+        self.band = None;
+        if self.path_bar_editing {
+            self.cancel_path_edit();
+        }
+        let (seen, fresh) = (v.seen_mtime, v.fresh);
+        let left_mtime = dir_mtime(&self.cwd);
+        self.swap_view(&mut v);
+        v.seen_mtime = left_mtime;
+        v.fresh = false;
+        if fresh {
+            self.after_navigate();
+        } else if seen.is_none() || seen != dir_mtime(&self.cwd) {
+            self.reload_dir();
+        }
+        v
+    }
+
+    pub fn split(&self) -> bool {
+        self.tabs[self.active_tab].panes.len() > 1
+    }
+
+    /// Run `f` with the active tab's other pane as the app's view (for
+    /// drawing it, or looking something up in it); None if not split.
+    pub fn with_other_pane<R>(&mut self, f: impl FnOnce(&mut App) -> R) -> Option<R> {
+        let tab = &mut self.tabs[self.active_tab];
+        let other = 1 - tab.active.min(1);
+        let mut v = tab.panes.get_mut(other)?.take()?;
+        self.swap_view(&mut v);
+        let r = f(self);
+        self.swap_view(&mut v);
+        self.tabs[self.active_tab].panes[other] = Some(v);
+        Some(r)
+    }
+
+    /// The other pane's folder, when split.
+    pub fn other_pane_cwd(&self) -> Option<PathBuf> {
+        let tab = &self.tabs[self.active_tab];
+        tab.panes.get(1 - tab.active.min(1))?.as_ref().map(|v| v.cwd.clone())
+    }
+
+    /// Open `path` in a new tab after the others, shown at once or left
+    /// in the background (middle-click).
+    pub fn new_tab(&mut self, path: PathBuf, show: bool) {
+        let mut v = self.fresh_view(path);
+        if show {
+            let old = self.checkout(v);
+            let tab = &mut self.tabs[self.active_tab];
+            tab.panes[tab.active] = Some(old);
+            self.tabs.push(Tab { panes: vec![None], active: 0 });
+            self.active_tab = self.tabs.len() - 1;
+        } else {
+            v.fresh = true;
+            self.tabs.push(Tab { panes: vec![Some(v)], active: 0 });
+        }
+    }
+
+    pub fn switch_tab(&mut self, i: usize) {
+        if i == self.active_tab || i >= self.tabs.len() {
+            return;
+        }
+        let tab = &mut self.tabs[i];
+        let Some(v) = tab.panes[tab.active].take() else { return; };
+        let old = self.checkout(v);
+        let cur = &mut self.tabs[self.active_tab];
+        cur.panes[cur.active] = Some(old);
+        self.active_tab = i;
+    }
+
+    /// Next (`step` 1) or previous (-1) tab, wrapping around.
+    pub fn cycle_tab(&mut self, step: isize) {
+        let n = self.tabs.len() as isize;
+        if n > 1 {
+            self.switch_tab((self.active_tab as isize + step).rem_euclid(n) as usize);
+        }
+    }
+
+    /// Close tab `i`; the last one stays.
+    pub fn close_tab(&mut self, i: usize) {
+        if self.tabs.len() < 2 || i >= self.tabs.len() {
+            return;
+        }
+        if i == self.active_tab {
+            self.switch_tab(if i + 1 < self.tabs.len() { i + 1 } else { i - 1 });
+        }
+        self.tabs.remove(i);
+        if i < self.active_tab {
+            self.active_tab -= 1;
+        }
+    }
+
+    /// F3: split the view (the new side starts at the same folder and gets
+    /// the focus), or close the side not in use.
+    pub fn toggle_split(&mut self) {
+        if self.split() {
+            let tab = &mut self.tabs[self.active_tab];
+            let other = 1 - tab.active;
+            tab.panes.remove(other);
+            tab.active = 0;
+        } else {
+            let v = self.fresh_view(self.cwd.clone());
+            let old = self.checkout(v);
+            let tab = &mut self.tabs[self.active_tab];
+            tab.panes = vec![Some(old), None];
+            tab.active = 1;
+        }
+    }
+
+    /// Make pane `p` of this tab the one in use.
+    pub fn focus_pane(&mut self, p: usize) {
+        let tab = &mut self.tabs[self.active_tab];
+        if p == tab.active || p >= tab.panes.len() {
+            return;
+        }
+        let Some(v) = tab.panes[p].take() else { return; };
+        let old = self.checkout(v);
+        let tab = &mut self.tabs[self.active_tab];
+        let was = tab.active;
+        tab.panes[was] = Some(old);
+        tab.active = p;
+    }
+
+    /// After file operations: everything showing folders reloads; views not
+    /// on screen catch up when shown.
+    pub fn reload_views(&mut self) {
+        self.reload_dir();
+        self.with_other_pane(|a| a.reload_dir());
+        for tab in &mut self.tabs {
+            for v in tab.panes.iter_mut().flatten() {
+                v.seen_mtime = None;
+            }
+        }
+    }
+
+    /// Name for a tab: its active pane's folder.
+    pub fn tab_title(&self, i: usize) -> String {
+        let tab = &self.tabs[i];
+        let path = match tab.panes.get(tab.active).and_then(|v| v.as_ref()) {
+            Some(v) => v.cwd.clone(),
+            None => self.cwd.clone(),
+        };
+        path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string_lossy().to_string())
+    }
+
     pub fn remember_undo(&mut self, label: String, steps: Vec<crate::fileops::Undo>) {
         const KEEP: usize = 50;
         self.undo_stack.push((label, steps));
@@ -1123,6 +1419,18 @@ impl App {
     }
 
     /// Queue icon loads for all visible entries.
+    /// Icons and thumbnails for every view on screen: when split, the other
+    /// side's wishes are gathered first and planned after this side's.
+    pub fn queue_all_visible_icons(&mut self) {
+        self.other_thumb_jobs.clear();
+        if self.split() {
+            self.collecting_thumb_jobs = true;
+            self.with_other_pane(|a| a.queue_visible_icons());
+            self.collecting_thumb_jobs = false;
+        }
+        self.queue_visible_icons();
+    }
+
     pub fn queue_visible_icons(&mut self) {
         if self.view_mode == ViewMode::Compact {
             return;
@@ -1194,6 +1502,12 @@ impl App {
                 jobs.extend(items.iter().map(|(p, m)| (p.as_path(), m.as_str(), crate::thumbs::Priority::Depth)));
             }
         }
+        if self.collecting_thumb_jobs {
+            self.other_thumb_jobs = jobs.iter().map(|&(p, m, prio)| (p.to_path_buf(), m.to_string(), prio)).collect();
+            return;
+        }
+        let other = &self.other_thumb_jobs;
+        jobs.extend(other.iter().map(|(p, m, prio)| (p.as_path(), m.as_str(), *prio)));
         self.thumb_cache.plan(&jobs);
 
         // Then warm up the visible folders' contents
@@ -1241,6 +1555,9 @@ impl App {
         }
         for report in self.fileops.poll() {
             self.notify(report.message());
+            if self.tabs.len() > 1 || self.split() {
+                self.reload_views();
+            }
             if !report.undo.is_empty() {
                 let n = report.undo.len();
                 let what = match report.op {

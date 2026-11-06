@@ -29,6 +29,9 @@ pub enum MenuAction {
     OpenPath,
     OpenPathNewWindow,
     OpenNewWindow,
+    OpenNewTab,
+    CopyToOtherPane,
+    MoveToOtherPane,
     Rename,
     Cut,
     Copy,
@@ -197,6 +200,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 items.push(MenuItem::sub("\u{f08e}  Open With", others));
             }
             if is_dir {
+                items.push(MenuItem::new("\u{f2d2}  Open in New Tab", MenuAction::OpenNewTab));
                 items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
                 items.push(MenuItem::new("\u{f120}  Open in Terminal", MenuAction::OpenTerminal));
             }
@@ -214,6 +218,11 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 items.push(MenuItem::new("\u{f0ea}  Paste Into Folder", MenuAction::Paste).enabled_if(has_clip));
             }
             items.push(MenuItem::sep());
+            if app.split() {
+                items.push(MenuItem::new("\u{f0c5}  Copy to Other Side", MenuAction::CopyToOtherPane));
+                items.push(MenuItem::new("\u{f0b2}  Move to Other Side", MenuAction::MoveToOtherPane));
+                items.push(MenuItem::sep());
+            }
             items.push(MenuItem::new("\u{f044}  Rename", MenuAction::Rename));
             items.push(MenuItem::new("\u{f1f8}  Move to Trash", MenuAction::Trash));
             items.push(MenuItem::sep());
@@ -264,6 +273,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
 
         MenuTarget::Place(idx) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
+            items.push(MenuItem::new("\u{f2d2}  Open in New Tab", MenuAction::OpenNewTab));
             items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
             let is_trash = app.places.get(idx)
                 .map(|p| p.icon.as_deref() == Some("user-trash") || p.path.ends_with("Trash/files"))
@@ -278,6 +288,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
 
         MenuTarget::Device(idx) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
+            items.push(MenuItem::new("\u{f2d2}  Open in New Tab", MenuAction::OpenNewTab));
             items.push(MenuItem::new("\u{f2d0}  Open in New Window", MenuAction::OpenNewWindow));
             items.push(MenuItem::new("\u{f120}  Open Terminal Here", MenuAction::OpenTerminal));
             if let Some(dev) = app.devices.get(idx).filter(|d| d.can_unmount()) {

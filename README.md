@@ -22,6 +22,10 @@ icons, thumbnails and smooth translucent menus; other terminals get text-drawn i
   of the folders you can see, so scrolling and opening folders feel instant.
 - **Places sidebar**: drag to reorder, right-click to add or remove; devices with usage
   bars and an eject button for removable drives and FUSE mounts; KDE Connect phones.
+- **Tabs and split view**: `Ctrl+T` opens a tab (on the selected folder), middle-click
+  opens a folder in a background tab, `F3` splits the view in two; drag between the
+  sides or use Copy/Move to Other Side. With one tab and no split, neither takes any
+  space.
 - **Location bar**: clickable breadcrumbs, or type a path with completion
   (`Ctrl+L`, `F6`, `Alt+D`).
 - **Search** by file name (`fd`) or inside files (`rg`), in the current folder or below.
@@ -126,6 +130,9 @@ Dolphin's defaults; `F1` in the app lists them, including any you've changed.
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Icons / Compact / Details view |
 | `Ctrl+Plus` / `Ctrl+Minus` | larger / smaller icons |
 | `Alt+[` / `Alt+]` | narrower / wider sidebar |
+| `Ctrl+T` / `Ctrl+W` | new tab / close tab |
+| `Ctrl+Tab`, `Ctrl+PageDown` / `Ctrl+Shift+Tab`, `Ctrl+PageUp` | next / previous tab |
+| `F3` / `Ctrl+F3` | split view on or off / switch sides |
 | `Ctrl+Q` | quit |
 
 ## Configuration

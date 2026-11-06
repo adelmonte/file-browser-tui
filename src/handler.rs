@@ -407,6 +407,26 @@ fn run_action(app: &mut App, action: Action) -> bool {
         Action::ViewDetails => app.set_view_mode(ViewMode::Details),
         Action::SidebarNarrower => app.sidebar_w = app.sidebar_w.saturating_sub(2).max(8),
         Action::SidebarWider => app.sidebar_w = (app.sidebar_w + 2).min(50),
+        Action::NewTab => {
+            // A selected folder opens in it, else this one, as in Dolphin
+            let path = app.selection.and_then(|i| app.listing.entries.get(i))
+                .filter(|e| e.is_dir && app.multi_selection.len() <= 1)
+                .map(|e| e.path.clone())
+                .unwrap_or_else(|| app.cwd.clone());
+            app.new_tab(path, true);
+        }
+        Action::CloseTab => app.close_tab(app.active_tab),
+        Action::NextTab => app.cycle_tab(1),
+        Action::PrevTab => app.cycle_tab(-1),
+        Action::SplitView => app.toggle_split(),
+        Action::OtherPane => {
+            if app.split() {
+                let p = 1 - app.tabs[app.active_tab].active;
+                app.focus_pane(p);
+            }
+        }
+        Action::CopyToOtherPane => actions::to_other_pane(app, true),
+        Action::MoveToOtherPane => actions::to_other_pane(app, false),
     }
     false
 }
@@ -433,6 +453,45 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             } else if contains(cancel, col, row) {
                 app.name_prompt = None;
             }
+        }
+        return;
+    }
+
+    // Tab bar: a click shows the tab, its x or a middle-click closes it
+    if let MouseEventKind::Down(button) = ev.kind
+        && app.menu.is_none()
+        && let Some(&(i, _, close)) = app.tab_rects.iter().find(|(_, r, _)| contains(*r, col, row))
+    {
+        match button {
+            MouseButton::Left if contains(close, col, row) => app.close_tab(i),
+            MouseButton::Left => app.switch_tab(i),
+            MouseButton::Middle => app.close_tab(i),
+            MouseButton::Right => {}
+        }
+        return;
+    }
+    // A press or the wheel in the other side of a split brings it into use
+    if matches!(ev.kind, MouseEventKind::Down(_) | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown)
+        && app.menu.is_none()
+        && app.split()
+        && matches!(app.drag_state, DragState::Idle)
+    {
+        let active = app.tabs[app.active_tab].active;
+        if let Some(other) = app.pane_rects.get(1 - active.min(1)).copied()
+            && contains(other, col, row)
+        {
+            if app.rename_state.is_some() {
+                app.commit_rename();
+                app.rename_state = None;
+            }
+            app.focus_pane(1 - active);
+        }
+    }
+    // Middle-click on a folder opens it in a new tab, left in the background
+    if ev.kind == MouseEventKind::Down(MouseButton::Middle) && app.menu.is_none() {
+        if let Some(e) = hit_test(app, col, row).and_then(|i| app.listing.entries.get(i)).filter(|e| e.is_dir) {
+            let path = e.path.clone();
+            app.new_tab(path, false);
         }
         return;
     }
@@ -709,9 +768,33 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 }
                 return;
             }
-            if let DragState::Dragging { item_idx, hover_target, .. } = app.drag_state.clone()
+            let copy = ev.modifiers.contains(KeyModifiers::CONTROL);
+            let active = app.tabs[app.active_tab].active;
+            let other_pane = app.split().then(|| app.pane_rects.get(1 - active.min(1)).copied()).flatten()
+                .filter(|r| contains(*r, col, row));
+            if let DragState::Dragging { item_idx, .. } = app.drag_state.clone()
+                && other_pane.is_some()
+            {
+                // Dropped on the other side: into the folder under the
+                // pointer there, else the folder it shows
+                let sources = if app.multi_selection.contains(&item_idx) {
+                    actions::selected_paths(app)
+                } else {
+                    app.listing.entries.get(item_idx).map(|e| vec![e.path.clone()]).unwrap_or_default()
+                };
+                let dest = app.with_other_pane(|a| {
+                    hit_test(a, col, row).and_then(|i| a.listing.entries.get(i)).filter(|e| e.is_dir)
+                        .map(|e| e.path.clone()).unwrap_or_else(|| a.cwd.clone())
+                });
+                if let Some(dest) = dest && !sources.is_empty() && !sources.iter().any(|s| s.parent() == Some(dest.as_path()) || *s == dest) {
+                    if copy {
+                        app.fileops.copy(sources, &dest);
+                    } else {
+                        app.fileops.move_to(sources, &dest);
+                    }
+                }
+            } else if let DragState::Dragging { item_idx, hover_target, .. } = app.drag_state.clone()
                 && let Some(dst_idx) = hover_target {
-                    let copy = ev.modifiers.contains(KeyModifiers::CONTROL);
                     app.execute_drop(item_idx, dst_idx, copy);
                 }
             // Stale ghost placements are cleaned by the post-draw frame diff.

@@ -10,6 +10,14 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum Action {
     Quit,
     Undo,
+    NewTab,
+    CloseTab,
+    NextTab,
+    PrevTab,
+    SplitView,
+    OtherPane,
+    CopyToOtherPane,
+    MoveToOtherPane,
     Help,
     Search,
     SelectAll,
@@ -70,6 +78,14 @@ pub const ACTIONS: &[(&str, Action, &[&str], &str)] = &[
     ("view_details", Action::ViewDetails, &["Ctrl+3"], "Details view"),
     ("sidebar_narrower", Action::SidebarNarrower, &["Alt+["], "Narrower sidebar"),
     ("sidebar_wider", Action::SidebarWider, &["Alt+]"], "Wider sidebar"),
+    ("new_tab", Action::NewTab, &["Ctrl+T"], "New tab"),
+    ("close_tab", Action::CloseTab, &["Ctrl+W"], "Close tab"),
+    ("next_tab", Action::NextTab, &["Ctrl+Tab", "Ctrl+PageDown"], "Next tab"),
+    ("prev_tab", Action::PrevTab, &["Ctrl+Shift+Tab", "Ctrl+PageUp"], "Previous tab"),
+    ("split_view", Action::SplitView, &["F3"], "Split view on/off"),
+    ("other_pane", Action::OtherPane, &["Ctrl+F3"], "Switch to the other side of a split"),
+    ("copy_to_other_pane", Action::CopyToOtherPane, &[], "Copy to the other side of a split"),
+    ("move_to_other_pane", Action::MoveToOtherPane, &[], "Move to the other side of a split"),
 ];
 
 /// A key combo, normalized so a parsed spec and a key event compare equal.

@@ -43,6 +43,13 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
                 app.reveal(&path);
             }
         }
+        MenuAction::OpenNewTab => {
+            if let Some(path) = target_path(app, target).filter(|p| p.is_dir()) {
+                app.new_tab(path, true);
+            }
+        }
+        MenuAction::CopyToOtherPane => to_other_pane(app, true),
+        MenuAction::MoveToOtherPane => to_other_pane(app, false),
         MenuAction::OpenPathNewWindow | MenuAction::OpenNewWindow => {
             if let Some(path) = target_path(app, target) {
                 open_new_window(&path);
@@ -149,6 +156,9 @@ const KITTY_ARGS: &[&str] = &[
     "-o", "mouse_map=shift+left triplepress grabbed",
     "-o", "mouse_map=ctrl+shift+left press grabbed",
     "-o", "mouse_map=ctrl+shift+left release grabbed",
+    // Tab switching keys go to the app's own tabs
+    "-o", "map ctrl+tab",
+    "-o", "map ctrl+shift+tab",
 ];
 
 /// Another window of the app at `path` (a file opens its folder with it
@@ -474,6 +484,24 @@ fn compress(app: &mut App, target: MenuTarget, targz: bool) {
         let out = unique_name(&parent, &format!("{name}.zip"));
         let out_name = out.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         crate::launch::detach(Command::new("zip").current_dir(&parent).args(["-r", &out_name, &name]));
+    }
+}
+
+/// Copy or move the selection to the folder shown on the other side of a
+/// split.
+pub fn to_other_pane(app: &mut App, copy: bool) {
+    let Some(dest) = app.other_pane_cwd() else {
+        app.notify("Split the view (F3) to copy or move to the other side".into());
+        return;
+    };
+    let paths = selected_paths(app);
+    if paths.is_empty() || dest == app.cwd {
+        return;
+    }
+    if copy {
+        app.fileops.copy(paths, &dest);
+    } else {
+        app.fileops.move_to(paths, &dest);
     }
 }
 

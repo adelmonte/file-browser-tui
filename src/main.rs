@@ -264,7 +264,7 @@ fn run(
         }
 
         // Queue icons for newly visible cells after render updated grid_cols/grid_area
-        app.queue_visible_icons();
+        app.queue_all_visible_icons();
 
         // Wait up to a frame for input, then take everything already
         // queued before drawing again: a burst of wheel events is one frame

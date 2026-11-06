@@ -10,6 +10,7 @@ pub mod menu;
 pub mod properties;
 pub mod searchbar;
 pub mod sidebar;
+pub mod tabbar;
 pub mod statusbar;
 pub mod theme;
 pub mod topbar;
@@ -65,13 +66,38 @@ pub fn render(f: &mut Frame, app: &mut App) {
     statusbar::render_statusbar(f, app, status_area);
     searchbar::render_searchbar(f, app, search_area);
 
-    app.item_rects.clear();
-    match app.view_mode {
-        ViewMode::Icons   => grid::render_grid(f, app, main_area),
-        ViewMode::Compact => compact::render_compact(f, app, main_area),
-        ViewMode::Details => details::render_details(f, app, main_area),
+    // Tabs over the views, when there's more than one
+    let mut main_area = main_area;
+    app.tab_rects.clear();
+    if app.tabs.len() > 1 && main_area.height > 2 {
+        tabbar::render_tabbar(f, app, Rect { height: 1, ..main_area });
+        main_area.y += 1;
+        main_area.height -= 1;
     }
-    scrollbar::render(f, app, main_area);
+    // Split: two panes with a line between, the one in use drawn last so
+    // its geometry is what the handlers see
+    let panes: Vec<Rect> = if app.split() {
+        let left_w = main_area.width / 2;
+        let line = Rect { x: main_area.x + left_w, width: 1, ..main_area };
+        f.render_widget(
+            Paragraph::new(vec![Line::raw("\u{2502}"); line.height as usize]).style(Style::default().fg(theme::border())),
+            line,
+        );
+        vec![
+            Rect { width: left_w, ..main_area },
+            Rect { x: line.x + 1, width: main_area.width.saturating_sub(left_w + 1), ..main_area },
+        ]
+    } else {
+        vec![main_area]
+    };
+    app.pane_rects = panes.clone();
+    let split = panes.len() > 1;
+    let active = app.tabs[app.active_tab].active.min(panes.len() - 1);
+    if split {
+        let other = panes[1 - active];
+        app.with_other_pane(|a| render_view(f, a, other, true, false));
+    }
+    render_view(f, app, panes[active], split, true);
     render_band(f, app);
 
     // Overlays rendered AFTER the grid so they appear on top of everything
@@ -154,6 +180,23 @@ fn render_band(f: &mut Frame, app: &mut App) {
             r,
         );
     }
+}
+
+/// A folder view in `area`, under its own header when split.
+fn render_view(f: &mut Frame, app: &mut App, mut area: Rect, header: bool, active: bool) {
+    if header && area.height > 2 {
+        tabbar::render_pane_header(f, Rect { height: 1, ..area }, &app.cwd, active);
+        area.y += 1;
+        area.height -= 1;
+    }
+    app.main_area = area;
+    app.item_rects.clear();
+    match app.view_mode {
+        ViewMode::Icons   => grid::render_grid(f, app, area),
+        ViewMode::Compact => compact::render_compact(f, app, area),
+        ViewMode::Details => details::render_details(f, app, area),
+    }
+    scrollbar::render(f, app, area);
 }
 
 pub fn band_rect((ax, ay): (u16, u16), (bx, by): (u16, u16)) -> Rect {
