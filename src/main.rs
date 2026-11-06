@@ -118,11 +118,14 @@ fn main() -> anyhow::Result<()> {
     // with it selected
     let start = std::env::args_os().nth(1).map(std::path::PathBuf::from)
         .and_then(|p| std::fs::canonicalize(p).ok());
-    if let Some(p) = &start {
-        let dir = if p.is_dir() { Some(p.as_path()) } else { p.parent() };
-        if let Some(dir) = dir {
-            let _ = std::env::set_current_dir(dir);
+    match &start {
+        Some(p) => {
+            let dir = if p.is_dir() { Some(p.as_path()) } else { p.parent() };
+            if let Some(dir) = dir {
+                let _ = std::env::set_current_dir(dir);
+            }
         }
+        None => { let _ = std::env::set_current_dir(config.start_folder()); }
     }
 
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
@@ -160,6 +163,7 @@ fn main() -> anyhow::Result<()> {
     ratatui::restore();
 
     // Persist config and per-dir view state
+    config::save_last_folder(&app.cwd);
     let _ = build_config(&app).save();
     app.dirstates.save();
 
@@ -178,6 +182,7 @@ file-browser-tui: a Dolphin-like file manager for kitty
 
 Usage: file-browser-tui [--kitty] [PATH]
   PATH        folder to open, or a file to open its folder with it selected
+              (without one: home_page, or the last folder with resume = true)
 
 Options:
   --kitty     open in a new kitty window set up for the app (no padding,

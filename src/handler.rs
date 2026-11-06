@@ -335,6 +335,7 @@ fn run_action(app: &mut App, action: Action) -> bool {
         Action::Back => app.navigate_back(),
         Action::Forward => app.navigate_forward(),
         Action::Up => app.navigate_up(),
+        Action::Home => app.navigate_to(app.config.home_page()),
         Action::Reload => app.reload_dir(),
         Action::ToggleHidden => app.toggle_show_hidden(),
         Action::NewFolder => actions::execute(app, MenuAction::NewFolder, MenuTarget::Empty),

@@ -113,7 +113,9 @@ file-browser-tui --kitty [PATH]  # a new kitty window set up for the app
 file-browser-tui [PATH]          # inside the kitty window you're in
 ```
 
-`PATH` is a folder to open, or a file to open its folder with it selected.
+`PATH` is a folder to open, or a file to open its folder with it selected. Without one
+it opens your home page (see [Startup](#startup)); `file-browser-tui .` opens the
+folder you're in.
 
 Use `--kitty` in launchers, desktop entries and window manager bindings; the included
 `file-browser-tui.desktop` does. It opens a kitty window without padding, so the
@@ -135,6 +137,7 @@ lists them all, including any you've changed.
 | `Backspace`, `Alt+←` | back |
 | `Alt+→` | forward |
 | `Alt+↑` | up a folder |
+| `Alt+Home` | home page |
 | `Ctrl+L`, `F6`, `Alt+D` | edit the location |
 | `Ctrl+F` | search |
 | `Ctrl+A` | select all |
@@ -164,6 +167,13 @@ lists them all, including any you've changed.
 `~/.config/file-browser-tui/config.toml` is created on first run with every option
 listed and commented out. Its view settings are the defaults for folders you haven't
 changed; changes you make in a folder are remembered for that folder.
+
+### Startup
+
+```toml
+home_page = "~/Downloads"     # where it opens and Alt+Home goes (default: ~)
+resume = true                 # open in the folder you were in last time instead
+```
 
 ### Keys
 

@@ -46,6 +46,13 @@ pub struct Config {
     /// shown but never written to disk; "~/" means the home folder.
     #[serde(default)]
     pub thumbnail_cache_exclude: Vec<String>,
+    /// The folder the app opens in and Alt+Home goes to; "~" is the home
+    /// folder.
+    #[serde(default = "default_home_page")]
+    pub home_page: String,
+    /// Open in the folder you were in last time instead of the home page.
+    #[serde(default)]
+    pub resume: bool,
     /// KDE Connect: phones under Devices and Send to Device.
     #[serde(default = "default_true")]
     pub kdeconnect: bool,
@@ -186,6 +193,8 @@ impl Default for Config {
             thumbnail_cache_exclude: Vec::new(),
             icon_theme: String::new(),
             kdeconnect: true,
+            home_page: default_home_page(),
+            resume: false,
             keys: HashMap::new(),
             theme: None,
             read_only: false,
@@ -269,7 +278,9 @@ fn template() -> String {
 # icon_size_idx = 7             # 0 (smallest) to 19
 # folder_previews = true        # show a folder's pictures on its icon
 # terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
-# kdeconnect = true            # phones under Devices, Send to Device (needs kdeconnect)
+# home_page = "~"               # the folder it opens in and Alt+Home goes to
+# resume = false                # true: open in the folder you were in last time instead
+# kdeconnect = true             # phones under Devices, Send to Device (needs kdeconnect)
 # icon_theme = ""               # e.g. "Papirus-Dark"; empty = the desktop's (KDE, GTK or GNOME setting)
 sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
 
@@ -333,6 +344,47 @@ impl Config {
     pub fn path() -> PathBuf {
         config_path()
     }
+
+    /// `home_page` as a folder: home if it's unset or gone.
+    pub fn home_page(&self) -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let page = self.home_page.trim();
+        let path = match page.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => home.join(rest.trim_start_matches('/')),
+            _ => PathBuf::from(page),
+        };
+        if path.is_absolute() && path.is_dir() { path } else { home }
+    }
+
+    /// The folder to open when no PATH is given.
+    pub fn start_folder(&self) -> PathBuf {
+        if self.resume
+            && let Some(last) = std::fs::read_to_string(last_folder_path()).ok()
+            && std::path::Path::new(last.trim_end_matches('\n')).is_dir()
+        {
+            return PathBuf::from(last.trim_end_matches('\n'));
+        }
+        self.home_page()
+    }
+}
+
+/// Where the folder open at quit is kept (for `resume`).
+fn last_folder_path() -> PathBuf {
+    dirs::state_dir().or_else(dirs::cache_dir)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("file-browser-tui/last_folder")
+}
+
+pub fn save_last_folder(dir: &std::path::Path) {
+    let path = last_folder_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, format!("{}\n", dir.display()));
+}
+
+fn default_home_page() -> String {
+    "~".into()
 }
 
 fn config_path() -> PathBuf {
@@ -381,5 +433,23 @@ mod tests {
         let back: Config = toml::from_str(&after).unwrap();
         assert!(back.show_hidden && back.places.len() == c.places.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn home_page_expands_and_falls_back() {
+        let home = dirs::home_dir().unwrap();
+        let mut c = Config::default();
+        assert_eq!(c.home_page(), home);
+        c.home_page = "/tmp".into();
+        assert_eq!(c.home_page(), PathBuf::from("/tmp"));
+        c.home_page = "~/".into();
+        assert_eq!(c.home_page(), home);
+        // Gone, or relative: home
+        c.home_page = "/no/such/folder".into();
+        assert_eq!(c.home_page(), home);
+        c.home_page = "Documents".into();
+        assert_eq!(c.home_page(), home);
+        c.home_page = "/tmp".into();
+        assert_eq!(c.start_folder(), PathBuf::from("/tmp"));
     }
 }
