@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 const HELP: &str = "\
-file-browser-tui: a Dolphin-like file manager for the terminal (best in kitty)
+file-browser-tui: a Dolphin-like file manager for kitty
 
 Usage: file-browser-tui [--kitty] [PATH]
   PATH        folder to open, or a file to open its folder with it selected

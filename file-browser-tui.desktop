@@ -2,7 +2,7 @@
 Type=Application
 Name=File Browser TUI
 GenericName=File Manager
-Comment=A Dolphin-like file manager for the terminal
+Comment=A Dolphin-like file manager for kitty
 Exec=file-browser-tui --kitty %f
 Icon=system-file-manager
 Terminal=false

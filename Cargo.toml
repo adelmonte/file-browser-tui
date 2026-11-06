@@ -1,9 +1,9 @@
 [package]
 name = "file-browser-tui"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.92.0"
-description = "A Dolphin-like file manager for the terminal, best in kitty"
+description = "A Dolphin-like file manager for kitty"
 license = "GPL-3.0-only"
 repository = "https://github.com/adelmonte/file-browser-tui"
 readme = "README.md"
