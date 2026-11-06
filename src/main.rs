@@ -325,6 +325,8 @@ fn run(
                     let new_size = ratatui::layout::Size { width: w, height: h };
                     if new_size != app.last_terminal_size {
                         app.last_terminal_size = new_size;
+                        // The screen is cleared: sized text goes out again
+                        app.post_text_shown.clear();
                         if is_kitty {
                             // Placeholder images follow their cells through the
                             // reflow; only direct placements (underlays) are

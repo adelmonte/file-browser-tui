@@ -159,6 +159,22 @@ pub fn render(f: &mut Frame, app: &mut App) {
         render_confirm_delete(f, app);
     }
 
+    // Sized text goes out only when it's new, and never over something
+    // drawn on top of its cells this frame (those cells are no longer ours)
+    let buf = f.buffer_mut();
+    let mut shown = std::collections::HashSet::new();
+    for (rect, seq) in std::mem::take(&mut app.post_text) {
+        let ours = rect.positions().all(|p| buf.cell(p).is_some_and(|c| c.diff_option == ratatui::buffer::CellDiffOption::Skip));
+        if !ours {
+            continue;
+        }
+        if !app.post_text_shown.contains(&(rect, seq.clone())) {
+            app.post_draw.push(seq.clone());
+        }
+        shown.insert((rect, seq));
+    }
+    app.post_text_shown = shown;
+
     // Image uploads lifted out of placeholder cells go out before this
     // frame's cell updates, so the placeholders always have an image.
     underlay::finish_frame(app);

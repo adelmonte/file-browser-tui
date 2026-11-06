@@ -418,6 +418,12 @@ pub struct App {
     /// Raw output written after ratatui flushes a frame (Kitty multicell
     /// text, which ratatui can't express).
     pub post_draw: Vec<String>,
+    /// Kitty sized text wanted this frame, with the cells it covers: written
+    /// after the frame only if new, and only where nothing was drawn over it.
+    pub post_text: Vec<(Rect, String)>,
+    /// What `post_text` put on screen last frame (still there, as ratatui
+    /// leaves those cells alone); cleared when the screen is.
+    pub post_text_shown: std::collections::HashSet<(Rect, String)>,
     /// Field backgrounds drawn under the text (see ui::underlay), by slot.
     pub underlays: HashMap<u32, crate::ui::underlay::Placed>,
     pub underlays_seen: std::collections::HashSet<u32>,
@@ -614,6 +620,8 @@ impl App {
             dirstates,
             kitty_transmits: Vec::new(),
             post_draw: Vec::new(),
+            post_text: Vec::new(),
+            post_text_shown: std::collections::HashSet::new(),
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
             underlays_alt: std::collections::HashSet::new(),

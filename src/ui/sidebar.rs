@@ -144,7 +144,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                         buf[(cx, cy)].set_symbol(" ").set_diff_option(CellDiffOption::Skip);
                     }
                 }
-                app.post_draw.push(seq);
+                app.post_text.push((Rect { x: text_x, y, width: used, height: h }, seq));
             } else {
                 f.render_widget(
                     Paragraph::new(Span::styled(name, Style::default().fg(theme::rgb(fg)))),
