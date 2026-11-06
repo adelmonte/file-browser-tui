@@ -123,11 +123,14 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                 text_w -= 3;
             }
             // A menu over the end of the row (the View menu over the
-            // sidebar's right edge) cuts the name short where it starts; the
-            // name keeps its look rather than turning plain
+            // sidebar's right edge) that leaves the whole name visible: the
+            // name keeps its look. One over the name itself (a right-click
+            // menu opened on it) turns it plain, which the menu cuts off
+            // cleanly; cut short, kitty's text left a stray first letter
             let row_rect = Rect { x: text_x, y, width: text_w, height: h };
             if let Some(mx) = menu_rects.iter().filter(|m| m.intersects(row_rect)).map(|m| m.x).min()
                 && mx > text_x
+                && kitty::centered_width(row.name.chars().count(), h) <= mx - text_x
             {
                 text_w = text_w.min(mx - text_x);
             }
