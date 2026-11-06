@@ -230,7 +230,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
                 let folder = crate::archive::stem(&entry.path);
                 items.push(MenuItem::sub("\u{f187}  Extract", vec![
                     MenuItem::new("Here, Autodetect Subfolder", MenuAction::ExtractHere),
-                    MenuItem::new(&format!("Into \"{folder}\""), MenuAction::ExtractToFolder),
+                    MenuItem::new(format!("Into \"{folder}\""), MenuAction::ExtractToFolder),
                 ]));
             }
             items.push(MenuItem::sub("\u{f1c6}  Compress", vec![
@@ -261,7 +261,7 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             items.push(MenuItem::sep());
             items.push(MenuItem::new("\u{f0ea}  Paste", MenuAction::Paste).enabled_if(has_clip));
             match app.undo_stack.last() {
-                Some((label, _)) => items.push(MenuItem::new(&format!("\u{f0e2}  Undo: {label}"), MenuAction::Undo)),
+                Some((label, _)) => items.push(MenuItem::new(format!("\u{f0e2}  Undo: {label}"), MenuAction::Undo)),
                 None => items.push(MenuItem::new("\u{f0e2}  Undo", MenuAction::Undo).enabled_if(false)),
             }
             items.push(MenuItem::new("\u{f120}  Open Terminal Here", MenuAction::OpenTerminal));

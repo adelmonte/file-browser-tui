@@ -174,11 +174,10 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         match ev.code {
             KeyCode::Esc if !p.busy => app.unlock_prompt = None,
             KeyCode::Enter => app.submit_unlock(),
-            _ if !p.busy => {
-                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+            _ if !p.busy
+                && lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed => {
                     p.error = None;
                 }
-            }
             _ => {}
         }
         return false;
