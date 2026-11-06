@@ -99,7 +99,11 @@ fn render_location(f: &mut Frame, app: &mut App, field: Rect) {
         let line = if app.path_bar_all {
             // In the menus' highlight color, without a cursor, so it reads
             // as selected text and not as a field to type at the end of
-            Line::from(Span::styled(app.path_bar_input.clone(), style.bg(theme::rgb(theme::get().highlight))))
+            let w = (app.path_bar_input.chars().count() as u16).min(crumbs_area.width);
+            let hl = theme::get().highlight;
+            let behind = underlay::text_selection(app, 10, Rect { width: w, ..crumbs_area }, hl);
+            let style = if behind { style } else { style.bg(theme::rgb(hl)) };
+            Line::from(Span::styled(app.path_bar_input.clone(), style))
         } else {
             Line::from(crate::lineedit::spans(&app.path_bar_input, app.path_bar_cursor, style))
         };

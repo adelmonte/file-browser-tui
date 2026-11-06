@@ -213,6 +213,18 @@ fn upload_uniform(out: &mut String, id: u32, w: u32, h: u32, px: [u8; 4]) {
     }
 }
 
+/// Selected text in a field (`rect`, one row): above the field's own
+/// background, which hides cell backgrounds, and under the text.
+pub fn text_selection(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
+    let (cw, ch) = cell(app);
+    let pad = (ch as f32 * 0.08).round() as u32;
+    place(app, slot, Placed {
+        x: rect.x as u32 * cw, y: rect.y as u32 * ch + pad,
+        w: rect.width as u32 * cw, h: (rect.height as u32 * ch).saturating_sub(2 * pad),
+        radius: (ch as f32 * 0.15).max(2.0) as u32, fill: color, border: None, z: -1, alpha: 255,
+    })
+}
+
 /// A rounded bar at pixel geometry (x, y, w, h), under the text.
 pub fn bar(app: &mut App, slot: u32, (x, y, w, h): (u32, u32, u32, u32), color: (u8, u8, u8)) -> bool {
     place(app, slot, Placed { x, y, w, h, radius: w / 2, fill: color, border: None, z: -1, alpha: 255 })
