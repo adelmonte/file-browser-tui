@@ -122,16 +122,17 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                 app.eject_rects.push((r, i));
                 text_w -= 3;
             }
-            // A menu over the end of the row (the View menu over the
-            // sidebar's right edge) that leaves the whole name visible: the
-            // name keeps its look. One over the name itself (a right-click
-            // menu opened on it) turns it plain, which the menu cuts off
-            // cleanly; cut short, kitty's text left a stray first letter
+            // A menu over the rest of the row (the View menu over the
+            // sidebar's edge, a right-click menu opened on the name) cuts
+            // the name off where it starts, keeping its look and place:
+            // kitty's centered text can't run under the menu, and plain
+            // text would jump to the row's top line
             let row_rect = Rect { x: text_x, y, width: text_w, height: h };
+            let mut cut = false;
             if let Some(mx) = menu_rects.iter().filter(|m| m.intersects(row_rect)).map(|m| m.x).min()
                 && mx > text_x
-                && kitty::centered_width(row.name.chars().count(), h) <= mx - text_x
             {
+                cut = kitty::centered_width(row.name.chars().count(), h) > mx - text_x;
                 text_w = text_w.min(mx - text_x);
             }
             let name: String = row.name.chars().take(text_w as usize).collect();
@@ -140,7 +141,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let covered = dialog || menu_rects.iter().any(|m| m.intersects(name_rect));
             if kitty && h > 1 && row.usage.is_none() && !covered {
                 // Kitty can center normal-size text across both rows
-                let (seq, used) = kitty::centered_text(text_x, y, h, text_w, &name, fg, bg);
+                let (seq, used) = kitty::centered_text_cut(text_x, y, h, text_w, &name, fg, bg, cut);
                 let buf = f.buffer_mut();
                 for cy in y..y + h {
                     for cx in text_x..text_x + used {

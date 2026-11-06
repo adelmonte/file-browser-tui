@@ -45,6 +45,17 @@ pub fn centered_text(
     x: u16, y: u16, rows: u16, max_w: u16, text: &str,
     fg: (u8, u8, u8), bg: Option<(u8, u8, u8)>,
 ) -> (String, u16) {
+    centered_text_cut(x, y, rows, max_w, text, fg, bg, false)
+}
+
+/// `centered_text` for text cut off by something drawn right after it (a
+/// menu over the rest of a name): no spare column, since the edge it
+/// would keep clear is covered anyway, so one more letter shows.
+#[allow(clippy::too_many_arguments)]
+pub fn centered_text_cut(
+    x: u16, y: u16, rows: u16, max_w: u16, text: &str,
+    fg: (u8, u8, u8), bg: Option<(u8, u8, u8)>, cut: bool,
+) -> (String, u16) {
     use std::fmt::Write;
     let rows = rows.clamp(1, 7);
     let mut out = format!("\x1b[{};{}H\x1b[38;2;{};{};{}m", y + 1, x + 1, fg.0, fg.1, fg.2);
@@ -57,12 +68,12 @@ pub fn centered_text(
     while !chars.is_empty() {
         // Block width is rows * w columns. Kitty sets the text a hair wider
         // than normal cells, so keep a spare column or the last glyph clips
-        let room = (((max_w - used) / rows).min(7) * rows).saturating_sub(1) as usize;
+        let room = (((max_w - used) / rows).min(7) * rows).saturating_sub(u16::from(!cut)) as usize;
         let n = chars.len().min(room);
         if n == 0 {
             break;
         }
-        let w = (n as u16 + 1).div_ceil(rows);
+        let w = (n as u16 + u16::from(!cut)).div_ceil(rows);
         let chunk: String = chars[..n].iter().collect();
         let _ = write!(out, "\x1b]66;s={rows}:w={w}:n=1:d={rows}:v=2;{chunk}\x07");
         used += w * rows;
@@ -177,6 +188,16 @@ mod tests {
     fn image_id_from_transmission() {
         assert_eq!(super::image_id("\x1b_Gq=2,i=487046015,a=T,U=1,f=32,m=1;AAAA"), Some(487046015));
         assert_eq!(super::image_id("\x1b_Gq=2,m=0;i=5"), None);
+    }
+
+    #[test]
+    fn cut_text_fits_its_room() {
+        for room in 1..20u16 {
+            let (_, used) = super::centered_text_cut(0, 0, 2, room, "Downloads and more", (0, 0, 0), None, true);
+            assert!(used <= room, "{room}: {used}");
+        }
+        let (s, _) = super::centered_text_cut(0, 0, 2, 3, "Home", (0, 0, 0), None, true);
+        assert!(s.contains(";Ho\x07"), "{s:?}");
     }
 
     #[test]
