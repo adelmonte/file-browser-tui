@@ -186,8 +186,8 @@ fn sections(app: &App) -> Vec<(&'static str, Vec<Row>)> {
         target: SidebarTarget::Device(i),
         icon: d.icon().into(),
         name: d.name.clone(),
-        current: std::path::Path::new(&d.path) == cwd,
-        dim: false,
+        current: d.is_mounted() && std::path::Path::new(&d.path) == cwd,
+        dim: !d.is_mounted(),
         usage: d.usage,
         eject: d.can_unmount(),
     }).collect();

@@ -170,6 +170,19 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
     }
 
     // New folder/file/pasted content name prompt
+    if let Some(ref mut p) = app.unlock_prompt {
+        match ev.code {
+            KeyCode::Esc if !p.busy => app.unlock_prompt = None,
+            KeyCode::Enter => app.submit_unlock(),
+            _ if !p.busy => {
+                if lineedit::edit(&mut p.input, &mut p.cursor_pos, ev) == Edit::Changed {
+                    p.error = None;
+                }
+            }
+            _ => {}
+        }
+        return false;
+    }
     if let Some(ref mut p) = app.name_prompt {
         match ev.code {
             KeyCode::Esc => { app.name_prompt = None; }
@@ -436,6 +449,18 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
         }
         return;
     }
+    if let Some(p) = &app.unlock_prompt {
+        if ev.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some((unlock, cancel)) = app.prompt_buttons
+        {
+            if contains(unlock, col, row) {
+                app.submit_unlock();
+            } else if contains(cancel, col, row) && !p.busy {
+                app.unlock_prompt = None;
+            }
+        }
+        return;
+    }
     if app.name_prompt.is_some() {
         if ev.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some((create, cancel)) = app.prompt_buttons
@@ -569,14 +594,16 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 return;
             }
             if let Some(target) = sidebar::target_at(app, col, row) {
-                let path = match target {
+                let path: Option<std::path::PathBuf> = match target {
                     // Opens on release, unless it turns into a reorder drag
                     crate::events::SidebarTarget::Place(i) => {
                         app.place_drag = Some(crate::events::PlaceDrag { from: i, origin_row: row, active: false, target: None });
                         None
                     }
-                    crate::events::SidebarTarget::Device(i) =>
-                        app.devices.get(i).map(|d| std::path::PathBuf::from(&d.path)),
+                    crate::events::SidebarTarget::Device(i) => {
+                        app.open_device(i);
+                        None
+                    }
                     crate::events::SidebarTarget::Phone(i) => {
                         app.open_phone(i);
                         None

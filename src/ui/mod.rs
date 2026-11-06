@@ -148,6 +148,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.name_prompt.is_some() {
         render_name_prompt(f, app);
     }
+    if app.unlock_prompt.is_some() {
+        render_unlock_prompt(f, app);
+    }
     app.conflict_buttons.clear();
     if app.conflict_prompt.is_some() {
         render_conflict_prompt(f, app);
@@ -216,6 +219,65 @@ fn confirm_delete_rect(term: Rect) -> Rect {
 
 /// Dolphin's Create Folder / Create File / Paste Clipboard Contents
 /// dialogs: a name field with Create and Cancel buttons.
+/// Passphrase for an encrypted drive: typed as dots, with the last
+/// attempt's error under it.
+fn render_unlock_prompt(f: &mut Frame, app: &mut App) {
+    let Some(p) = &app.unlock_prompt else { return; };
+    let term = f.area();
+    let w = 52u16.min(term.width);
+    let h = 8u16.min(term.height);
+    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let bg = Style::default().bg(theme::panel()).fg(theme::text());
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::border()))
+            .title(" Unlock Drive ")
+            .style(bg),
+        area,
+    );
+    let field_w = w.saturating_sub(6) as usize;
+    let dots = p.input.chars().count();
+    let cur = p.input[..p.cursor_pos.min(p.input.len())].chars().count();
+    let mut masked: String = "\u{2022}".repeat(cur);
+    masked.push(crate::lineedit::bar_cursor());
+    masked.push_str(&"\u{2022}".repeat(dots - cur));
+    let chars: Vec<char> = masked.chars().collect();
+    let visible: String = chars.iter().skip((cur + 1).saturating_sub(field_w)).take(field_w).collect();
+    let mut name = p.name.clone();
+    if name.chars().count() > field_w.saturating_sub(16) {
+        name = name.chars().take(field_w.saturating_sub(17)).collect::<String>() + "\u{2026}";
+    }
+    let status = match (&p.error, p.busy) {
+        (_, true) => Line::styled("  Unlocking\u{2026}", Style::default().fg(theme::muted())),
+        (Some(e), _) => Line::styled(format!("  {e}"), Style::default().fg(theme::rgb(theme::get().error))),
+        (None, _) => Line::raw(""),
+    };
+    let lines = vec![
+        Line::raw(format!("  Passphrase for {name}:")),
+        Line::raw(""),
+        Line::from(vec![
+            ratatui::text::Span::raw("  "),
+            ratatui::text::Span::styled(format!("{visible:<field_w$}"), Style::default().bg(theme::input()).fg(theme::text_strong())),
+        ]),
+        status,
+    ];
+    f.render_widget(
+        Paragraph::new(lines).style(bg),
+        Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(2) },
+    );
+    let y = area.bottom().saturating_sub(2);
+    let ok_label = " Unlock ";
+    let cancel_label = " Cancel ";
+    let cancel = Rect { x: area.right().saturating_sub(3 + cancel_label.len() as u16), y, width: cancel_label.len() as u16, height: 1 };
+    let ok = Rect { x: cancel.x.saturating_sub(2 + ok_label.len() as u16), y, width: ok_label.len() as u16, height: 1 };
+    f.render_widget(Paragraph::new(ok_label).style(Style::default().bg(theme::selection()).fg(theme::text_strong()).add_modifier(Modifier::BOLD)), ok);
+    f.render_widget(Paragraph::new(cancel_label).style(Style::default().bg(theme::input()).fg(theme::text())), cancel);
+    app.prompt_buttons = Some((ok, cancel));
+}
+
 fn render_name_prompt(f: &mut Frame, app: &mut App) {
     use crate::events::PromptKind;
     let Some(ref p) = app.name_prompt else { return; };

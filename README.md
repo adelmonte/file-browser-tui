@@ -34,7 +34,10 @@ action also has a keyboard shortcut.
   Copy/Move to Other Side. With one tab and no split, neither takes any space.
 - **Places sidebar**: drag to reorder, right-click to add or remove. Drives show how
   full they are, and removable drives and network mounts get an eject button.
-  Phones paired with KDE Connect show up too.
+  Plugged-in drives appear greyed out until clicked, which mounts them; encrypted
+  (LUKS) drives ask for their passphrase. Phones paired with KDE Connect show up too.
+  If the folder you're in disappears (a drive pulled out), the view goes back to the
+  last folder that's still there.
 - **Location bar**: each folder in the path is clickable (click `Pictures` in
   `/home/me/Pictures/Wallpapers/` to go there), or type a path with completion
   (`Ctrl+L`, `F6`, `Alt+D`).
@@ -81,7 +84,7 @@ Optional tools, used when installed. `file-browser-tui --check` lists what it fo
 | `xdg-utils` | opening files with their default app |
 | `libarchive` (`bsdtar`) | Extract (`7z`, `unrar` or `unzip` are used if it can't) |
 | `zip` | Compress to zip |
-| `udisks2` | unmounting and safely removing drives |
+| `udisks2` | mounting, unlocking and safely removing drives |
 | `kdeconnect` | Send to Device, browsing phones |
 | `glib2` (`gio`) | file type icons for unusual files |
 

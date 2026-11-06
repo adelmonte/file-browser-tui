@@ -25,6 +25,7 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
                     app.selection = Some(idx);
                     app.enter_selected();
                 }
+                MenuTarget::Device(i) => app.open_device(i),
                 _ => {
                     if let Some(path) = target_path(app, target)
                         && path.is_dir() { app.navigate_to(path); }

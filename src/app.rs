@@ -311,6 +311,10 @@ pub struct App {
     unmount_tx: mpsc::Sender<(String, Result<(), String>)>,
     /// Background jobs (extracting, ...) report here with a notice to show.
     pub job_tx: mpsc::Sender<String>,
+    /// Drives mounted (or not) in the background: device, where it went.
+    mounted_tx: mpsc::Sender<(String, Result<PathBuf, String>)>,
+    mounted_rx: mpsc::Receiver<(String, Result<PathBuf, String>)>,
+    pub unlock_prompt: Option<crate::events::UnlockPrompt>,
     job_rx: mpsc::Receiver<String>,
     unmount_rx: mpsc::Receiver<(String, Result<(), String>)>,
     pub sidebar_w: u16,
@@ -449,6 +453,7 @@ impl App {
         let devices = crate::places::default_devices();
         let (unmount_tx, unmount_rx) = mpsc::channel();
         let (job_tx, job_rx) = mpsc::channel();
+        let (mounted_tx, mounted_rx) = mpsc::channel();
         let dirstates = DirStates::load();
 
         let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
@@ -556,6 +561,9 @@ impl App {
             unmount_tx,
             job_tx,
             job_rx,
+            mounted_tx,
+            mounted_rx,
+            unlock_prompt: None,
             unmount_rx,
             menu: None,
             dnd: Default::default(),
@@ -629,7 +637,13 @@ impl App {
         }
         let mut listing = match crate::fs::read_dir(&self.cwd, self.show_hidden, self.folders_first, &self.sort) {
             Ok(listing) => listing,
-            Err(e) => { tracing::error!("reload_dir: {e}"); return; }
+            Err(e) => {
+                tracing::error!("reload_dir: {e}");
+                if !self.cwd.is_dir() {
+                    self.leave_if_gone();
+                }
+                return;
+            }
         };
 
         if self.view_mode == ViewMode::Details && !self.expanded.is_empty() {
@@ -907,6 +921,71 @@ impl App {
         self.quit_armed = Some(std::time::Instant::now());
         self.notify("A file operation is still running: quit again to cancel it and quit".into());
         false
+    }
+
+    /// Open a device from the sidebar: go there if it's mounted, mount a
+    /// plugged-in drive first, or ask for an encrypted one's passphrase.
+    pub fn open_device(&mut self, i: usize) {
+        use crate::fs::mounts::MountKind;
+        let Some(dev) = self.devices.get(i).cloned() else { return; };
+        match dev.kind {
+            MountKind::Locked => {
+                self.unlock_prompt = Some(crate::events::UnlockPrompt {
+                    device: dev.source, name: dev.name, input: String::new(), cursor_pos: 0, error: None, busy: false,
+                });
+            }
+            MountKind::Unmounted => {
+                self.notify(format!("Mounting {}\u{2026}", dev.name));
+                let tx = self.mounted_tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send((dev.source.clone(), crate::fs::mounts::mount(&dev.source)));
+                });
+            }
+            _ => {
+                let path = PathBuf::from(&dev.path);
+                if path.is_dir() {
+                    self.navigate_to(path);
+                }
+            }
+        }
+    }
+
+    /// Try the typed passphrase (in the background; the prompt shows the
+    /// outcome).
+    pub fn submit_unlock(&mut self) {
+        let Some(p) = &mut self.unlock_prompt else { return; };
+        if p.busy || p.input.is_empty() {
+            return;
+        }
+        let passphrase = std::mem::take(&mut p.input);
+        p.cursor_pos = 0;
+        p.busy = true;
+        p.error = None;
+        let (tx, device) = (self.mounted_tx.clone(), p.device.clone());
+        std::thread::spawn(move || {
+            let result = crate::fs::mounts::unlock_and_mount(&device, passphrase.as_bytes());
+            drop(passphrase);
+            let _ = tx.send((device, result));
+        });
+    }
+
+    /// The folder on screen vanished (its drive was pulled out or unmounted
+    /// elsewhere, or it was deleted): go back to the latest folder in the
+    /// history that's still there, else home.
+    pub fn leave_if_gone(&mut self) {
+        if self.cwd.is_dir() {
+            return;
+        }
+        let gone = self.cwd.clone();
+        let alive = |p: &PathBuf| p.is_dir() && !p.starts_with(&gone);
+        self.history_back.retain(alive);
+        self.history_forward.retain(alive);
+        let to = self.history_back.pop()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        self.notify(format!("{} is gone; back in {}", gone.display(), to.display()));
+        self.cwd = to;
+        self.after_navigate();
     }
 
     /// Unmount a device in the background (and power the drive off with
@@ -1597,9 +1676,27 @@ impl App {
             self.kdeconnect_devices = devices;
         }
 
-        if let Ok(ev) = self.mount_event_rx.try_recv() {
-            let MountEvent::Updated(devs) = ev;
+        if let Some(MountEvent::Updated(devs)) = self.mount_event_rx.try_iter().last() {
             self.devices = devs;
+            self.leave_if_gone();
+            self.with_other_pane(|a| a.leave_if_gone());
+        }
+        while let Ok((device, result)) = self.mounted_rx.try_recv() {
+            let prompt = self.unlock_prompt.as_mut().filter(|p| p.device == device);
+            match (result, prompt) {
+                (Ok(path), _) => {
+                    self.unlock_prompt = None;
+                    if let Ok(devs) = crate::fs::mounts::parse_mountinfo() {
+                        self.devices = devs;
+                    }
+                    self.navigate_to(path);
+                }
+                (Err(e), Some(p)) => {
+                    p.error = Some(e);
+                    p.busy = false;
+                }
+                (Err(e), None) => self.notify(format!("Couldn't mount {device}: {e}")),
+            }
         }
         while let Ok(notice) = self.job_rx.try_recv() {
             self.notify(notice);

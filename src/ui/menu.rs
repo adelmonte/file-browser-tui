@@ -286,6 +286,14 @@ pub fn build_context_menu(app: &App, target: MenuTarget) -> Vec<MenuItem> {
             items.push(MenuItem::new("\u{f067}  Add Current Dir to Places", MenuAction::AddToPlaces));
         }
 
+        MenuTarget::Device(idx) if app.devices.get(idx).is_some_and(|d| !d.is_mounted()) => {
+            let label = match app.devices[idx].kind {
+                crate::fs::mounts::MountKind::Locked => "\u{f023}  Unlock and Open",
+                _ => "\u{f07c}  Mount and Open",
+            };
+            items.push(MenuItem::new(label, MenuAction::Open));
+        }
+
         MenuTarget::Device(idx) => {
             items.push(MenuItem::new("\u{f07c}  Open", MenuAction::Open));
             items.push(MenuItem::new("\u{f2d2}  Open in New Tab", MenuAction::OpenNewTab));

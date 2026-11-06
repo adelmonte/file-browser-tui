@@ -148,6 +148,19 @@ pub struct NamePrompt {
     pub placeholder: String,
 }
 
+/// Asking for an encrypted drive's passphrase.
+pub struct UnlockPrompt {
+    /// The locked device, e.g. /dev/sdb1.
+    pub device: String,
+    pub name: String,
+    pub input: String,
+    pub cursor_pos: usize,
+    /// Why the last try failed (wrong passphrase, ...).
+    pub error: Option<String>,
+    /// Unlocking and mounting in the background.
+    pub busy: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictButton {
     /// Overwrite, or Write Into for folders.
