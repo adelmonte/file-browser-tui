@@ -1809,9 +1809,13 @@ impl App {
                 // re-places moved images itself).
                 Some((nr, nbg, ndim)) if nbg == bg && ndim == dim && nr == rect => {}
                 Some((nr, _, _)) if *nr != *rect => {}
-                // Variant changed (selection toggled) or image vanished
-                // (scrolled off, dir changed, occluded by an overlay).
-                _ => deletions.push((path.clone(), *rect)),
+                // Look changed (hover, selection, cut): both looks stay, so
+                // going back reuses the image kitty already has. Dropping
+                // them also dropped the one just sent, which was then built
+                // and sent again: a flicker on every hover change
+                Some(_) => {}
+                // Vanished (scrolled off, dir changed, occluded by an overlay)
+                None => deletions.push((path.clone(), *rect)),
             }
         }
 
