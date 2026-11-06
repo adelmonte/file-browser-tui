@@ -299,54 +299,6 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return run_action(app, action);
     }
 
-    // Fixed keys: selection movement, open, escape
-    match ev.code {
-        KeyCode::Esc if app.search.is_some() => app.close_search(),
-        KeyCode::Esc => {
-            app.selection = None;
-            app.multi_selection.clear();
-            app.drag_state = DragState::Idle;
-        }
-
-        // Shift+Arrow: extend multi-selection (must precede plain arrow arms)
-        KeyCode::Left  if ev.modifiers.contains(KeyModifiers::SHIFT) => app.extend_selection(-1),
-        KeyCode::Right if ev.modifiers.contains(KeyModifiers::SHIFT) => app.extend_selection(1),
-        KeyCode::Up    if ev.modifiers.contains(KeyModifiers::SHIFT) => {
-            let step = app.row_step(false);
-            app.extend_selection(step);
-        }
-        KeyCode::Down  if ev.modifiers.contains(KeyModifiers::SHIFT) => {
-            let step = app.row_step(true);
-            app.extend_selection(step);
-        }
-
-        // Navigation (plain, clears multi-selection)
-        KeyCode::Left | KeyCode::Right if app.view_mode == ViewMode::Details
-            && app.tree_key(ev.code == KeyCode::Right) => {}
-        KeyCode::Left => {
-            app.multi_selection.clear();
-            app.selection_anchor = None;
-            app.move_selection_cols(-1);
-        }
-        KeyCode::Right => {
-            app.multi_selection.clear();
-            app.selection_anchor = None;
-            app.move_selection_cols(1);
-        }
-        KeyCode::Up => {
-            app.multi_selection.clear();
-            app.selection_anchor = None;
-            app.move_selection_rows(-1);
-        }
-        KeyCode::Down => {
-            app.multi_selection.clear();
-            app.selection_anchor = None;
-            app.move_selection_rows(1);
-        }
-        KeyCode::Enter => app.enter_selected(),
-
-        _ => {}
-    }
     false
 }
 
@@ -384,6 +336,46 @@ fn run_action(app: &mut App, action: Action) -> bool {
         Action::CopyLocation => actions::execute(app, MenuAction::CopyLocation, target),
         Action::Trash => actions::trash_selection(app),
         Action::Undo => app.undo(),
+        Action::Open => app.enter_selected(),
+        Action::Cancel => {
+            if app.search.is_some() {
+                app.close_search();
+            } else {
+                app.selection = None;
+                app.multi_selection.clear();
+                app.drag_state = DragState::Idle;
+            }
+        }
+        Action::MoveLeft | Action::MoveRight => {
+            let right = action == Action::MoveRight;
+            // Details view: Left/Right fold and unfold the folder tree first
+            if !(app.view_mode == ViewMode::Details && app.tree_key(right)) {
+                app.multi_selection.clear();
+                app.selection_anchor = None;
+                app.move_selection_cols(if right { 1 } else { -1 });
+            }
+        }
+        Action::MoveUp | Action::MoveDown => {
+            app.multi_selection.clear();
+            app.selection_anchor = None;
+            app.move_selection_rows(if action == Action::MoveDown { 1 } else { -1 });
+        }
+        Action::SelectLeft => app.extend_selection(-1),
+        Action::SelectRight => app.extend_selection(1),
+        Action::SelectUp | Action::SelectDown => {
+            let step = app.row_step(action == Action::SelectDown);
+            app.extend_selection(step);
+        }
+        Action::First | Action::SelectToFirst => app.select_to(0, action == Action::SelectToFirst),
+        Action::Last | Action::SelectToLast => {
+            let last = app.listing.entries.len().saturating_sub(1);
+            app.select_to(last, action == Action::SelectToLast);
+        }
+        Action::PageUp | Action::PageDown | Action::SelectPageUp | Action::SelectPageDown => {
+            let down = matches!(action, Action::PageDown | Action::SelectPageDown);
+            let target = app.page_target(down);
+            app.select_to(target, matches!(action, Action::SelectPageUp | Action::SelectPageDown));
+        }
         Action::Delete => {
             let paths = actions::selected_paths(app);
             if !paths.is_empty() {

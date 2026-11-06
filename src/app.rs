@@ -1796,6 +1796,51 @@ impl App {
         if down { cols } else { -cols }
     }
 
+    /// Select entry `idx`, or with `extend` everything from the anchor to it.
+    pub fn select_to(&mut self, idx: usize, extend: bool) {
+        let len = self.listing.entries.len();
+        if len == 0 { return; }
+        let idx = idx.min(len - 1);
+        if extend {
+            let anchor = self.selection_anchor.unwrap_or(self.selection.unwrap_or(idx));
+            self.selection_anchor = Some(anchor);
+            self.multi_selection = (anchor.min(idx)..=anchor.max(idx)).collect();
+        } else {
+            self.multi_selection.clear();
+            self.selection_anchor = None;
+        }
+        self.selection = Some(idx);
+        self.ensure_selection_visible();
+    }
+
+    /// The entry a screenful up or down from the selection.
+    pub fn page_target(&self, down: bool) -> usize {
+        let len = self.listing.entries.len();
+        let Some(cur) = self.selection else { return 0; };
+        let height = self.grid_area.height.max(1);
+        match self.view_mode {
+            ViewMode::Icons => {
+                let mut idx = cur;
+                for _ in 0..(height / self.cell_h.max(1)).max(1) {
+                    match self.icon_neighbor(idx, down) {
+                        Some(n) => idx = n,
+                        None => return if down { len.saturating_sub(1) } else { 0 },
+                    }
+                }
+                idx
+            }
+            ViewMode::Details => {
+                let page = (height as usize).saturating_sub(1).max(1);
+                if down { (cur + page).min(len.saturating_sub(1)) } else { cur.saturating_sub(page) }
+            }
+            ViewMode::Compact => {
+                let cols = self.grid_cols.max(1) as usize;
+                let page = (height / crate::ui::compact::COMPACT_CELL_H).max(1) as usize * cols;
+                if down { (cur + page).min(len.saturating_sub(1)) } else { cur.saturating_sub(page) }
+            }
+        }
+    }
+
     /// Extend the multi-selection by delta cells from the current anchor.
     pub fn extend_selection(&mut self, delta: i32) {
         let len = self.listing.entries.len();

@@ -119,18 +119,24 @@ images line up with the edges, and passes Shift+click, Ctrl+Shift+click and
 
 ## Keyboard shortcuts
 
-Dolphin's defaults. `F1` in the app lists them all, including any you've changed.
+Dolphin's defaults, and every one can be changed (see [Keys](#keys)). `F1` in the app
+lists them all, including any you've changed.
 
 | Key | Action |
 | --- | --- |
+| Arrows | move |
+| `Home` / `End` | first / last item |
+| `PageUp` / `PageDown` | up / down a page |
 | `Enter` | open |
+| `Esc` | clear the selection, close search |
 | `Backspace`, `Alt+←` | back |
 | `Alt+→` | forward |
 | `Alt+↑` | up a folder |
 | `Ctrl+L`, `F6`, `Alt+D` | edit the location |
 | `Ctrl+F` | search |
 | `Ctrl+A` | select all |
-| `Shift+arrows`, `Shift+click`, `Ctrl+click` | extend the selection |
+| `Shift` + arrows, `Home`, `End`, `PageUp`, `PageDown` | extend the selection |
+| `Shift+click` / `Ctrl+click` | select a range / add or remove one |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste |
 | `Ctrl+Alt+C` | copy the location |
 | `Ctrl+Z` | undo |
@@ -158,14 +164,18 @@ changed; changes you make in a folder are remembered for that folder.
 
 ### Keys
 
-Listing an action replaces its default keys; an empty list unbinds it. The generated
-config lists every action.
+Every shortcut is an action you can rebind, from moving with the arrows to tabs and
+split view. Listing an action replaces its default keys; an empty list unbinds it.
+The generated config lists every action with its default keys. (Keys inside text
+fields and dialogs, like typing a name, stay fixed.)
 
 ```toml
 [keys]
 new_folder = ["F10", "Alt+F"]
 rename = ["F2", "Alt+R"]
 up = ["Alt+Up", "Shift+Backspace"]
+move_down = ["Down", "J"]
+move_up = ["Up", "K"]
 ```
 
 ### Colors

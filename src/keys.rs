@@ -10,6 +10,24 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum Action {
     Quit,
     Undo,
+    Open,
+    Cancel,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    SelectLeft,
+    SelectRight,
+    SelectUp,
+    SelectDown,
+    First,
+    Last,
+    PageUp,
+    PageDown,
+    SelectToFirst,
+    SelectToLast,
+    SelectPageUp,
+    SelectPageDown,
     NewTab,
     CloseTab,
     NextTab,
@@ -50,6 +68,24 @@ pub enum Action {
 /// Config name, action, Dolphin's default keys, and the help text.
 pub const ACTIONS: &[(&str, Action, &[&str], &str)] = &[
     ("quit", Action::Quit, &["Ctrl+Q"], "Quit"),
+    ("open", Action::Open, &["Enter"], "Open"),
+    ("cancel", Action::Cancel, &["Esc"], "Clear the selection / close search"),
+    ("move_left", Action::MoveLeft, &["Left"], "Move left (Details: collapse)"),
+    ("move_right", Action::MoveRight, &["Right"], "Move right (Details: expand)"),
+    ("move_up", Action::MoveUp, &["Up"], "Move up"),
+    ("move_down", Action::MoveDown, &["Down"], "Move down"),
+    ("select_left", Action::SelectLeft, &["Shift+Left"], "Extend selection left"),
+    ("select_right", Action::SelectRight, &["Shift+Right"], "Extend selection right"),
+    ("select_up", Action::SelectUp, &["Shift+Up"], "Extend selection up"),
+    ("select_down", Action::SelectDown, &["Shift+Down"], "Extend selection down"),
+    ("first", Action::First, &["Home"], "First item"),
+    ("last", Action::Last, &["End"], "Last item"),
+    ("page_up", Action::PageUp, &["PageUp"], "Up a page"),
+    ("page_down", Action::PageDown, &["PageDown"], "Down a page"),
+    ("select_to_first", Action::SelectToFirst, &["Shift+Home"], "Extend selection to the first item"),
+    ("select_to_last", Action::SelectToLast, &["Shift+End"], "Extend selection to the last item"),
+    ("select_page_up", Action::SelectPageUp, &["Shift+PageUp"], "Extend selection up a page"),
+    ("select_page_down", Action::SelectPageDown, &["Shift+PageDown"], "Extend selection down a page"),
     ("help", Action::Help, &["F1"], "Show this help"),
     ("search", Action::Search, &["Ctrl+F"], "Search"),
     ("select_all", Action::SelectAll, &["Ctrl+A"], "Select all"),
@@ -242,6 +278,22 @@ mod tests {
 
     fn ev(code: KeyCode, m: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, m)
+    }
+
+    #[test]
+    fn every_default_key_parses_and_is_its_actions_alone() {
+        let (keymap, problems) = Keymap::new(&HashMap::new());
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut seen = HashMap::new();
+        for (name, action, keys, _) in ACTIONS {
+            for spec in *keys {
+                let combo = Combo::parse(spec).unwrap_or_else(|| panic!("{name}: {spec}"));
+                if let Some(other) = seen.insert(combo, *name) {
+                    panic!("{spec} is the default for both {other} and {name}");
+                }
+                assert_eq!(keymap.map.get(&combo), Some(action), "{name}: {spec}");
+            }
+        }
     }
 
     #[test]
