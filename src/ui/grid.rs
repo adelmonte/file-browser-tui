@@ -368,6 +368,10 @@ pub(crate) fn render_cell_image(
                 // Note the images sent for this item, to free them in kitty
                 // when it leaves the screen
                 let ids: Vec<u32> = app.kitty_transmits[sent..].iter().filter_map(|t| kitty::image_id(t)).collect();
+                let bytes: usize = app.kitty_transmits[sent..].iter().map(|t| t.len()).sum();
+                if bytes > 0 {
+                    *app.kitty_bytes.entry(entry_path.clone()).or_default() += bytes;
+                }
                 if !ids.is_empty() {
                     let known = app.kitty_ids.entry(entry_path.clone()).or_default();
                     for id in ids {

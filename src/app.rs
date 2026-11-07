@@ -434,6 +434,11 @@ pub struct App {
     /// Kitty image ids sent for each item's icon or thumbnail, freed when
     /// it leaves the screen.
     pub kitty_ids: HashMap<PathBuf, Vec<u32>>,
+    /// Bytes sent to kitty for each item's images.
+    pub kitty_bytes: HashMap<PathBuf, usize>,
+    /// Items off screen whose images kitty still holds, oldest first: back
+    /// on screen (scrolled back, the folder reopened) they cost nothing.
+    kitty_parked: std::collections::VecDeque<PathBuf>,
     /// Ids to free after this frame.
     pub kitty_free: Vec<u32>,
     /// The mount watcher's first device list has arrived.
@@ -649,6 +654,8 @@ impl App {
             post_draw: Vec::new(),
             post_text: Vec::new(),
             kitty_ids: HashMap::new(),
+            kitty_bytes: HashMap::new(),
+            kitty_parked: std::collections::VecDeque::new(),
             kitty_free: Vec::new(),
             devices_ready: false,
             post_text_shown: std::collections::HashSet::new(),
@@ -1871,6 +1878,8 @@ impl App {
     pub fn forget_images(&mut self) {
         self.kitty_delete_all = false;
         self.kitty_free.extend(self.kitty_ids.drain().flat_map(|(_, ids)| ids));
+        self.kitty_bytes.clear();
+        self.kitty_parked.clear();
         self.underlays.clear();
         self.band_uploaded = None;
         self.band_shown = None;
@@ -1880,6 +1889,7 @@ impl App {
     }
 
     pub fn kitty_frame_diff(&mut self) -> (Vec<Rect>, bool) {
+        const KITTY_PARK_BYTES: usize = 48 << 20;
         let mut deletions: Vec<(PathBuf, Rect)> = Vec::new();
 
         for (path, (rect, bg, dim)) in &self.prev_frame_images {
@@ -1906,11 +1916,25 @@ impl App {
             return (Vec::new(), true);
         }
 
+        // Gone from the screen: kitty keeps the images a while, so scrolling
+        // back (or reopening the folder) shows them without sending them
+        // again; freed oldest first past the budget. Freed at once, a quick
+        // scroll up and down sent the same megabytes over and over, enough
+        // load on kitty to blink the sidebar's icons
         for (path, _) in &deletions {
-            self.icon_cache.invalidate(path);
-            self.thumb_cache.invalidate(path);
-            // Built and sent anew when it's back: free what kitty holds
-            if let Some(ids) = self.kitty_ids.remove(path) {
+            self.kitty_parked.retain(|p| p != path);
+            self.kitty_parked.push_back(path.clone());
+        }
+        if !self.kitty_parked.is_empty() {
+            let shown = &self.prev_frame_images;
+            self.kitty_parked.retain(|p| !shown.contains_key(p));
+        }
+        let mut parked: usize = self.kitty_parked.iter().filter_map(|p| self.kitty_bytes.get(p)).sum();
+        while parked > KITTY_PARK_BYTES && let Some(path) = self.kitty_parked.pop_front() {
+            parked -= self.kitty_bytes.remove(&path).unwrap_or(0);
+            self.icon_cache.invalidate(&path);
+            self.thumb_cache.invalidate(&path);
+            if let Some(ids) = self.kitty_ids.remove(&path) {
                 self.kitty_free.extend(ids);
             }
         }

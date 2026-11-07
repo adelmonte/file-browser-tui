@@ -122,7 +122,7 @@ impl ThumbCache {
         Self {
             // A few screens' worth: what's shown plus what's ahead
             images: LruCache::new(NonZeroUsize::new(600).unwrap()),
-            protocols: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            protocols: LruCache::new(NonZeroUsize::new(300).unwrap()),
             shared,
             rx_image,
             pending: HashSet::new(),
