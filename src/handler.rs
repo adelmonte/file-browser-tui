@@ -591,9 +591,13 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 return;
             }
             if contains(p.filter_rect, col, row) {
+                // A dropdown at the window's foot: it opens upward, just
+                // above the button
                 let items = crate::pick::filter_menu(p);
                 let r = p.filter_rect;
-                app.menu = Some(MenuState::new(MenuKind::Sort, MenuTarget::Empty, items, (r.x, r.y)));
+                let tall = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
+                let (_, h) = menu::menu_size(&items, tall);
+                app.menu = Some(MenuState::new(MenuKind::Sort, MenuTarget::Empty, items, (r.x, r.y.saturating_sub(h + 1))));
                 return;
             }
         }

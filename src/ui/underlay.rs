@@ -65,7 +65,10 @@ fn cell(app: &App) -> (u32, u32) {
 /// `pad` pixels into the rows above and below. `slot` identifies the field.
 /// Returns false when it can't (not Kitty): fill the cells instead.
 pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
-    if rect.y == 0 {
+    // A menu over it: plain cells this frame, which the menu covers. The
+    // box would show through the menu (its panel is drawn further down)
+    let reach = Rect { y: rect.y.saturating_sub(1), height: rect.height + 2, ..rect };
+    if rect.y == 0 || app.menu_cover.iter().any(|m| m.intersects(reach)) {
         return false;
     }
     let pad = field_pad(app);

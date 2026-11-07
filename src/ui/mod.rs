@@ -31,6 +31,8 @@ use crate::app::{App, TOPBAR_H, ViewMode};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    let kitty = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
+    app.menu_cover = app.menu.as_ref().map(|m| menu::covered(m, area, kitty)).unwrap_or_default();
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)

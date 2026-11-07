@@ -470,7 +470,7 @@ fn item_rows(rect: Rect, items: &[MenuItem], tall: bool) -> Vec<(u16, u16)> {
     }).collect()
 }
 
-fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
+pub fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
         .map(|i| {
             let arrow = if i.submenu.is_empty() { 0 } else { 2 };

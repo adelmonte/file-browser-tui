@@ -459,6 +459,8 @@ pub struct App {
     pub kitty_delete_all: bool,
     /// Images sent this frame, and their bytes (for the frame log).
     pub frame_sent: (usize, usize),
+    /// Where the open menu goes this frame, for layers drawn before it.
+    pub menu_cover: Vec<Rect>,
     /// Until then, icons still loading show nothing rather than a glyph
     /// that would flash for a few frames.
     pub icons_grace_until: std::time::Instant,
@@ -660,6 +662,7 @@ impl App {
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
             frame_sent: (0, 0),
+            menu_cover: Vec::new(),
             icons_grace_until: std::time::Instant::now(),
         };
         app.apply_dir_state();
