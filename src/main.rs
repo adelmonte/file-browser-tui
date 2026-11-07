@@ -244,7 +244,7 @@ Options:
   --kitty     open in a new kitty window set up for the app (no padding,
               Shift/Ctrl+Shift clicks reach it); use this in launchers
   --pick REQUEST
-              pick files for another program, as file-browser-portal asks
+              pick files for another program, as xdg-desktop-portal-tui asks
               (a TOML request; with --kitty first, in a window of its own)
   --check     list the optional tools and features found on this system
   --version   print the version

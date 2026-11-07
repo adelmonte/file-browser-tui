@@ -126,12 +126,12 @@ images line up with the edges, and passes Shift+click, Ctrl+Shift+click and
 
 ### As the file dialog for other programs
 
-[file-browser-portal](https://github.com/adelmonte/file-browser-portal) makes the
+[xdg-desktop-portal-tui](https://github.com/adelmonte/xdg-desktop-portal-tui) makes the
 app the system's Open and Save dialog (an xdg-desktop-portal file chooser, used by
 Firefox and others). It starts `file-browser-tui --kitty --pick REQUEST`, which shows a
 bar along the bottom: a name field when saving, the program's file types, and
 Open/Save and Cancel. Enter or a double click picks, Esc cancels, Tab moves between
-the name field and the files. The window's app id is `file-browser-portal`, so it
+the name field and the files. The window's app id is `xdg-desktop-portal-tui`, so it
 can be floated like a dialog.
 
 ## Keyboard shortcuts

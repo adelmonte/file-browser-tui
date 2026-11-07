@@ -197,7 +197,7 @@ pub fn kitty_command(path: Option<&Path>) -> Option<Command> {
 pub fn kitty_pick_command(request: &Path, title: &str) -> Option<Command> {
     let exe = std::env::current_exe().ok()?;
     let mut cmd = Command::new("kitty");
-    cmd.arg("--app-id=file-browser-portal").args(&KITTY_ARGS[1..]).env(KITTY_ENV, "1");
+    cmd.arg("--app-id=xdg-desktop-portal-tui").args(&KITTY_ARGS[1..]).env(KITTY_ENV, "1");
     if !title.is_empty() {
         cmd.arg(format!("--title={title}"));
     }

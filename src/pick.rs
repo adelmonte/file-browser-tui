@@ -1,5 +1,5 @@
 //! Picking files for another program: the file chooser portal
-//! (file-browser-portal) starts the app with `--pick REQUEST`, a TOML file
+//! (xdg-desktop-portal-tui) starts the app with `--pick REQUEST`, a TOML file
 //! saying what to pick, and reads the answer from the file it names.
 
 use std::path::{Path, PathBuf};
