@@ -457,6 +457,8 @@ pub struct App {
     prev_frame_images: HashMap<PathBuf, FrameImage>,
     /// Request a bulk placement wipe after the next draw.
     pub kitty_delete_all: bool,
+    /// Images sent this frame, and their bytes (for the frame log).
+    pub frame_sent: (usize, usize),
     /// Until then, icons still loading show nothing rather than a glyph
     /// that would flash for a few frames.
     pub icons_grace_until: std::time::Instant,
@@ -657,6 +659,7 @@ impl App {
             frame_images: HashMap::new(),
             prev_frame_images: HashMap::new(),
             kitty_delete_all: false,
+            frame_sent: (0, 0),
             icons_grace_until: std::time::Instant::now(),
         };
         app.apply_dir_state();

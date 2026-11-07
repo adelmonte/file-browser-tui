@@ -172,6 +172,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     if !app.kitty_transmits.is_empty() {
         let mut out = std::io::stdout().lock();
+        app.frame_sent.0 += app.kitty_transmits.len();
+        app.frame_sent.1 += app.kitty_transmits.iter().map(|t| t.len()).sum::<usize>();
         for t in app.kitty_transmits.drain(..) {
             let _ = out.write_all(t.as_bytes());
         }

@@ -26,7 +26,7 @@ mod user_actions;
 use std::{io::Write, sync::mpsc, time::Duration};
 
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event, KeyEventKind,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::{execute, terminal::{SetTitle, supports_keyboard_enhancement}};
@@ -105,7 +105,7 @@ fn main() -> anyhow::Result<()> {
     // Enter alternate screen FIRST (required before Picker::from_query_stdio)
     let mut terminal = ratatui::init();
 
-    execute!(std::io::stdout(), EnableMouseCapture)?;
+    execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange)?;
 
     // Kitty keyboard protocol: distinguishes Shift+Backspace etc. and reports
     // event kinds (we filter to Press/Repeat so keys don't double-fire).
@@ -213,7 +213,7 @@ fn main() -> anyhow::Result<()> {
     if kbd_enhanced {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
-    execute!(std::io::stdout(), DisableMouseCapture)?;
+    execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange)?;
     ratatui::restore();
 
     // Persist config and per-dir view state
@@ -350,6 +350,14 @@ fn run(
         // Clean up Kitty placements for images that vanished or changed
         // this frame (occluded by overlays, scrolled away, dir changed, ...)
         let (deletions, delete_all) = app.kitty_frame_diff();
+        if is_kitty && (delete_all || !deletions.is_empty() || !app.kitty_free.is_empty() || app.frame_sent.0 > 0) {
+            tracing::debug!(
+                "frame: sent {} images ({} KiB), freed {}, cleared {} places{}",
+                app.frame_sent.0, app.frame_sent.1 / 1024, app.kitty_free.len(), deletions.len(),
+                if delete_all { ", deleted all images" } else { "" }
+            );
+        }
+        app.frame_sent = (0, 0);
         if is_kitty && !app.kitty_free.is_empty() {
             let mut out = std::io::stdout().lock();
             let _ = ui::kitty::free_images(&mut out, &std::mem::take(&mut app.kitty_free));
@@ -421,7 +429,11 @@ fn run(
                     handler::handle_mouse(app, mouse);
                     maybe_restart_watcher(app, dir_watcher);  // restart watcher if navigated
                 }
+                Event::FocusGained | Event::FocusLost => {
+                    tracing::debug!("{}", if matches!(ev, Event::FocusGained) { "focus gained" } else { "focus lost" });
+                }
                 Event::Resize(w, h) => {
+                    tracing::debug!("resize to {w}x{h}");
                     let new_size = ratatui::layout::Size { width: w, height: h };
                     if new_size != app.last_terminal_size {
                         app.last_terminal_size = new_size;
@@ -451,6 +463,7 @@ fn run(
 fn maybe_restart_watcher(app: &mut App, dir_watcher: Option<&fs::watcher::DirWatcher>) {
     if app.watched_path != app.cwd {
         app.watched_path = app.cwd.clone();
+        tracing::debug!("folder: {}", app.cwd.display());
         if let Some(w) = dir_watcher {
             w.watch(&app.cwd);
         }
