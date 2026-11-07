@@ -17,28 +17,29 @@ pub const HEIGHT: u16 = 3;
 pub fn render_pickbar(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(p) = &app.pick else { return; };
     let y = area.y + 1;
-    let accept = format!(" {} ", p.accept_label());
-    let cancel = " Cancel ";
-    let cancel_rect = Rect { x: area.right().saturating_sub(2 + cancel.len() as u16), y, width: cancel.len() as u16, height: 1 };
-    let accept_w = accept.chars().count() as u16;
-    let accept_rect = Rect { x: cancel_rect.x.saturating_sub(2 + accept_w), y, width: accept_w, height: 1 };
+    // Buttons the same width, so the pair sits evenly at the right
+    let accept = p.accept_label();
+    let filter_label = format!("{}  \u{25be}", p.filter_label());
+    let has_filter = !(p.req.filters.is_empty() || p.folders_only());
+    let button_w = accept.chars().count().max("Cancel".len()) as u16 + 6;
+    let cancel_rect = Rect { x: area.right().saturating_sub(2 + button_w), y, width: button_w, height: 1 };
+    let accept_rect = Rect { x: cancel_rect.x.saturating_sub(2 + button_w), y, width: button_w, height: 1 };
     let mut right_edge = accept_rect.x;
-
-    let filter_rect = if p.req.filters.is_empty() || p.folders_only() {
-        Rect::default()
-    } else {
-        let label = format!(" {} \u{25be} ", p.filter_label());
-        let w = (label.chars().count() as u16).min(area.width / 3);
+    let filter_rect = if has_filter {
+        let w = (filter_label.chars().count() as u16 + 4).min(area.width / 3);
         let r = Rect { x: right_edge.saturating_sub(3 + w), y, width: w, height: 1 };
-        f.render_widget(Paragraph::new(label).style(Style::default().bg(theme::input()).fg(theme::text())), r);
         right_edge = r.x;
         r
+    } else {
+        Rect::default()
     };
-    f.render_widget(
-        Paragraph::new(accept).style(Style::default().bg(theme::selection()).fg(theme::text_strong()).add_modifier(Modifier::BOLD)),
-        accept_rect,
-    );
-    f.render_widget(Paragraph::new(cancel).style(Style::default().bg(theme::input()).fg(theme::text())), cancel_rect);
+    let input = theme::get().input;
+    if has_filter {
+        crate::ui::pill(f, app, 26, filter_rect, &filter_label, Some(input), Style::default().fg(theme::text()));
+    }
+    crate::ui::pill(f, app, 24, accept_rect, &accept, Some(theme::get().selection), Style::default().fg(theme::text_strong()).add_modifier(Modifier::BOLD));
+    crate::ui::pill(f, app, 25, cancel_rect, "Cancel", Some(input), Style::default().fg(theme::text()));
+    let Some(p) = &app.pick else { return; };
 
     let left = area.x + 2;
     let name_rect = if p.has_name_field() {

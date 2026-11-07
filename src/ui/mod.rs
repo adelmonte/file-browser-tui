@@ -264,6 +264,17 @@ fn render_view(f: &mut Frame, app: &mut App, mut area: Rect, header: bool, activ
     scrollbar::render(f, app, area);
 }
 
+/// A button or chip: a rounded box the height of a text field (Kitty), or
+/// its cells filled, with the label centered.
+pub fn pill(f: &mut Frame, app: &mut App, slot: u32, rect: Rect, label: &str, fill: Option<(u8, u8, u8)>, style: Style) {
+    let boxed = fill.is_some_and(|c| underlay::field(app, slot, rect, c));
+    let style = match fill {
+        Some(c) if !boxed => style.bg(theme::rgb(c)),
+        _ => style,
+    };
+    f.render_widget(Paragraph::new(label).alignment(ratatui::layout::Alignment::Center).style(style), rect);
+}
+
 pub fn band_rect((ax, ay): (u16, u16), (bx, by): (u16, u16)) -> Rect {
     Rect { x: ax.min(bx), y: ay.min(by), width: ax.abs_diff(bx) + 1, height: ay.abs_diff(by) + 1 }
 }
