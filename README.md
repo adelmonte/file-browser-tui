@@ -1,5 +1,8 @@
 # file-browser-tui
 
+> Also the Open and Save dialog for Firefox and other programs, with
+> [xdg-desktop-portal-tui](https://github.com/adelmonte/xdg-desktop-portal-tui).
+
 <p align="center">
   <img src="demo.png" alt="file-browser-tui showing a folder of wallpapers with thumbnails and a right-click menu" width="520">
 </p>
