@@ -103,6 +103,16 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return app.confirm_quit();
     }
 
+    // Picking: "replace the existing file?"
+    if let Some(p) = &mut app.pick
+        && let Some(paths) = p.confirm_replace.take()
+    {
+        if matches!(ev.code, KeyCode::Enter | KeyCode::Char('y' | 'Y' | 'r' | 'R')) {
+            crate::pick::finish(app, paths);
+        }
+        return false;
+    }
+
     // Help overlay captures all keys
     if app.show_help {
         app.show_help = false;
@@ -389,6 +399,32 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
         return false;
     }
 
+    // Picking: the name field takes typing; Tab goes between it and the files
+    if let Some(p) = &mut app.pick {
+        if p.has_name_field() && ev.code == KeyCode::Tab {
+            p.name_focused = !p.name_focused;
+            return false;
+        }
+        if p.name_focused {
+            match ev.code {
+                KeyCode::Esc => crate::pick::cancel(app),
+                KeyCode::Enter => crate::pick::accept(app),
+                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                    p.name_focused = false;
+                    if let Some(action) = app.keymap.action(&ev) {
+                        return run_action(app, action);
+                    }
+                }
+                _ => { lineedit::edit_undoable("pick", &mut p.name, &mut p.cursor, ev); }
+            }
+            return false;
+        }
+        if ev.code == KeyCode::Esc && app.search.is_none() {
+            crate::pick::cancel(app);
+            return false;
+        }
+    }
+
     if let Some(action) = app.keymap.action(&ev) {
         return run_action(app, action);
     }
@@ -521,6 +557,47 @@ fn run_action(app: &mut App, action: Action) -> bool {
 pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     let col = ev.column;
     let row = ev.row;
+
+    // Picking: the bottom bar's field and buttons
+    if let Some(p) = &mut app.pick {
+        if let Some(paths) = p.confirm_replace.take() {
+            if ev.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some((replace, cancel)) = app.prompt_buttons
+            {
+                if contains(replace, col, row) {
+                    crate::pick::finish(app, paths);
+                } else if !contains(cancel, col, row) && let Some(p) = &mut app.pick {
+                    p.confirm_replace = Some(paths);
+                }
+            } else if let Some(p) = &mut app.pick {
+                p.confirm_replace = Some(paths);
+            }
+            return;
+        }
+        if ev.kind == MouseEventKind::Down(MouseButton::Left) && app.menu.is_none() {
+            if contains(p.accept_rect, col, row) {
+                crate::pick::accept(app);
+                return;
+            }
+            if contains(p.cancel_rect, col, row) {
+                crate::pick::cancel(app);
+                return;
+            }
+            if contains(p.name_rect, col, row) {
+                p.name_focused = true;
+                // Text starts after the field's padding column
+                let at = (col.saturating_sub(p.name_rect.x + 1)) as usize;
+                p.cursor = p.name.char_indices().nth(at).map_or(p.name.len(), |(i, _)| i);
+                return;
+            }
+            if contains(p.filter_rect, col, row) {
+                let items = crate::pick::filter_menu(p);
+                let r = p.filter_rect;
+                app.menu = Some(MenuState::new(MenuKind::Sort, MenuTarget::Empty, items, (r.x, r.y)));
+                return;
+            }
+        }
+    }
 
     // Dialogs are modal: only their buttons respond
     if app.conflict_prompt.is_some() {
@@ -757,6 +834,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
 
                 match app.click_tracker.record(idx) {
                     ClickKind::Single => {
+                        crate::pick::clicked(app, idx);
+                        if let Some(p) = &mut app.pick {
+                            p.name_focused = false;
+                        }
                         app.multi_selection.clear();
                         app.selection_anchor = Some(idx);
                         app.selection = Some(idx);
@@ -769,6 +850,9 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                         if entry.is_dir {
                             let path = entry.path.clone();
                             app.navigate_to(path);
+                        } else if app.pick.is_some() {
+                            crate::pick::clicked(app, idx);
+                            crate::pick::accept(app);
                         } else {
                             app.open_selected();
                         }

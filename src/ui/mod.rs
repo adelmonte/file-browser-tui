@@ -7,6 +7,7 @@ pub mod grid;
 pub mod help;
 pub mod kitty;
 pub mod menu;
+pub mod pickbar;
 pub mod properties;
 pub mod searchbar;
 pub mod sidebar;
@@ -38,6 +39,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             // Search field row plus room for its box to reach below it
             Constraint::Length(if app.search.is_some() { 2 } else { 0 }),
             Constraint::Min(0),
+            Constraint::Length(if app.pick.is_some() { pickbar::HEIGHT } else { 0 }),
             Constraint::Length(1),
         ])
         .split(area);
@@ -45,7 +47,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let topbar_area = vertical[0];
     let search_area = vertical[1];
     let content_area = vertical[2];
-    let status_area = vertical[3];
+    let pick_area = vertical[3];
+    let status_area = vertical[4];
 
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
@@ -65,6 +68,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     sidebar::render_sidebar(f, app, sidebar_area);
     statusbar::render_statusbar(f, app, status_area);
     searchbar::render_searchbar(f, app, search_area);
+    pickbar::render_pickbar(f, app, pick_area);
 
     // Tabs over the views, when there's more than one
     let mut main_area = main_area;
@@ -158,6 +162,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.confirm_delete.is_some() {
         render_confirm_delete(f, app);
     }
+    pickbar::render_replace_prompt(f, app);
 
     write_sized_text(f, app);
 

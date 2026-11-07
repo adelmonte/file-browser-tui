@@ -124,6 +124,16 @@ Use `--kitty` in launchers, desktop entries and window manager bindings; the inc
 images line up with the edges, and passes Shift+click, Ctrl+Shift+click and
 `Ctrl+Tab` to the app instead of kitty's own selection and tabs.
 
+### As the file dialog for other programs
+
+[file-browser-portal](https://github.com/adelmonte/file-browser-portal) makes the
+app the system's Open and Save dialog (an xdg-desktop-portal file chooser, used by
+Firefox and others). It starts `file-browser-tui --kitty --pick REQUEST`, which shows a
+bar along the bottom: a name field when saving, the program's file types, and
+Open/Save and Cancel. Enter or a double click picks, Esc cancels, Tab moves between
+the name field and the files. The window's app id is `file-browser-portal`, so it
+can be floated like a dialog.
+
 ## Keyboard shortcuts
 
 Dolphin's defaults, and every one can be changed (see [Keys](#keys)). `F1` in the app

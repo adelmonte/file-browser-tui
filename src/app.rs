@@ -315,6 +315,8 @@ pub struct App {
     mounted_tx: mpsc::Sender<(String, Result<PathBuf, String>)>,
     mounted_rx: mpsc::Receiver<(String, Result<PathBuf, String>)>,
     pub unlock_prompt: Option<crate::events::UnlockPrompt>,
+    /// Picking files for another program (`--pick`).
+    pub pick: Option<crate::pick::Picking>,
     job_rx: mpsc::Receiver<String>,
     unmount_rx: mpsc::Receiver<(String, Result<(), String>)>,
     pub sidebar_w: u16,
@@ -595,6 +597,7 @@ impl App {
             mounted_tx,
             mounted_rx,
             unlock_prompt: None,
+            pick: None,
             unmount_rx,
             menu: None,
             dnd: Default::default(),
@@ -684,6 +687,9 @@ impl App {
             }
         };
 
+        if let Some(p) = &self.pick {
+            listing.entries.retain(|e| p.shows(&e.path, e.is_dir));
+        }
         if self.view_mode == ViewMode::Details && !self.expanded.is_empty() {
             listing.entries = self.with_expanded(listing.entries, 0);
         }
@@ -1533,6 +1539,7 @@ impl App {
     pub fn overlay_open(&self) -> bool {
         self.menu.is_some() || self.show_help || self.properties.is_some() || self.name_prompt.is_some()
             || self.conflict_prompt.is_some() || self.confirm_delete.is_some() || self.unlock_prompt.is_some()
+            || self.pick.as_ref().is_some_and(|p| p.confirm_replace.is_some())
     }
 
     /// Forget what's on screen, as after a resize: the next frame clears
@@ -1913,9 +1920,13 @@ impl App {
             && let Some(entry) = self.listing.entries.get(idx).cloned() {
                 if entry.is_dir {
                     self.navigate_to(entry.path);
+                } else if self.pick.is_some() {
+                    crate::pick::accept(self);
                 } else {
                     crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
                 }
+            } else if self.pick.is_some() {
+                crate::pick::accept(self);
             }
     }
 

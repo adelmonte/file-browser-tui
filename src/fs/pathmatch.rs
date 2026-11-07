@@ -69,6 +69,24 @@ pub fn candidates(dir: &Path, typed: &str, max: usize) -> Vec<PathBuf> {
 /// The folder `typed` most likely means: `~` expanded, each part that
 /// doesn't exist replaced by its best match. None if some part matches
 /// nothing.
+/// A typed path as it stands: `~` is home, a relative one is under `base`,
+/// `..` and `.` taken out.
+pub fn expand(typed: &Path, base: &Path) -> PathBuf {
+    let full = match typed.strip_prefix("~") {
+        Ok(rest) => dirs::home_dir().unwrap_or_default().join(rest),
+        Err(_) => base.join(typed),
+    };
+    let mut out = PathBuf::new();
+    for part in full.components() {
+        match part {
+            Component::ParentDir => { out.pop(); }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 pub fn resolve(typed: &Path) -> Option<PathBuf> {
     let typed = match typed.strip_prefix("~") {
         Ok(rest) => dirs::home_dir()?.join(rest),

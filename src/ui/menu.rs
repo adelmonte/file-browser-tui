@@ -66,6 +66,8 @@ pub enum MenuAction {
     SendToDevice(usize),
     /// What to do with files dropped from another program.
     Drop(crate::dnd::DropOp),
+    /// The picker's file type filter (None: all files).
+    PickFilter(Option<usize>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

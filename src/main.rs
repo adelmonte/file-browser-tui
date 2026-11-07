@@ -16,6 +16,7 @@ mod check;
 mod clipboard;
 mod lineedit;
 mod mime;
+mod pick;
 mod places;
 mod search;
 mod thumbs;
@@ -41,9 +42,19 @@ fn main() -> anyhow::Result<()> {
         Some("--kitty") => {
             // Become a kitty window running the app with its options
             use std::os::unix::process::CommandExt;
-            let path = std::env::args_os().nth(2).map(std::path::PathBuf::from)
-                .and_then(|p| std::fs::canonicalize(p).ok());
-            let Some(mut cmd) = actions::kitty_command(path.as_deref()) else { std::process::exit(1) };
+            let cmd = if std::env::args().nth(2).as_deref() == Some("--pick") {
+                let Some(req) = std::env::args_os().nth(3).map(std::path::PathBuf::from) else {
+                    eprintln!("file-browser-tui: --pick needs a request file");
+                    std::process::exit(2);
+                };
+                let title = pick::Picking::load(&req).map(|p| p.req.title).unwrap_or_default();
+                actions::kitty_pick_command(&req, &title)
+            } else {
+                let path = std::env::args_os().nth(2).map(std::path::PathBuf::from)
+                    .and_then(|p| std::fs::canonicalize(p).ok());
+                actions::kitty_command(path.as_deref())
+            };
+            let Some(mut cmd) = cmd else { std::process::exit(1) };
             let err = cmd.exec();
             eprintln!("file-browser-tui: couldn't start kitty: {err}");
             std::process::exit(1);
@@ -56,6 +67,7 @@ fn main() -> anyhow::Result<()> {
             println!("{}", HELP);
             return Ok(());
         }
+        Some("--pick") => {}
         Some(a) if a.starts_with('-') => {
             eprintln!("file-browser-tui: unknown option {a} (see --help)");
             std::process::exit(2);
@@ -125,10 +137,29 @@ fn main() -> anyhow::Result<()> {
     let (dir_tx, dir_rx) = mpsc::channel();
     let (mount_tx, mount_rx) = mpsc::channel();
 
+    // Picking for another program: what to pick, from the request file
+    let pick = if std::env::args().nth(1).as_deref() == Some("--pick") {
+        let req = std::env::args_os().nth(2).map(std::path::PathBuf::from).unwrap_or_default();
+        match pick::Picking::load(&req) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                ratatui::restore();
+                eprintln!("file-browser-tui: pick request {}: {e:#}", req.display());
+                std::process::exit(2);
+            }
+        }
+    } else {
+        None
+    };
+
     // Optional start path: a folder opens there, a file opens its folder
     // with it selected
-    let start = std::env::args_os().nth(1).map(std::path::PathBuf::from)
-        .and_then(|p| std::fs::canonicalize(p).ok());
+    let start = if pick.is_some() {
+        None
+    } else {
+        std::env::args_os().nth(1).map(std::path::PathBuf::from)
+            .and_then(|p| std::fs::canonicalize(p).ok())
+    };
     match &start {
         Some(p) => {
             let dir = if p.is_dir() { Some(p.as_path()) } else { p.parent() };
@@ -136,10 +167,21 @@ fn main() -> anyhow::Result<()> {
                 let _ = std::env::set_current_dir(dir);
             }
         }
-        None => { let _ = std::env::set_current_dir(config.start_folder()); }
+        None => {
+            let dir = pick.as_ref().map_or_else(|| config.start_folder(), pick::start_folder);
+            let _ = std::env::set_current_dir(dir);
+        }
     }
 
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
+    if let Some(p) = pick {
+        let file = p.req.current_file.clone();
+        app.pick = Some(p);
+        app.reload_dir();
+        if let Some(f) = file.filter(|f| f.exists()) {
+            app.reveal(&f);
+        }
+    }
     // Started in kitty some other way: say once how to get its options
     if first_run
         && app.picker.protocol_type() == ProtocolType::Kitty
@@ -175,7 +217,9 @@ fn main() -> anyhow::Result<()> {
     ratatui::restore();
 
     // Persist config and per-dir view state
-    config::save_last_folder(&app.cwd);
+    if app.pick.is_none() {
+        config::save_last_folder(&app.cwd);
+    }
     let _ = build_config(&app).save();
     app.dirstates.save();
 
@@ -199,6 +243,9 @@ Usage: file-browser-tui [--kitty] [PATH]
 Options:
   --kitty     open in a new kitty window set up for the app (no padding,
               Shift/Ctrl+Shift clicks reach it); use this in launchers
+  --pick REQUEST
+              pick files for another program, as file-browser-portal asks
+              (a TOML request; with --kitty first, in a window of its own)
   --check     list the optional tools and features found on this system
   --version   print the version
   --help      print this help
@@ -245,6 +292,9 @@ fn run(
     let mut overlay_was_open = false;
 
     'frames: loop {
+        if app.pick.as_ref().is_some_and(|p| p.done) {
+            break;
+        }
         // Drain background results (icons, thumbs, dir events, mount events)
         app.drain_channels();
 
@@ -283,7 +333,11 @@ fn run(
         // Window title follows the current folder, like Dolphin's
         if app.cwd != title_path {
             title_path = app.cwd.clone();
-            let _ = execute!(std::io::stdout(), SetTitle(title_path.to_string_lossy()));
+            let title = match app.pick.as_ref().map(|p| p.req.title.as_str()).filter(|t| !t.is_empty()) {
+                Some(t) => format!("{t} \u{2014} {}", title_path.display()),
+                None => title_path.to_string_lossy().to_string(),
+            };
+            let _ = execute!(std::io::stdout(), SetTitle(title));
         }
         if !app.post_draw.is_empty() {
             let mut out = std::io::stdout().lock();

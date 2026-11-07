@@ -18,6 +18,7 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
     match action {
         MenuAction::None => {}
         MenuAction::Drop(op) => crate::dnd::perform(app, op),
+        MenuAction::PickFilter(f) => crate::pick::set_filter(app, f),
 
         MenuAction::Open => {
             match target {
@@ -188,6 +189,19 @@ pub fn kitty_command(path: Option<&Path>) -> Option<Command> {
     if let Some(path) = path {
         cmd.arg(path);
     }
+    Some(cmd)
+}
+
+/// A kitty window picking files for the portal, with its own app id so
+/// the compositor can float it like a dialog.
+pub fn kitty_pick_command(request: &Path, title: &str) -> Option<Command> {
+    let exe = std::env::current_exe().ok()?;
+    let mut cmd = Command::new("kitty");
+    cmd.arg("--app-id=file-browser-portal").args(&KITTY_ARGS[1..]).env(KITTY_ENV, "1");
+    if !title.is_empty() {
+        cmd.arg(format!("--title={title}"));
+    }
+    cmd.arg(exe).arg("--pick").arg(request);
     Some(cmd)
 }
 
