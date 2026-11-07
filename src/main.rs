@@ -72,6 +72,15 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    // A crash puts the terminal back and says where, in the log too
+    std::panic::set_hook(Box::new(|info| {
+        ratatui::restore();
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        let trace = std::backtrace::Backtrace::force_capture();
+        tracing::error!("crashed: {info}\n{trace}");
+        eprintln!("file-browser-tui crashed: {info}\n(details in /tmp/file-browser-tui.log)");
+    }));
+
     let first_run = !Config::path().exists();
     let (config, config_err) = match Config::load() {
         Ok(c) => (c, None),

@@ -1591,6 +1591,9 @@ impl App {
                 (start, end) = (a, (b + 1).min(self.listing.entries.len()));
             }
         }
+        // The layout can still be the last folder's (just navigated, not
+        // drawn yet): never past this one's entries
+        let end = end.min(self.listing.entries.len());
         if start >= end { return; }
 
         for i in start..end {
