@@ -233,6 +233,7 @@ fn run(
     let mut title_path = std::path::PathBuf::new();
     let mut last_active = std::time::Instant::now();
     let mut last_frame_hash = 0u64;
+    let mut overlay_was_open = false;
 
     'frames: loop {
         // Drain background results (icons, thumbs, dir events, mount events)
@@ -246,6 +247,16 @@ fn run(
             let mut out = std::io::stdout().lock();
             let _ = out.write_all(b"\x1b[?2026h");
         }
+        // A menu or dialog just closed: redraw the whole screen. Kitty text
+        // blocks under it can end up where ratatui doesn't know (kitty
+        // moves text written onto another block), and only a full redraw
+        // is sure to put every cell back
+        let overlay_open = app.overlay_open();
+        if overlay_was_open && !overlay_open && is_kitty {
+            terminal.clear()?;
+            app.forget_screen();
+        }
+        overlay_was_open = overlay_open;
         let frame_hash = {
             use std::hash::{Hash, Hasher};
             let done = terminal.draw(|f| ui::render(f, app))?;
@@ -351,15 +362,13 @@ fn run(
                     let new_size = ratatui::layout::Size { width: w, height: h };
                     if new_size != app.last_terminal_size {
                         app.last_terminal_size = new_size;
-                        // The screen is cleared: sized text goes out again
-                        app.post_text_shown.clear();
                         if is_kitty {
                             // Placeholder images follow their cells through the
-                            // reflow; only direct placements (underlays) are
-                            // wiped by the screen clear and must be re-placed
-                            app.underlays.clear();
-                            app.band_shown = None;
+                            // reflow; only direct placements (underlays) and
+                            // sized text are wiped by the screen clear
+                            app.forget_screen();
                         } else {
+                            app.post_text_shown.clear();
                             app.icon_cache.clear_protocols();
                             app.sidebar_icons.clear_protocols();
                             app.thumb_cache.clear_protocols();

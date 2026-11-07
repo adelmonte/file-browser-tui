@@ -1529,6 +1529,20 @@ impl App {
     /// Queue icon loads for all visible entries.
     /// Icons and thumbnails for every view on screen: when split, the other
     /// side's wishes are gathered first and planned after this side's.
+    /// A menu or dialog is open over the window.
+    pub fn overlay_open(&self) -> bool {
+        self.menu.is_some() || self.show_help || self.properties.is_some() || self.name_prompt.is_some()
+            || self.conflict_prompt.is_some() || self.confirm_delete.is_some() || self.unlock_prompt.is_some()
+    }
+
+    /// Forget what's on screen, as after a resize: the next frame clears
+    /// it and draws everything (cells, kitty text, underlays) afresh.
+    pub fn forget_screen(&mut self) {
+        self.post_text_shown.clear();
+        self.underlays.clear();
+        self.band_shown = None;
+    }
+
     /// Something is moving or arriving on its own (icons loading, a smooth
     /// scroll, a file operation, a search, a drag): frames go at full rate.
     pub fn animating(&self) -> bool {
