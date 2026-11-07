@@ -290,6 +290,7 @@ fn run(
     let mut last_active = std::time::Instant::now();
     let mut last_frame_hash = 0u64;
     let mut overlay_was_open = false;
+    let mut drawn_cwd = app.cwd.clone();
 
     'frames: loop {
         if app.pick.as_ref().is_some_and(|p| p.done) {
@@ -297,6 +298,25 @@ fn run(
         }
         // Drain background results (icons, thumbs, dir events, mount events)
         app.drain_channels();
+
+        // A folder just opened: give its images on screen a moment to load
+        // (from the thumbnail cache, a few ms each) and show it complete,
+        // like a new window, instead of filling in over a few frames. The
+        // last folder stays up meanwhile; slow ones still fill in after
+        if app.cwd != drawn_cwd {
+            drawn_cwd = app.cwd.clone();
+            if app.view_mode == app::ViewMode::Icons {
+                app.layout_icons(app.grid_cols);
+            }
+            app.queue_all_visible_icons();
+            let opened = std::time::Instant::now();
+            while opened.elapsed() < Duration::from_millis(150)
+                && (app.icon_cache.loading() || app.thumb_cache.loading())
+            {
+                std::thread::sleep(Duration::from_millis(2));
+                app.drain_channels();
+            }
+        }
 
         // Render frame. Everything it writes (cells, centered labels, image
         // cleanup) goes in one synchronized update, so the terminal shows
