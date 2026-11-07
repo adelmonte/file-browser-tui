@@ -24,6 +24,9 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("rg", "search inside files", None),
     ("ffmpeg", "video thumbnails and audio album art", None),
     ("pdftoppm", "PDF thumbnails (if \"pdf\" is in thumbnails)", None),
+    #[cfg(target_os = "macos")]
+    ("open", "opening files with their default app", None),
+    #[cfg(not(target_os = "macos"))]
     ("xdg-open", "opening files with their default app", None),
     ("bsdtar", "Extract (zip, tar, 7z, rar, iso, ...; libarchive)", None),
     ("tar", "Compress to tar.gz", None),

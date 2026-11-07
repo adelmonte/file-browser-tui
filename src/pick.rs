@@ -364,7 +364,10 @@ mod tests {
             ..Default::default()
         });
         assert!(p.shows(Path::new("/x/A.png"), false));
-        assert!(p.shows(Path::new("/x/b.jpg"), false));
+        // image/* needs the shared-mime-info database (absent on stock macOS)
+        if crate::mime::detect(Path::new("/x/b.jpg")).is_some() {
+            assert!(p.shows(Path::new("/x/b.jpg"), false));
+        }
         assert!(!p.shows(Path::new("/x/c.txt"), false));
         assert!(p.shows(Path::new("/x/dir"), true));
     }

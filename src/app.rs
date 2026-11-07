@@ -1945,7 +1945,7 @@ impl App {
         if let Some(idx) = self.selection
             && let Some(entry) = self.listing.entries.get(idx) {
                 if entry.is_dir { return; }
-                crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
+                crate::launch::open_default(&entry.path);
             }
     }
 
@@ -1957,7 +1957,7 @@ impl App {
                 } else if self.pick.is_some() {
                     crate::pick::accept(self);
                 } else {
-                    crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
+                    crate::launch::open_default(&entry.path);
                 }
             } else if self.pick.is_some() {
                 crate::pick::accept(self);

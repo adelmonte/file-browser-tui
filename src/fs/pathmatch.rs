@@ -130,7 +130,10 @@ mod tests {
         assert_eq!(r("home/doc"), Some(home.join("Documents")));
         assert_eq!(r("home/dcuments"), Some(home.join("Documents")));
         assert_eq!(r("home/dwnlds"), Some(home.join("Downloads")));
-        assert_eq!(r("home/Music"), Some(home.join("music")));
+        // On a case-insensitive filesystem (macOS default) "Music" already exists as typed
+        if std::fs::metadata(home.join("MUSIC")).is_err() {
+            assert_eq!(r("home/Music"), Some(home.join("music")));
+        }
         // Not hidden unless the dot is typed
         assert_eq!(r("home/cache"), Some(home.join("cache-old")));
         assert_eq!(r("hme/.cac"), Some(home.join(".cache")));

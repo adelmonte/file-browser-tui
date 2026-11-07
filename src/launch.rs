@@ -17,6 +17,12 @@ pub fn spawn_own_session(cmd: &mut Command) -> std::io::Result<Child> {
     cmd.spawn()
 }
 
+/// Open `path` with its default application: `open` on macOS, xdg-open elsewhere.
+pub fn open_default(path: &std::path::Path) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    detach(Command::new(opener).arg(path));
+}
+
 /// Start `cmd` detached (no stdio, own session) and reap it when it exits.
 pub fn detach(cmd: &mut Command) {
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -35,7 +41,7 @@ mod tests {
         let out = std::env::temp_dir().join(format!("fbt-launch-{}", std::process::id()));
         let _ = std::fs::remove_file(&out);
         super::detach(std::process::Command::new("sh").arg("-c")
-            .arg("echo $$ $(ps -o sid= -p $$) $(ps -o tty= -p $$) > \"$0.tmp\" && mv \"$0.tmp\" \"$0\"").arg(&out));
+            .arg(r#"perl -e 'print "$ARGV[0] ", getpgrp(0), " ", (open(T, "</dev/tty") ? "tty" : "?"), "\n"' $$ > "$0.tmp" && mv "$0.tmp" "$0""#).arg(&out));
         let mut text = String::new();
         for _ in 0..200 {
             if let Ok(t) = std::fs::read_to_string(&out) { text = t; break; }
@@ -44,6 +50,7 @@ mod tests {
         let _ = std::fs::remove_file(&out);
         let f: Vec<&str> = text.split_whitespace().collect();
         assert_eq!(f.len(), 3, "{text:?}");
+        // A session leader is also its own process group leader (portable: macOS ps has no sid column)
         assert_eq!(f[0], f[1], "session id should be its own pid");
         assert_eq!(f[2], "?", "no controlling terminal");
     }

@@ -1,15 +1,17 @@
+use std::{sync::mpsc, thread};
+#[cfg(target_os = "linux")]
 use std::{
     collections::HashMap,
     os::unix::io::AsRawFd,
-    sync::mpsc,
-    thread,
     fs::File,
     io::{BufRead, BufReader},
 };
 
+#[cfg(target_os = "linux")]
 use nix::poll::{PollFd, PollFlags, poll};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum MountKind {
     /// The root filesystem: always there, never unmounted from here.
     Root,
@@ -169,6 +171,7 @@ pub fn unlock_and_mount(dev: &str, passphrase: &[u8]) -> Result<std::path::PathB
 /// Drives that are plugged in (removable or hot-pluggable, or attached disk
 /// images) with a filesystem nobody has mounted yet, and locked encrypted
 /// ones, from lsblk.
+#[cfg(target_os = "linux")]
 fn unmounted_drives() -> Vec<DeviceEntry> {
     let Ok(out) = std::process::Command::new("lsblk")
         .args(["-P", "-o", "NAME,PATH,LABEL,FSTYPE,MOUNTPOINT,RM,HOTPLUG,SIZE,TYPE,PKNAME"])
@@ -223,6 +226,7 @@ fn unmounted_drives() -> Vec<DeviceEntry> {
 }
 
 /// One `lsblk -P` line: KEY="value" pairs (values escape `"` as \x22).
+#[cfg(target_os = "linux")]
 fn parse_pairs(line: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut rest = line.trim();
@@ -241,6 +245,26 @@ pub enum MountEvent {
 
 /// Watch for mounts coming and going (mountinfo), and drives being plugged
 /// in or pulled out (/dev), sending the device list after each change.
+#[cfg(not(target_os = "linux"))]
+pub fn spawn_mount_watcher(tx: mpsc::Sender<MountEvent>) {
+    thread::spawn(move || {
+        let mut last: Option<Vec<(String, String)>> = None;
+        loop {
+            if let Ok(devices) = parse_mountinfo() {
+                let key: Vec<_> = devices.iter().map(|d| (d.path.clone(), d.name.clone())).collect();
+                if last.as_ref() != Some(&key) {
+                    last = Some(key);
+                    if tx.send(MountEvent::Updated(devices)).is_err() {
+                        return;
+                    }
+                }
+            }
+            thread::sleep(std::time::Duration::from_secs(3));
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
 pub fn spawn_mount_watcher(tx: mpsc::Sender<MountEvent>) {
     use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
     use std::os::fd::AsFd;
@@ -287,14 +311,37 @@ pub fn spawn_mount_watcher(tx: mpsc::Sender<MountEvent>) {
 }
 
 /// FUSE pseudo-filesystems that are infrastructure, not user mounts.
+#[cfg(target_os = "linux")]
 const FUSE_BLOCKLIST: &[&str] = &["fuse.gvfsd-fuse", "fuse.portal"];
 
 /// Filesystems we consider "real" for removable media under /run/media.
+#[cfg(target_os = "linux")]
 const MEDIA_FSTYPES: &[&str] = &[
     "ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs",
     "vfat", "exfat", "ntfs", "ntfs3", "udf", "iso9660",
 ];
 
+/// macOS: the root volume plus whatever is mounted under /Volumes.
+#[cfg(not(target_os = "linux"))]
+pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
+    let mut devices = vec![DeviceEntry::new("Root".into(), "/".into())];
+    let root = std::fs::canonicalize("/").unwrap_or_else(|_| "/".into());
+    if let Ok(rd) = std::fs::read_dir("/Volumes") {
+        let mut vols: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+        vols.sort();
+        for p in vols {
+            // The boot volume shows up as a symlink to /
+            if std::fs::canonicalize(&p).is_ok_and(|c| c == root) || !p.is_dir() {
+                continue;
+            }
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            devices.push(DeviceEntry::with_kind(name, p.to_string_lossy().into_owned(), MountKind::Media, String::new()));
+        }
+    }
+    Ok(devices)
+}
+
+#[cfg(target_os = "linux")]
 pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
     let file = File::open("/proc/self/mountinfo")?;
     let reader = BufReader::new(file);
@@ -351,6 +398,7 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
 }
 
 /// mountinfo escapes space, tab, newline and backslash as octal (\040 etc).
+#[cfg(target_os = "linux")]
 fn unescape_mountpoint(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let bytes = raw.as_bytes();

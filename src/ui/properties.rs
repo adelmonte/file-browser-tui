@@ -149,8 +149,8 @@ impl PropertiesState {
 
         let free = nix::sys::statvfs::statvfs(path)
             .map(|vfs| {
-                let free = vfs.blocks_available() * vfs.fragment_size();
-                let total = vfs.blocks() * vfs.fragment_size();
+                let free = vfs.blocks_available() as u64 * vfs.fragment_size() as u64;
+                let total = vfs.blocks() as u64 * vfs.fragment_size() as u64;
                 format!("{} free of {}", human_size(free), human_size(total))
             })
             .unwrap_or_else(|_| "\u{2014}".into());
