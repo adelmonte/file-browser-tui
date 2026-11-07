@@ -1866,6 +1866,19 @@ impl App {
     /// Returns rects whose Kitty placements must be deleted (or a delete-all
     /// flag for bulk changes), and invalidates the affected protocols so they
     /// re-transmit on their next render.
+    /// Every image goes (the icon size changed): every image sent for a
+    /// protocol can be freed, and everything is built and placed anew.
+    pub fn forget_images(&mut self) {
+        self.kitty_delete_all = false;
+        self.kitty_free.extend(self.kitty_ids.drain().flat_map(|(_, ids)| ids));
+        self.underlays.clear();
+        self.band_uploaded = None;
+        self.band_shown = None;
+        self.sidebar_icons.clear_protocols();
+        self.icon_cache.clear_protocols();
+        self.thumb_cache.clear_protocols();
+    }
+
     pub fn kitty_frame_diff(&mut self) -> (Vec<Rect>, bool) {
         let mut deletions: Vec<(PathBuf, Rect)> = Vec::new();
 
@@ -1886,19 +1899,10 @@ impl App {
         }
 
         let delete_all = self.kitty_delete_all;
-        self.kitty_delete_all = false;
         self.prev_frame_images = std::mem::take(&mut self.frame_images);
 
         if delete_all {
-            // Every protocol goes, so every image sent for one can be freed
-            self.kitty_free.extend(self.kitty_ids.drain().flat_map(|(_, ids)| ids));
-            // Deleted along with everything else; re-placed next frame
-            self.underlays.clear();
-            self.band_uploaded = None;
-            self.band_shown = None;
-            self.sidebar_icons.clear_protocols();
-            self.icon_cache.clear_protocols();
-            self.thumb_cache.clear_protocols();
+            self.forget_images();
             return (Vec::new(), true);
         }
 

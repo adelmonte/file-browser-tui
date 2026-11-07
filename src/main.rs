@@ -316,6 +316,17 @@ fn run(
             app.forget_screen();
         }
         overlay_was_open = overlay_open;
+        // Every image is to go (the icon size changed): delete them before
+        // drawing, so this frame sends the new ones in the same update.
+        // Deleted after it, the images just sent went too, and every icon
+        // blinked out until the next frame
+        if is_kitty && app.kitty_delete_all {
+            tracing::debug!("frame: deleting all images before drawing");
+            app.forget_images();
+            let mut out = std::io::stdout().lock();
+            let _ = ui::kitty::free_images(&mut out, &std::mem::take(&mut app.kitty_free));
+            let _ = ui::kitty::delete_all(&mut out);
+        }
         let frame_hash = {
             use std::hash::{Hash, Hasher};
             let done = terminal.draw(|f| ui::render(f, app))?;
