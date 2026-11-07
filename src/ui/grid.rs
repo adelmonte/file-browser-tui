@@ -271,8 +271,8 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
             && c.paths.contains(&app.listing.entries[entry_idx].path))
         .unwrap_or(false);
 
-    // The icon image is composited onto the same bg color, so the
-    // highlight runs behind the icon as one full-cell rectangle.
+    // The highlight runs behind the icon as one full-cell rectangle (the
+    // image is composited onto its color where images can't be blended)
     let cell_bg: Option<(u8, u8, u8)> = if is_selected {
         Some(theme::get().selection)
     } else if is_drag_target {
@@ -341,6 +341,12 @@ pub(crate) fn render_cell_image(
 
     let (cols, rows) = (icon_rect.width, icon_rect.height);
     let dim = app.is_cut(&entry_path);
+    // Kitty blends images over the cells under them, so the highlight shows
+    // through as it is: one image per item. Baked in, every hover was a new
+    // image to send (a big one for a photo), and moving across a folder of
+    // thumbnails sent them in bursts that briefly blanked the window
+    let cell_bg = bg;
+    let bg = if app.picker.protocol_type() == ProtocolType::Kitty { None } else { bg };
 
     let drew = {
         let proto = if is_media {
@@ -350,7 +356,7 @@ pub(crate) fn render_cell_image(
         };
         if let Some(proto) = proto {
             Clear.render(icon_rect, buf);
-            if let Some(c) = bg {
+            if let Some(c) = cell_bg {
                 Block::default().style(Style::default().bg(rgb(c))).render(icon_rect, buf);
             }
             StatefulImage::new().render(icon_rect, buf, proto);
