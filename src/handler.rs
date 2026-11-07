@@ -925,6 +925,15 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 };
                 let items = menu::build_context_menu(app, target);
                 if !items.is_empty() {
+                    // On a place or device: below it, so it stays whole
+                    // (its name is centered across both rows, which a menu
+                    // over one of them would break)
+                    let row = match sidebar::target_at(app, col, row) {
+                        Some(t) => (row..app.last_terminal_size.height)
+                            .find(|&r| sidebar::target_at(app, col, r) != Some(t))
+                            .unwrap_or(row),
+                        None => row,
+                    };
                     app.menu = Some(MenuState::new(MenuKind::Context, target, items, (col, row)));
                 }
             }
