@@ -348,17 +348,7 @@ pub(crate) fn render_cell_image(
     let cell_bg = bg;
     let bg = if app.picker.protocol_type() == ProtocolType::Kitty { None } else { bg };
 
-    // Scrolling: new images are held to about a megabyte a frame. Rows go
-    // by faster than they matter, and a fast scroll through photos sent
-    // kitty over 100 MB a second, more than it shows cleanly (the sidebar's
-    // icons flashed); the rest come in a frame or two later
-    const SCROLL_UPLOAD_BYTES: usize = 1 << 20;
-    let held_back = app.picker.protocol_type() == ProtocolType::Kitty
-        && (app.scroll_pos - app.scroll_target).abs() > 0.01
-        && !app.kitty_ids.contains_key(&entry_path)
-        && app.kitty_transmits.iter().map(|t| t.len()).sum::<usize>() >= SCROLL_UPLOAD_BYTES;
-
-    let drew = !held_back && {
+    let drew = {
         let proto = if is_media {
             app.thumb_cache.get_mut(&app.picker, &entry_path, cols, rows, bg, dim)
         } else {
