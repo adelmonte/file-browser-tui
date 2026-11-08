@@ -107,7 +107,10 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             }
             let fg = if row.dim { theme::get().muted } else if row.current { theme::text_strong_rgb() } else { theme::get().text };
 
-            draw_icon(f, app, &row.icon, Rect { x: inner.x + 1, y, width: icon_w, height: h }, bg);
+            let icon_rect = Rect { x: inner.x + 1, y, width: icon_w, height: h };
+            if dialog || menu_rects.iter().any(|m| m.intersects(icon_rect)) || !place_icon_image(app, &row.icon, icon_rect) {
+                draw_icon(f, app, &row.icon, icon_rect, bg);
+            }
             let text_x = inner.x + 1 + icon_w + 1;
             let mut text_w = (inner.x + width).saturating_sub(text_x + 1);
             if row.eject && let SidebarTarget::Device(i) = row.target && text_w > 6 {
@@ -118,7 +121,9 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                 if hot {
                     f.render_widget(Block::default().style(Style::default().bg(theme::rgb(theme::get().highlight))), r);
                 }
-                draw_icon(f, app, "media-eject", r, eject_bg);
+                if dialog || menu_rects.iter().any(|m| m.intersects(r)) || !place_icon_image(app, "media-eject", r) {
+                    draw_icon(f, app, "media-eject", r, eject_bg);
+                }
                 app.eject_rects.push((r, i));
                 text_w -= 3;
             }
@@ -166,6 +171,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
     app.sidebar_rows = row_map;
+    drop_unplaced_icons(app);
 }
 
 struct Row {
@@ -255,6 +261,63 @@ pub fn draw_icon(f: &mut Frame, app: &mut App, name: &str, rect: Rect, bg: Optio
     if app.picker.protocol_type() == ProtocolType::Kitty {
         kitty::split_placeholder_rows(f.buffer_mut(), rect, &mut app.kitty_transmits);
     }
+}
+
+/// Ids for directly placed sidebar icons, clear of the underlays' and (in
+/// practice) ratatui-image's random ones.
+const PLACED_ID_BASE: u32 = 0x00F2_0000;
+
+/// Show a sidebar icon as a kitty placement at its cell instead of as
+/// placeholder text: only sent when it changes, and nothing in the frame's
+/// text touches it. False when it can't (not kitty, not loaded yet).
+fn place_icon_image(app: &mut App, name: &str, rect: Rect) -> bool {
+    use std::fmt::Write;
+    use base64::Engine;
+    if app.picker.protocol_type() != ProtocolType::Kitty {
+        return false;
+    }
+    let key = request_icon(app, name);
+    let at = (rect.x, rect.y);
+    if app.sidebar_placed.get(&at).is_some_and(|(k, r, _)| *k == key && *r == rect) {
+        app.sidebar_placed_seen.insert(at);
+        return true;
+    }
+    let Some(img) = app.sidebar_icons.fitted(&app.picker, &key, rect.width, rect.height) else { return false; };
+    let img = img.to_rgba8();
+    let id = PLACED_ID_BASE + app.sidebar_next_id % 0x1_0000;
+    app.sidebar_next_id = app.sidebar_next_id.wrapping_add(1);
+    let data = base64::engine::general_purpose::STANDARD.encode(img.as_raw());
+    let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
+    let mut out = format!("\x1b7\x1b[{};{}H", rect.y + 1, rect.x + 1);
+    for (i, chunk) in chunks.iter().enumerate() {
+        let more = u8::from(i + 1 < chunks.len());
+        if i == 0 {
+            let _ = write!(out, "\x1b_Ga=T,f=32,s={},v={},i={id},p=1,c={},r={},z=-1,C=1,q=2,m={more};", img.width(), img.height(), rect.width, rect.height);
+        } else {
+            let _ = write!(out, "\x1b_Gm={more};");
+        }
+        out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
+        out.push_str("\x1b\\");
+    }
+    // The old one goes once the new one is up
+    if let Some((_, _, old)) = app.sidebar_placed.insert(at, (key, rect, id)) {
+        let _ = write!(out, "\x1b_Ga=d,d=I,i={old},q=2\x1b\\");
+    }
+    out.push_str("\x1b8");
+    app.post_draw.push(out);
+    app.sidebar_placed_seen.insert(at);
+    true
+}
+
+/// After the sidebar is drawn: take away placed icons it no longer shows.
+fn drop_unplaced_icons(app: &mut App) {
+    let gone: Vec<(u16, u16)> = app.sidebar_placed.keys().copied().filter(|k| !app.sidebar_placed_seen.contains(k)).collect();
+    for at in gone {
+        if let Some((_, _, id)) = app.sidebar_placed.remove(&at) {
+            app.post_draw.push(format!("\x1b_Ga=d,d=I,i={id},q=2\x1b\\"));
+        }
+    }
+    app.sidebar_placed_seen.clear();
 }
 
 fn request_icon(app: &mut App, name: &str) -> PathBuf {

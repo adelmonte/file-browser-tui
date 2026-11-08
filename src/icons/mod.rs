@@ -350,6 +350,12 @@ impl IconCache {
         self.protocols.get_mut(&key)
     }
 
+    /// The loaded image for a path fitted to `cols`×`rows` cells, transparent
+    /// around it, as `get_mut` would draw it.
+    pub fn fitted(&self, picker: &Picker, path: &Path, cols: u16, rows: u16) -> Option<image::DynamicImage> {
+        Some(fit_to_cells(self.image(path)?, picker, cols, rows, None, self.fit))
+    }
+
     /// The loaded image for a path, if any.
     pub fn image(&self, path: &Path) -> Option<&image::DynamicImage> {
         self.images.peek(path)?.as_deref()

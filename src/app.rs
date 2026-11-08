@@ -451,6 +451,11 @@ pub struct App {
     pub underlays_seen: std::collections::HashSet<u32>,
     /// Underlay slots currently shown under their alternate image id.
     pub underlays_alt: std::collections::HashSet<u32>,
+    /// Sidebar icons placed directly (at a cell, not as placeholder text),
+    /// by their cell: the icon, its area and its image id.
+    pub sidebar_placed: HashMap<(u16, u16), (PathBuf, Rect, u32)>,
+    pub sidebar_placed_seen: std::collections::HashSet<(u16, u16)>,
+    pub sidebar_next_id: u32,
     /// Rubber band on Kitty: pixel size its pieces were uploaded for, and
     /// where it's shown.
     pub band_uploaded: Option<(u32, u32)>,
@@ -662,6 +667,9 @@ impl App {
             underlays: HashMap::new(),
             underlays_seen: std::collections::HashSet::new(),
             underlays_alt: std::collections::HashSet::new(),
+            sidebar_placed: HashMap::new(),
+            sidebar_placed_seen: std::collections::HashSet::new(),
+            sidebar_next_id: 0,
             band_uploaded: None,
             band_shown: None,
             band_upload: None,
@@ -1565,6 +1573,7 @@ impl App {
     pub fn forget_screen(&mut self) {
         self.post_text_shown.clear();
         self.underlays.clear();
+        self.kitty_free.extend(self.sidebar_placed.drain().map(|(_, (_, _, id))| id));
         self.band_shown = None;
     }
 
@@ -1889,6 +1898,7 @@ impl App {
         self.kitty_bytes.clear();
         self.kitty_parked.clear();
         self.underlays.clear();
+        self.kitty_free.extend(self.sidebar_placed.drain().map(|(_, (_, _, id))| id));
         self.band_uploaded = None;
         self.band_shown = None;
         self.sidebar_icons.clear_protocols();
