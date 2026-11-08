@@ -1959,14 +1959,6 @@ impl App {
         (deletions.into_iter().map(|(_, r)| r).collect(), false)
     }
 
-    pub fn open_selected(&mut self) {
-        if let Some(idx) = self.selection
-            && let Some(entry) = self.listing.entries.get(idx).cloned() {
-                if entry.is_dir { return; }
-                self.open_file(&entry.path);
-            }
-    }
-
     /// Showing a folder inside an archive (or the archive's top).
     pub fn in_archive(&self) -> bool {
         crate::vfs::in_archive(&self.cwd)

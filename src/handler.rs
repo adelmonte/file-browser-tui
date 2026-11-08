@@ -858,7 +858,7 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                             crate::pick::clicked(app, idx);
                             crate::pick::accept(app);
                         } else {
-                            app.open_selected();
+                            app.enter_selected();
                         }
                     }
                 }
