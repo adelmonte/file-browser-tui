@@ -253,10 +253,11 @@ impl FileOps {
         let _ = self.jobs.send(Job { op, sources, dest });
     }
 
-    /// Archives open read-only: nothing goes into one, nothing in one is
-    /// deleted. True (with the reason kept for the app) if `paths` would.
-    fn into_archive(&mut self, paths: &[PathBuf]) -> bool {
-        let inside = paths.iter().any(|p| crate::vfs::is_virtual(p));
+    /// Archives open read-only: nothing goes into one (a `dest` folder in
+    /// one), nothing in one is deleted. True (with the reason kept for the
+    /// app) if this would.
+    fn into_archive(&mut self, paths: &[PathBuf], dest: Option<&Path>) -> bool {
+        let inside = paths.iter().any(|p| crate::vfs::is_virtual(p)) || dest.is_some_and(crate::vfs::in_archive);
         if inside {
             self.refused = Some("Archives open read-only: their contents can't be changed".into());
         }
@@ -264,14 +265,14 @@ impl FileOps {
     }
 
     pub fn copy(&mut self, sources: Vec<PathBuf>, dest: &Path) {
-        if !self.into_archive(&[dest.to_path_buf()]) {
+        if !self.into_archive(&[], Some(dest)) {
             self.submit(Op::Copy, sources, Some(dest.to_path_buf()));
         }
     }
 
     /// Moving out of an archive copies (the archive stays as it is).
     pub fn move_to(&mut self, sources: Vec<PathBuf>, dest: &Path) {
-        if self.into_archive(&[dest.to_path_buf()]) {
+        if self.into_archive(&[], Some(dest)) {
             return;
         }
         let (packed, loose): (Vec<PathBuf>, Vec<PathBuf>) = sources.into_iter().partition(|p| crate::vfs::is_virtual(p));
@@ -280,13 +281,13 @@ impl FileOps {
     }
 
     pub fn trash(&mut self, paths: Vec<PathBuf>) {
-        if !self.into_archive(&paths) {
+        if !self.into_archive(&paths, None) {
             self.submit(Op::Trash, paths, None);
         }
     }
 
     pub fn delete(&mut self, paths: Vec<PathBuf>) {
-        if !self.into_archive(&paths) {
+        if !self.into_archive(&paths, None) {
             self.submit(Op::Delete, paths, None);
         }
     }

@@ -220,14 +220,14 @@ pub fn index(archive: &Path) -> Result<Arc<Index>, String> {
     Ok(idx)
 }
 
-/// A file we browse into: an archive by its name.
+/// A file we browse into: an archive, by its name.
 pub fn browsable(path: &Path) -> bool {
-    crate::archive::is_archive(path)
+    path.file_name().is_some_and(|n| crate::archive::named_like_archive(&n.to_string_lossy()))
 }
 
-/// Split a path inside an archive into the archive and the path within
-/// it ("" for the archive itself). None for ordinary paths.
-pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
+/// The archive on disk a path starts in, and the rest of the path ("" for
+/// the archive itself). None for ordinary paths.
+fn split_outer(path: &Path) -> Option<(PathBuf, PathBuf)> {
     if let Ok(meta) = std::fs::metadata(path) {
         return (meta.is_file() && browsable(path)).then(|| (path.to_path_buf(), PathBuf::new()));
     }
@@ -247,9 +247,32 @@ pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
     None
 }
 
-/// Inside an archive (the archive itself counts as its top folder).
+/// Split a path in an archive into the archive file it's read from and the
+/// path within that ("" for the archive's top). An archive inside an
+/// archive is unpacked to the cache and read from there.
+pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let (mut archive, mut inner) = split_outer(path)?;
+    loop {
+        let Ok(idx) = index(&archive) else { return Some((archive, inner)) };
+        let nested = inner.ancestors().collect::<Vec<_>>().into_iter().rev()
+            .filter(|p| !p.as_os_str().is_empty())
+            .find(|p| idx.items.get(*p).is_some_and(|i| !i.is_dir && !i.is_symlink) && browsable(p))
+            .map(Path::to_path_buf);
+        let Some(nested) = nested else { return Some((archive, inner)) };
+        let rest = inner.strip_prefix(&nested).ok()?.to_path_buf();
+        archive = unpack_member(&archive, &nested).ok()?;
+        inner = rest;
+    }
+}
+
+/// Something inside an archive, not on disk (the archive file itself isn't).
 pub fn is_virtual(path: &Path) -> bool {
-    split(path).is_some()
+    std::fs::symlink_metadata(path).is_err() && split_outer(path).is_some()
+}
+
+/// A folder inside an archive, or an archive shown as a folder.
+pub fn in_archive(dir: &Path) -> bool {
+    split_outer(dir).is_some()
 }
 
 /// A folder to show: a real one, or a folder in an archive.
@@ -315,25 +338,55 @@ pub fn clean_up() {
 /// A real copy of a path inside an archive (a file, or a folder with all
 /// it holds), unpacked into this run's cache; ordinary paths as they are.
 pub fn materialize(path: &Path) -> Result<PathBuf, String> {
-    let Some((archive, inner)) = split(path) else { return Ok(path.to_path_buf()) };
-    // One folder per archive (by path and size, so a changed one unpacks anew)
-    let size = std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0);
+    if !is_virtual(path) {
+        return Ok(path.to_path_buf());
+    }
+    let (archive, inner) = split(path).ok_or("can't read the archive")?;
+    // An archive in an archive: split already unpacked it
+    if inner.as_os_str().is_empty() {
+        return Ok(archive);
+    }
+    unpack_member(&archive, &inner)
+}
+
+/// Where `materialize` puts a path (before it's there): what other apps
+/// are given for a file being dragged or copied out.
+pub fn unpacked_path(path: &Path) -> PathBuf {
+    if !is_virtual(path) {
+        return path.to_path_buf();
+    }
+    match split(path) {
+        Some((archive, inner)) if inner.as_os_str().is_empty() => archive,
+        Some((archive, inner)) => unpack_dir(&archive).join(inner),
+        None => path.to_path_buf(),
+    }
+}
+
+/// The cache folder an archive's members are unpacked into: one per
+/// archive, by path and size, so a changed one unpacks anew.
+fn unpack_dir(archive: &Path) -> PathBuf {
+    let size = std::fs::metadata(archive).map(|m| m.len()).unwrap_or(0);
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (&archive, size).hash(&mut h);
+        (archive, size).hash(&mut h);
         format!("{:016x}", h.finish())
     };
     let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let root = unpack_root().join(key).join(name);
-    let target = root.join(&inner);
-    let idx = index(&archive)?;
-    let whole_dir = idx.is_dir(&inner);
+    unpack_root().join(key).join(name)
+}
+
+/// Unpack `inner` (a file, or a folder and all it holds) from `archive`,
+/// a file on disk; a file already unpacked is reused.
+fn unpack_member(archive: &Path, inner: &Path) -> Result<PathBuf, String> {
+    let root = unpack_dir(archive);
+    let target = root.join(inner);
+    let whole_dir = index(archive)?.is_dir(inner);
     if !whole_dir && target.is_file() {
         return Ok(target);
     }
-    std::fs::create_dir_all(&target.parent().unwrap_or(&root)).map_err(|e| e.to_string())?;
-    unpack(&archive, &inner, &root)?;
+    std::fs::create_dir_all(target.parent().unwrap_or(&root)).map_err(|e| e.to_string())?;
+    unpack(archive, inner, &root)?;
     if whole_dir {
         std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
     }
@@ -375,16 +428,26 @@ fn unpack(archive: &Path, inner: &Path, root: &Path) -> Result<(), String> {
                 use std::io::Write;
                 use std::os::unix::fs::PermissionsExt;
                 let perm = unsafe { ffi::archive_entry_perm(e) } & 0o777;
-                let mut f = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
-                loop {
-                    let n = r.read(&mut buf)?;
-                    if n == 0 {
-                        break;
+                // Written beside it and renamed: never seen half-written
+                static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let part = dest.with_file_name(format!(".{}.part{n}", dest.file_name().unwrap_or_default().to_string_lossy()));
+                let mut f = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+                let written = (|| {
+                    loop {
+                        let n = r.read(&mut buf)?;
+                        if n == 0 {
+                            return Ok(());
+                        }
+                        f.write_all(&buf[..n]).map_err(|e| e.to_string())?;
                     }
-                    f.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-                }
+                })();
                 let mode = if perm == 0 { 0o644 } else { perm | 0o600 };
-                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(mode));
+                let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(mode));
+                if let Err(e) = written.and_then(|_| std::fs::rename(&part, &dest).map_err(|e| e.to_string())) {
+                    let _ = std::fs::remove_file(&part);
+                    return Err(e);
+                }
             }
             _ => r.skip(),
         }
@@ -430,6 +493,24 @@ mod tests {
             let dir = materialize(&out.join("proj/sub")).unwrap();
             assert_eq!(std::fs::read_to_string(dir.join("deep.txt")).unwrap(), "deep");
         }
+        // The archive file itself is an ordinary file; what's in it isn't
+        let zip = d.join("t.zip");
+        assert!(!is_virtual(&zip) && in_archive(&zip) && is_virtual(&zip.join("proj")));
+        assert_eq!(materialize(&zip).unwrap(), zip);
+
+        // An archive in an archive browses the same way
+        std::fs::create_dir_all(d.join("outer")).unwrap();
+        std::fs::copy(&zip, d.join("outer/inner.zip")).unwrap();
+        assert!(std::process::Command::new("bsdtar").current_dir(&d).args(["-czf", "nest.tar.gz", "outer"]).status().unwrap().success());
+        let inner = d.join("nest.tar.gz/outer/inner.zip");
+        assert!(is_virtual(&inner) && is_folder(&inner) && is_folder(&inner.join("proj/sub")));
+        assert_eq!(read_dir(&inner.join("proj"), false).unwrap().len(), 2);
+        let deep = inner.join("proj/sub/deep.txt");
+        let at = unpacked_path(&deep);
+        assert_eq!(materialize(&deep).unwrap(), at);
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "deep");
+        assert!(std::fs::read_to_string(materialize(&inner).unwrap()).is_err(), "the inner zip itself, as a file");
+
         assert_eq!(clean(Path::new("../../etc/passwd")), None);
         assert_eq!(clean(Path::new("./a/./b")), Some(PathBuf::from("a/b")));
         clean_up();

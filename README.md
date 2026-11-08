@@ -53,8 +53,9 @@ action also has a keyboard shortcut.
 - **Undo** (`Ctrl+Z`) for copies, moves, renames, trashing and new folders or files.
   Undoing a copy moves the copies to the trash rather than deleting them.
 - **Archives as folders**: double-click a zip, tar.gz, 7z, rar or iso to look inside it
-  like a folder (`…/photos.zip/2024/`). Files in it open with their app, and copying or
-  dragging them out unpacks just those. Read-only: nothing inside can be renamed,
+  like a folder (`…/photos.zip/2024/`), archives inside it too. Files in it open with
+  their app, and copying them out, dragging them to another app or pasting them in one
+  unpacks just those. Read-only: nothing inside can be renamed,
   deleted or added.
 - **Archives**: Extract Here, which puts a single top-level folder beside the archive
   and gives loose files a folder of their own, or Extract Into a folder named after

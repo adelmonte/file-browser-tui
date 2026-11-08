@@ -268,8 +268,10 @@ pub fn clip_selection(app: &mut App, op: ClipOp) {
     if paths.is_empty() {
         return;
     }
-    // Also on the system clipboard, so other apps can paste the files
-    let list: String = paths.iter().map(|p| crate::thumbs::file_uri(p) + "\r\n").collect();
+    // Also on the system clipboard, so other apps can paste the files (ones
+    // in an archive where they're being unpacked to)
+    app.unpack_in_background(&paths);
+    let list: String = paths.iter().map(|p| crate::thumbs::file_uri(&crate::vfs::unpacked_path(p)) + "\r\n").collect();
     crate::clipboard::write(Some("text/uri-list"), list.as_bytes());
     let n = paths.len();
     let what = if n == 1 { "1 item".to_string() } else { format!("{n} items") };
@@ -295,7 +297,7 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
         types.is_empty()
             || crate::clipboard::read(Some("text/uri-list"))
                 .map(|l| crate::dnd::parse_uri_list(&String::from_utf8_lossy(&l)))
-                .is_some_and(|paths| paths == clip.paths)
+                .is_some_and(|paths| paths.iter().eq(clip.paths.iter().map(|p| crate::vfs::unpacked_path(p)).collect::<Vec<_>>().iter()))
     });
     if !ours {
         app.clipboard = None;

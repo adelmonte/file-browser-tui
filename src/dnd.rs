@@ -264,22 +264,18 @@ fn start_drag(app: &mut App, col: u16, row: u16) {
     } else {
         vec![entry.path.clone()]
     };
-    // Other apps can only take real files: ones in an archive are unpacked
-    let paths: Vec<PathBuf> = match paths.iter().map(|p| crate::vfs::materialize(p)).collect() {
-        Ok(p) => p,
-        Err(e) => {
-            app.notify(format!("Couldn't unpack: {e}"));
-            return;
-        }
-    };
-    let uris: String = paths.iter().map(|p| {
+    // Other apps can only take real files: ones in an archive are offered
+    // where they're being unpacked to (a drop on us copies from the archive)
+    app.unpack_in_background(&paths);
+    let outside: Vec<PathBuf> = paths.iter().map(|p| crate::vfs::unpacked_path(p)).collect();
+    let uris: String = outside.iter().map(|p| {
         let mut uri = crate::thumbs::file_uri(p);
         if p.is_dir() {
             uri.push('/');
         }
         uri + "\r\n"
     }).collect();
-    let text: String = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    let text: String = outside.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
 
     send(&format!("t=o:o=3;{URI_LIST} text/plain"));
     send_data("t=p:x=0", uris.as_bytes());
@@ -299,6 +295,7 @@ fn drag_event(app: &mut App, x: i64, y: i64) {
         // Data wanted for a type we didn't pre-send in full
         5 => {
             let Some(paths) = app.dnd.outgoing.clone() else { return; };
+            let paths: Vec<PathBuf> = paths.iter().map(|p| crate::vfs::unpacked_path(p)).collect();
             let data = if y == 0 {
                 paths.iter().map(|p| crate::thumbs::file_uri(p) + "\r\n").collect::<String>()
             } else {

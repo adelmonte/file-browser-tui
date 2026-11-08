@@ -20,6 +20,10 @@ fn suffix_of(name: &str) -> Option<&'static str> {
     SUFFIXES.iter().copied().find(|s| lower.ends_with(&s.to_lowercase()) && lower.len() > s.len())
 }
 
+pub fn named_like_archive(name: &str) -> bool {
+    suffix_of(name).is_some()
+}
+
 pub fn is_archive(path: &Path) -> bool {
     path.is_file() && path.file_name().is_some_and(|n| suffix_of(&n.to_string_lossy()).is_some())
 }

@@ -1959,16 +1959,34 @@ impl App {
 
     /// Showing a folder inside an archive (or the archive's top).
     pub fn in_archive(&self) -> bool {
-        !self.cwd.is_dir() && crate::vfs::is_virtual(&self.cwd)
+        crate::vfs::in_archive(&self.cwd)
     }
 
     /// Nothing can change inside an archive: say so, and true, if `dir` is in one.
     pub fn refuse_read_only(&mut self, dir: &std::path::Path) -> bool {
-        let inside = crate::vfs::is_virtual(dir);
+        let inside = crate::vfs::in_archive(dir);
         if inside {
             self.notify("Archives open read-only: their contents can't be changed".into());
         }
         inside
+    }
+
+    /// Unpack files in an archive for another app to take (a drag, the
+    /// clipboard) to where `vfs::unpacked_path` said they'd be.
+    pub fn unpack_in_background(&self, paths: &[PathBuf]) {
+        let paths: Vec<PathBuf> = paths.iter().filter(|p| crate::vfs::is_virtual(p)).cloned().collect();
+        if paths.is_empty() {
+            return;
+        }
+        let tx = self.job_tx.clone();
+        std::thread::spawn(move || {
+            for p in paths {
+                if let Err(e) = crate::vfs::materialize(&p) {
+                    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let _ = tx.send(format!("Couldn't unpack {name}: {e}"));
+                }
+            }
+        });
     }
 
     /// Open with the default app; a file in an archive is unpacked first.
