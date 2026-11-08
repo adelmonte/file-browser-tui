@@ -299,6 +299,19 @@ fn is_thumb_valid(thumb_path: &Path, source_mtime: Option<u64>) -> bool {
     }
 }
 
+/// One of our photo thumbnails from before they followed EXIF orientation
+/// (they may be sideways): made again. Other apps' always followed it.
+fn sideways_ours(thumb_path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(thumb_path) else { return false; };
+    let Ok(reader) = png::Decoder::new(std::io::BufReader::new(file)).read_info() else { return false; };
+    let texts = &reader.info().uncompressed_latin1_text;
+    let has = |k: &str, v: Option<&str>| texts.iter().any(|t| t.keyword == k && v.is_none_or(|v| t.text == v));
+    has("Software", Some("file-browser-tui")) && !has(UPRIGHT_TAG, None)
+}
+
+/// Marks our thumbnails made the way up EXIF orientation says.
+const UPRIGHT_TAG: &str = "X-FileBrowserTui::Upright";
+
 /// Save as PNG with the spec's Thumb::URI / Thumb::MTime tags so other
 /// thumbnail consumers (Dolphin, Nautilus) accept and reuse it.
 fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u64>) -> anyhow::Result<()> {
@@ -312,6 +325,7 @@ fn save_thumb(img: &image::DynamicImage, out: &Path, uri: &str, mtime: Option<u6
         enc.add_text_chunk("Thumb::MTime".into(), m.to_string())?;
     }
     enc.add_text_chunk("Software".into(), "file-browser-tui".into())?;
+    enc.add_text_chunk(UPRIGHT_TAG.into(), "1".into())?;
     enc.write_header()?.write_image_data(rgba.as_raw())?;
     Ok(())
 }
@@ -401,9 +415,11 @@ pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Re
     }
 
     // Reuse any valid thumbnail another app (or we) already made, any size
+    let photo = mime_type.starts_with("image/") && !mime_type.starts_with("image/svg");
     for dir in SIZE_DIRS {
         let candidate = root.join(dir).join(&name);
         if is_thumb_valid(&candidate, src_mtime)
+            && !(photo && sideways_ours(&candidate))
             && let Ok(img) = image::open(&candidate)
         {
             return Ok(img);

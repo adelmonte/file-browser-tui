@@ -268,7 +268,23 @@ fn is_not_found(e: &anyhow::Error) -> bool {
 
 /// Image thumbnail in-process with the image crate (no magick spawn).
 pub fn image_thumb(source: &Path) -> anyhow::Result<DynamicImage> {
-    Ok(image::open(source)?.thumbnail(256, 256))
+    Ok(upright(image::ImageReader::open(source)?.with_guessed_format()?)?.thumbnail(256, 256))
+}
+
+/// An image file's bytes as a thumbnail, the way up its EXIF orientation says.
+fn image_from_memory(bytes: &[u8]) -> anyhow::Result<DynamicImage> {
+    Ok(upright(image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?)?.thumbnail(256, 256))
+}
+
+/// Decode, turned (or mirrored) as the EXIF orientation says: cameras store
+/// a photo as the sensor saw it and tag which way is up.
+fn upright<R: std::io::BufRead + std::io::Seek>(reader: image::ImageReader<R>) -> anyhow::Result<DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = reader.into_decoder()?;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    Ok(img)
 }
 
 /// EPUB cover, read straight from the archive: the OPF's declared cover
@@ -304,7 +320,7 @@ pub fn epub_thumb(source: &Path) -> anyhow::Result<DynamicImage> {
         .ok_or_else(|| anyhow::anyhow!("no cover"))?;
 
     let name = resolve_href(&base, &percent_decode(&href));
-    Ok(image::load_from_memory(&read(&mut zip, &name)?)?.thumbnail(256, 256))
+    image_from_memory(&read(&mut zip, &name)?)
 }
 
 /// The opening tags named `name` (with or without a namespace prefix).
@@ -416,7 +432,7 @@ pub fn comic_thumb(source: &Path) -> anyhow::Result<DynamicImage> {
     let first = pages.first().ok_or_else(|| anyhow::anyhow!("no pages"))?;
     let mut buf = Vec::new();
     zip.by_name(first)?.take(64 << 20).read_to_end(&mut buf)?;
-    Ok(image::load_from_memory(&buf)?.thumbnail(256, 256))
+    image_from_memory(&buf)
 }
 
 /// First page of a PDF via poppler's pdftoppm.
@@ -440,6 +456,28 @@ pub fn pdf_thumb(source: &Path, tmp: &Path) -> anyhow::Result<DynamicImage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn photos_turned_upright() {
+        // 40x20, red on the left, stored with EXIF orientation 6 (turn
+        // 90 degrees clockwise to view): upright it's 20x40, red on top
+        let img = image::RgbImage::from_fn(40, 20, |x, _| if x < 20 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) });
+        let mut jpeg = Vec::new();
+        DynamicImage::ImageRgb8(img).write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg).unwrap();
+        let tiff = [b"MM\0*\0\0\0\x08\0\x01".as_slice(), &[0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0], &[0, 0, 0, 0]].concat();
+        let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+        let app1 = [[0xFF, 0xE1].as_slice(), &((exif.len() + 2) as u16).to_be_bytes(), &exif].concat();
+        let tagged = [&jpeg[..2], &app1, &jpeg[2..]].concat();
+        let path = std::env::temp_dir().join(format!("fbt-exif-{}.jpg", std::process::id()));
+        std::fs::write(&path, &tagged).unwrap();
+        let thumb = image_thumb(&path).unwrap().to_rgb8();
+        let _ = std::fs::remove_file(&path);
+        // Scaled to fit 256: 128x256
+        assert_eq!(thumb.dimensions(), (128, 256));
+        let top = thumb.get_pixel(64, 30);
+        assert!(top[0] > 200 && top[2] < 60, "red on top, got {top:?}");
+        assert_eq!(image_from_memory(&tagged).unwrap().to_rgb8().dimensions(), (128, 256));
+    }
 
     #[test]
     fn opf_parsing() {
