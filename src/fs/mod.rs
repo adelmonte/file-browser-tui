@@ -30,6 +30,11 @@ pub struct DirListing {
 }
 
 pub fn read_dir(path: &PathBuf, show_hidden: bool, folders_first: bool, sort: &SortState) -> anyhow::Result<DirListing> {
+    if !path.is_dir() && crate::vfs::is_virtual(path) {
+        let mut entries = crate::vfs::read_dir(path, show_hidden)?;
+        sort_entries(&mut entries, folders_first, sort);
+        return Ok(DirListing { entries });
+    }
     let mut entries = Vec::new();
 
     for result in std::fs::read_dir(path)? {

@@ -693,7 +693,7 @@ impl App {
             Ok(listing) => listing,
             Err(e) => {
                 tracing::error!("reload_dir: {e}");
-                if !self.cwd.is_dir() {
+                if !crate::vfs::is_folder(&self.cwd) {
                     self.leave_if_gone();
                 }
                 return;
@@ -718,6 +718,11 @@ impl App {
         self.icons_grace_until = std::time::Instant::now() + std::time::Duration::from_millis(300);
 
         self.restore_mimes(&mut listing.entries);
+        if self.in_archive() {
+            for e in &listing.entries {
+                self.thumb_cache.skip(&e.path);
+            }
+        }
 
         self.listing_gen += 1;
         let old = std::mem::replace(&mut self.listing, listing);
@@ -1035,11 +1040,11 @@ impl App {
     /// elsewhere, or it was deleted): go back to the latest folder in the
     /// history that's still there, else home.
     pub fn leave_if_gone(&mut self) {
-        if self.cwd.is_dir() {
+        if crate::vfs::is_folder(&self.cwd) {
             return;
         }
         let gone = self.cwd.clone();
-        let alive = |p: &PathBuf| p.is_dir() && !p.starts_with(&gone);
+        let alive = |p: &PathBuf| crate::vfs::is_folder(p) && !p.starts_with(&gone);
         self.history_back.retain(alive);
         self.history_forward.retain(alive);
         let to = self.history_back.pop()
@@ -1640,7 +1645,7 @@ impl App {
         let page = end - start;
         let media = |i: usize| {
             let e = &entries[i];
-            e.mime_type.as_deref().filter(|m| self.previews.covers(m)).map(|m| (e.path.as_path(), m))
+            e.mime_type.as_deref().filter(|m| self.previews.covers(m) && !self.thumb_cache.failed(&e.path)).map(|m| (e.path.as_path(), m))
         };
         let mut jobs: Vec<(&std::path::Path, &str, crate::thumbs::Priority)> = Vec::new();
         jobs.extend((start..end).filter_map(media).map(|(p, m)| (p, m, crate::thumbs::Priority::Visible)));
@@ -1709,6 +1714,9 @@ impl App {
     pub fn drain_channels(&mut self) {
         while let Ok(children) = self.prefetch_rx.try_recv() {
             self.prefetch_children(children);
+        }
+        if let Some(why) = self.fileops.refused.take() {
+            self.notify(why);
         }
         for report in self.fileops.poll() {
             self.notify(report.message());
@@ -1941,12 +1949,50 @@ impl App {
         (deletions.into_iter().map(|(_, r)| r).collect(), false)
     }
 
-    pub fn open_selected(&self) {
+    pub fn open_selected(&mut self) {
         if let Some(idx) = self.selection
-            && let Some(entry) = self.listing.entries.get(idx) {
+            && let Some(entry) = self.listing.entries.get(idx).cloned() {
                 if entry.is_dir { return; }
-                crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
+                self.open_file(&entry.path);
             }
+    }
+
+    /// Showing a folder inside an archive (or the archive's top).
+    pub fn in_archive(&self) -> bool {
+        !self.cwd.is_dir() && crate::vfs::is_virtual(&self.cwd)
+    }
+
+    /// Nothing can change inside an archive: say so, and true, if `dir` is in one.
+    pub fn refuse_read_only(&mut self, dir: &std::path::Path) -> bool {
+        let inside = crate::vfs::is_virtual(dir);
+        if inside {
+            self.notify("Archives open read-only: their contents can't be changed".into());
+        }
+        inside
+    }
+
+    /// Open with the default app; a file in an archive is unpacked first.
+    pub fn open_file(&mut self, path: &std::path::Path) {
+        if !crate::vfs::is_virtual(path) {
+            crate::launch::detach(std::process::Command::new("xdg-open").arg(path));
+            return;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.notify(format!("Unpacking {name}\u{2026}"));
+        let path = path.to_path_buf();
+        let tx = self.job_tx.clone();
+        std::thread::spawn(move || {
+            let msg = match crate::vfs::materialize(&path) {
+                Ok(real) => {
+                    crate::launch::detach(std::process::Command::new("xdg-open").arg(&real));
+                    None
+                }
+                Err(e) => Some(format!("Couldn't unpack {name}: {e}")),
+            };
+            if let Some(msg) = msg {
+                let _ = tx.send(msg);
+            }
+        });
     }
 
     pub fn enter_selected(&mut self) {
@@ -1956,8 +2002,10 @@ impl App {
                     self.navigate_to(entry.path);
                 } else if self.pick.is_some() {
                     crate::pick::accept(self);
+                } else if crate::vfs::browsable(&entry.path) {
+                    self.navigate_to(entry.path);
                 } else {
-                    crate::launch::detach(std::process::Command::new("xdg-open").arg(&entry.path));
+                    self.open_file(&entry.path);
                 }
             } else if self.pick.is_some() {
                 crate::pick::accept(self);
@@ -2277,9 +2325,12 @@ fn spawn_counter() -> (mpsc::Sender<(PathBuf, bool, u64)>, mpsc::Receiver<(PathB
     let (out_tx, out_rx) = mpsc::channel();
     std::thread::spawn(move || {
         while let Ok((path, hidden, generation)) = rx.recv() {
-            let n = std::fs::read_dir(&path).ok().map(|rd| rd.filter_map(|d| d.ok())
-                .filter(|d| hidden || !d.file_name().to_string_lossy().starts_with('.'))
-                .count());
+            let n = match std::fs::read_dir(&path) {
+                Ok(rd) => Some(rd.filter_map(|d| d.ok())
+                    .filter(|d| hidden || !d.file_name().to_string_lossy().starts_with('.'))
+                    .count()),
+                Err(_) => crate::vfs::read_dir(&path, hidden).ok().map(|e| e.len()),
+            };
             if out_tx.send((path, hidden, generation, n)).is_err() {
                 break;
             }

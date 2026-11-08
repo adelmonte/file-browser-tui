@@ -264,6 +264,14 @@ fn start_drag(app: &mut App, col: u16, row: u16) {
     } else {
         vec![entry.path.clone()]
     };
+    // Other apps can only take real files: ones in an archive are unpacked
+    let paths: Vec<PathBuf> = match paths.iter().map(|p| crate::vfs::materialize(p)).collect() {
+        Ok(p) => p,
+        Err(e) => {
+            app.notify(format!("Couldn't unpack: {e}"));
+            return;
+        }
+    };
     let uris: String = paths.iter().map(|p| {
         let mut uri = crate::thumbs::file_uri(p);
         if p.is_dir() {

@@ -36,7 +36,11 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
 
         MenuAction::OpenWith(i) => {
             if let Some(desktop_app) = app.open_with.get(i).cloned() {
-                crate::apps::launch(&desktop_app, &action_paths(app, target), &terminal_bin(app));
+                let paths: Result<Vec<PathBuf>, String> = action_paths(app, target).iter().map(|p| crate::vfs::materialize(p)).collect();
+                match paths {
+                    Ok(paths) => crate::apps::launch(&desktop_app, &paths, &terminal_bin(app)),
+                    Err(e) => app.notify(format!("Couldn't unpack: {e}")),
+                }
             }
         }
 
@@ -434,6 +438,9 @@ fn base64_encode(data: &[u8]) -> String {
 // ---------------------------------------------------------------------------
 
 fn start_rename(app: &mut App, idx: usize) {
+    if app.refuse_read_only(&app.cwd.clone()) {
+        return;
+    }
     if let Some(entry) = app.listing.entries.get(idx) {
         app.rename_state = Some(RenameState::new(idx, &entry.name.clone()));
         app.selection = Some(idx);
@@ -478,6 +485,9 @@ fn unique_name(dir: &Path, base: &str) -> PathBuf {
 
 /// Ask for the new folder's or file's name (created on confirming).
 fn create_new(app: &mut App, is_dir: bool) {
+    if app.refuse_read_only(&app.cwd.clone()) {
+        return;
+    }
     let base = if is_dir { "New Folder" } else { "New File" };
     let suggestion = unique_name(&app.cwd, base);
     let name = suggestion.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -489,6 +499,9 @@ fn create_new(app: &mut App, is_dir: bool) {
 fn compress(app: &mut App, target: MenuTarget, targz: bool) {
     let Some(src) = target_path(app, target) else { return; };
     let Some(parent) = src.parent().map(|p| p.to_path_buf()) else { return; };
+    if app.refuse_read_only(&parent) {
+        return;
+    }
     let Some(name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else { return; };
 
     if targz {

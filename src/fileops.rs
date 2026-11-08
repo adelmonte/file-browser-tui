@@ -212,6 +212,8 @@ pub struct FileOps {
     pub progress: Option<Progress>,
     /// A clash the worker is waiting on (see `resolve`).
     pub conflict: Option<Conflict>,
+    /// Why a job wasn't started (it would change an archive's contents).
+    pub refused: Option<String>,
 }
 
 impl FileOps {
@@ -233,7 +235,7 @@ impl FileOps {
                 let _ = tx.send(Msg::Done(report));
             }
         });
-        Self { jobs, rx, cancel, answers, pending: 0, progress: None, conflict: None }
+        Self { jobs, rx, cancel, answers, pending: 0, progress: None, conflict: None, refused: None }
     }
 
     /// Answer the clash the worker is waiting on.
@@ -251,20 +253,42 @@ impl FileOps {
         let _ = self.jobs.send(Job { op, sources, dest });
     }
 
-    pub fn copy(&mut self, sources: Vec<PathBuf>, dest: &Path) {
-        self.submit(Op::Copy, sources, Some(dest.to_path_buf()));
+    /// Archives open read-only: nothing goes into one, nothing in one is
+    /// deleted. True (with the reason kept for the app) if `paths` would.
+    fn into_archive(&mut self, paths: &[PathBuf]) -> bool {
+        let inside = paths.iter().any(|p| crate::vfs::is_virtual(p));
+        if inside {
+            self.refused = Some("Archives open read-only: their contents can't be changed".into());
+        }
+        inside
     }
 
+    pub fn copy(&mut self, sources: Vec<PathBuf>, dest: &Path) {
+        if !self.into_archive(&[dest.to_path_buf()]) {
+            self.submit(Op::Copy, sources, Some(dest.to_path_buf()));
+        }
+    }
+
+    /// Moving out of an archive copies (the archive stays as it is).
     pub fn move_to(&mut self, sources: Vec<PathBuf>, dest: &Path) {
-        self.submit(Op::Move, sources, Some(dest.to_path_buf()));
+        if self.into_archive(&[dest.to_path_buf()]) {
+            return;
+        }
+        let (packed, loose): (Vec<PathBuf>, Vec<PathBuf>) = sources.into_iter().partition(|p| crate::vfs::is_virtual(p));
+        self.submit(Op::Copy, packed, Some(dest.to_path_buf()));
+        self.submit(Op::Move, loose, Some(dest.to_path_buf()));
     }
 
     pub fn trash(&mut self, paths: Vec<PathBuf>) {
-        self.submit(Op::Trash, paths, None);
+        if !self.into_archive(&paths) {
+            self.submit(Op::Trash, paths, None);
+        }
     }
 
     pub fn delete(&mut self, paths: Vec<PathBuf>) {
-        self.submit(Op::Delete, paths, None);
+        if !self.into_archive(&paths) {
+            self.submit(Op::Delete, paths, None);
+        }
     }
 
     pub fn empty_trash(&mut self) {
@@ -353,9 +377,23 @@ impl<'a> Worker<'a> {
     fn run(mut self, job: &Job) -> Report {
         let op = job.op;
         self.multi = job.sources.len() > 1;
+        // Copies out of an archive are unpacked first, then copied as files
+        let mut sources = Vec::with_capacity(job.sources.len());
+        for s in &job.sources {
+            if !matches!(op, Op::Copy | Op::Move) || !crate::vfs::is_virtual(s) {
+                sources.push(s.clone());
+                continue;
+            }
+            self.p.current = s.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            self.tick(true);
+            match crate::vfs::materialize(s) {
+                Ok(real) => sources.push(real),
+                Err(e) => self.fail(s, e),
+            }
+        }
         // Byte totals only matter where bytes get copied
         if matches!(op, Op::Copy | Op::Move) {
-            for s in &job.sources {
+            for s in &sources {
                 let (bytes, items) = measure(s);
                 self.p.total_bytes += bytes;
                 self.p.total_items += items;
@@ -382,7 +420,7 @@ impl<'a> Worker<'a> {
                 }
             }
             _ => {
-                for src in &job.sources {
+                for src in &sources {
                     if self.cancelled() {
                         break;
                     }

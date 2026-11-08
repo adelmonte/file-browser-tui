@@ -138,6 +138,12 @@ impl ThumbCache {
         !self.pending_visible.is_empty()
     }
 
+    /// Show an icon for this path instead of a thumbnail (a file in an
+    /// archive, which isn't on disk to read).
+    pub fn skip(&mut self, path: &Path) {
+        self.failed.insert(path.to_path_buf());
+    }
+
     /// Whether making a thumbnail for this path already failed.
     pub fn failed(&self, path: &Path) -> bool {
         self.failed.contains(path)

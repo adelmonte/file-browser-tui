@@ -52,6 +52,10 @@ action also has a keyboard shortcut.
   Skip, Rename, Apply to All.
 - **Undo** (`Ctrl+Z`) for copies, moves, renames, trashing and new folders or files.
   Undoing a copy moves the copies to the trash rather than deleting them.
+- **Archives as folders**: double-click a zip, tar.gz, 7z, rar or iso to look inside it
+  like a folder (`…/photos.zip/2024/`). Files in it open with their app, and copying or
+  dragging them out unpacks just those. Read-only: nothing inside can be renamed,
+  deleted or added.
 - **Archives**: Extract Here, which puts a single top-level folder beside the archive
   and gives loose files a folder of their own, or Extract Into a folder named after
   the archive. Zip, tar.*, 7z, rar, iso and more. Compress to tar.gz or zip.
@@ -77,6 +81,7 @@ action also has a keyboard shortcut.
 - A [Nerd Font](https://www.nerdfonts.com/) for menu and toolbar symbols.
 - An icon theme (Breeze, Papirus, Adwaita, ...) and `rsvg-convert` (librsvg) to draw
   its icons.
+- libarchive, to look inside archives.
 
 Optional tools, used when installed. `file-browser-tui --check` lists what it found.
 
@@ -87,7 +92,7 @@ Optional tools, used when installed. `file-browser-tui --check` lists what it fo
 | `ffmpeg` (or `ffmpegthumbnailer`) | video thumbnails, audio cover art |
 | `poppler` (`pdftoppm`) | PDF thumbnails (add `"pdf"` to `thumbnails`, see below) |
 | `xdg-utils` | opening files with their default app |
-| `libarchive` (`bsdtar`) | Extract (`7z`, `unrar` or `unzip` are used if it can't) |
+| `bsdtar` (libarchive) | Extract (`7z`, `unrar` or `unzip` are used if it can't) |
 | `zip` | Compress to zip |
 | `udisks2` | mounting, unlocking and safely removing drives |
 | `kdeconnect` | Send to Device, browsing phones |

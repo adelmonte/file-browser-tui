@@ -22,6 +22,7 @@ mod search;
 mod thumbs;
 mod ui;
 mod user_actions;
+mod vfs;
 
 use std::{io::Write, sync::mpsc, time::Duration};
 
@@ -173,6 +174,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    std::thread::spawn(vfs::clean_up);
     let mut app = App::new(picker, config, dir_rx, mount_rx)?;
     if let Some(p) = pick {
         let file = p.req.current_file.clone();
@@ -222,6 +224,7 @@ fn main() -> anyhow::Result<()> {
     }
     let _ = build_config(&app).save();
     app.dirstates.save();
+    vfs::clean_up();
 
     if let Some(e) = config_err {
         eprintln!("file-browser-tui: config not loaded or saved: {e:#}");
