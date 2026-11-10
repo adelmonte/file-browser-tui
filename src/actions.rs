@@ -241,9 +241,8 @@ fn target_dir(app: &App, target: MenuTarget) -> Option<PathBuf> {
 // ---------------------------------------------------------------------------
 
 fn clip_target(app: &mut App, target: MenuTarget, op: ClipOp) {
-    if let Some(path) = target_path(app, target) {
-        app.clipboard = Some(Clipboard { paths: vec![path], op });
-    }
+    let paths = action_paths(app, target);
+    clip_paths(app, paths, op);
 }
 
 /// Returns the currently selected paths: multi_selection if non-empty, else single selection.
@@ -265,6 +264,13 @@ pub fn selected_paths(app: &App) -> Vec<PathBuf> {
 
 pub fn clip_selection(app: &mut App, op: ClipOp) {
     let paths = selected_paths(app);
+    clip_paths(app, paths, op);
+}
+
+/// Cut or copy `paths`: ours to paste, and on the system clipboard too.
+/// Pasting checks the system clipboard still holds them (something copied
+/// in another app since wins), so they must be put there.
+fn clip_paths(app: &mut App, paths: Vec<PathBuf>, op: ClipOp) {
     if paths.is_empty() {
         return;
     }
