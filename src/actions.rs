@@ -279,6 +279,7 @@ fn clip_paths(app: &mut App, paths: Vec<PathBuf>, op: ClipOp) {
     app.unpack_in_background(&paths);
     let list: String = paths.iter().map(|p| crate::thumbs::file_uri(&crate::vfs::unpacked_path(p)) + "\r\n").collect();
     crate::clipboard::write(Some("text/uri-list"), list.as_bytes());
+    mark_cut(if op == ClipOp::Cut { Some(&paths) } else { None });
     let n = paths.len();
     let what = if n == 1 { "1 item".to_string() } else { format!("{n} items") };
     app.notify(match op {
@@ -307,6 +308,12 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
     });
     if !ours {
         app.clipboard = None;
+        // Cut in another of our windows: moved, as there
+        if let Some(paths) = cut_elsewhere() {
+            mark_cut(None);
+            app.fileops.move_to(paths, dest);
+            return;
+        }
         paste_system(app, dest);
         return;
     }
@@ -314,10 +321,39 @@ pub fn paste_clipboard(app: &mut App, dest: &Path) {
     match clip.op {
         ClipOp::Copy => app.fileops.copy(clip.paths, dest),
         ClipOp::Cut => {
+            mark_cut(None);
             app.fileops.move_to(clip.paths, dest);
             app.clipboard = None;
         }
     }
+}
+
+/// What was last cut, for our other windows: the system clipboard holds
+/// only the files, not that they were cut (wl-copy offers one type).
+fn cut_note() -> PathBuf {
+    dirs::runtime_dir().unwrap_or_else(std::env::temp_dir).join("file-browser-tui-cut")
+}
+
+fn mark_cut(paths: Option<&[PathBuf]>) {
+    match paths {
+        Some(paths) => {
+            let text: String = paths.iter().map(|p| p.to_string_lossy().into_owned() + "\n").collect();
+            let _ = std::fs::write(cut_note(), text);
+        }
+        None => {
+            let _ = std::fs::remove_file(cut_note());
+        }
+    }
+}
+
+/// The files cut in another of our windows, if they're still what the
+/// system clipboard holds.
+fn cut_elsewhere() -> Option<Vec<PathBuf>> {
+    let note = std::fs::read_to_string(cut_note()).ok()?;
+    let cut: Vec<PathBuf> = note.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect();
+    let held = crate::dnd::parse_uri_list(&String::from_utf8_lossy(&crate::clipboard::read(Some("text/uri-list"))?));
+    let same = !cut.is_empty() && held.iter().eq(cut.iter().map(|p| crate::vfs::unpacked_path(p)).collect::<Vec<_>>().iter());
+    same.then_some(cut)
 }
 
 fn paste_system(app: &mut App, dest: &Path) {
