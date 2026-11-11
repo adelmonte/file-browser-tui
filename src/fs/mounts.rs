@@ -330,10 +330,11 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
         }
 
         // Real user FUSE mounts (sshfs, rclone, ...) — but not gvfs/portal
-        // infrastructure (nothing under /run/user), and not fusectl.
+        // infrastructure (nothing under /run/user but sshfs, where KDE
+        // Connect and lanlink mount phones), and not fusectl.
         let is_fuse = (fstype == "fuse" || fstype == "fuseblk" || fstype.starts_with("fuse."))
             && !FUSE_BLOCKLIST.contains(&fstype)
-            && !mountpoint.starts_with("/run/user/");
+            && (fstype == "fuse.sshfs" || !mountpoint.starts_with("/run/user/"));
 
         // Removable media mounted by udisks
         let is_media = mountpoint.starts_with("/run/media/")

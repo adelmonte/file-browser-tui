@@ -206,13 +206,13 @@ fn sections(app: &App) -> Vec<(&'static str, Vec<Row>)> {
     let phone_mount = |k: &crate::user_actions::KdeConnectDevice| {
         k.mount.clone().or_else(|| app.kdeconnect_mounts.get(&k.id).cloned())
     };
-    let is_phone_mount = |d: &crate::fs::mounts::DeviceEntry| {
-        app.kdeconnect_devices.iter().any(|k| phone_mount(k).is_some_and(|m| m == std::path::Path::new(&d.path)))
+    let phone_of = |d: &crate::fs::mounts::DeviceEntry| {
+        app.kdeconnect_devices.iter().find(|k| phone_mount(k).is_some_and(|m| m == std::path::Path::new(&d.path)))
     };
     let mut devices: Vec<Row> = app.devices.iter().enumerate().map(|(i, d)| Row {
         target: SidebarTarget::Device(i),
-        icon: if is_phone_mount(d) { "smartphone".into() } else { d.icon().into() },
-        name: d.name.clone(),
+        icon: if phone_of(d).is_some() { "smartphone".into() } else { d.icon().into() },
+        name: phone_of(d).map_or_else(|| d.name.clone(), |k| k.name.clone()),
         current: d.is_mounted() && (std::path::Path::new(&d.path) == cwd
             || (d.kind == crate::fs::mounts::MountKind::Phone && cwd.starts_with(&d.path))),
         dim: !d.is_mounted(),
