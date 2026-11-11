@@ -29,7 +29,7 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("tar", "Compress to tar.gz", None),
     ("zip", "Compress to zip", None),
     ("udisksctl", "unmounting and safely removing drives", None),
-    ("kdeconnect-cli", "Send to Device / browsing phones (KDE Connect)", None),
+    ("kdeconnect-cli", "Send to Device / browsing phones (KDE Connect; lanlink works too)", None),
     ("gio", "file type icons for unusual files (fallback)", None),
 ];
 

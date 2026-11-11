@@ -257,10 +257,13 @@ pub struct KdeConnectDevice {
     pub name: String,
     /// Connected right now (paired devices are listed either way).
     pub reachable: bool,
+    /// Paired through lanlink's daemon rather than KDE Connect's.
+    pub lanlink: bool,
 }
 
-/// Poll reachable KDE Connect devices in the background (no-op if
-/// kdeconnect-cli isn't installed), so menus never block on D-Bus.
+/// Poll paired KDE Connect devices in the background, from KDE Connect
+/// and from lanlink (a daemon speaking the same protocol), so menus never
+/// block on either.
 pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice>>) {
     std::thread::spawn(move || loop {
         let list = |flag: &str| -> Option<Vec<(String, String)>> {
@@ -273,12 +276,23 @@ pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice
                 Some((id.to_string(), name.trim().to_string()))
             }).collect())
         };
-        let Some(paired) = list("-l") else { return; }; // not installed
-        let reachable = list("-a").unwrap_or_default();
-        let mut devices: Vec<KdeConnectDevice> = paired.into_iter().map(|(id, name)| {
+        let paired = list("-l");
+        let has_lanlink = lanlink_socket().exists();
+        if paired.is_none() && !has_lanlink {
+            return; // neither is installed
+        }
+        let reachable = paired.as_ref().and_then(|_| list("-a")).unwrap_or_default();
+        let mut devices: Vec<KdeConnectDevice> = paired.unwrap_or_default().into_iter().map(|(id, name)| {
             let reachable = reachable.iter().any(|(r, _)| *r == id);
-            KdeConnectDevice { id, name, reachable }
+            KdeConnectDevice { id, name, reachable, lanlink: false }
         }).collect();
+        if has_lanlink {
+            for d in lanlink_devices() {
+                if !devices.iter().any(|k| k.id == d.id) {
+                    devices.push(d);
+                }
+            }
+        }
         devices.sort_by_key(|d| !d.reachable);
         if tx.send(devices).is_err() {
             return;
@@ -291,6 +305,9 @@ pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice
 /// mount point (blocks for up to a few seconds).
 /// Mount the phone's storage; Err carries KDE Connect's reason.
 pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
+    if device.lanlink {
+        return lanlink_mount(device);
+    }
     let object = format!("/modules/kdeconnect/devices/{}/sftp", device.id);
     let call = |method: &str| {
         Command::new("gdbus")
@@ -312,9 +329,83 @@ pub fn kdeconnect_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
 }
 
 pub fn kdeconnect_share(device: &KdeConnectDevice, paths: &[PathBuf]) {
+    if device.lanlink {
+        let items: Vec<String> = paths.iter().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()).to_string_lossy().into_owned()).collect();
+        let req = serde_json::json!({"cmd": "send", "device": device.id, "items": items});
+        std::thread::spawn(move || {
+            if let Err(e) = lanlink_call(&req) {
+                tracing::error!("lanlink send: {e}");
+            }
+        });
+        return;
+    }
     for p in paths {
         crate::launch::detach(Command::new("kdeconnect-cli").args(["-d", &device.id, "--share"]).arg(p));
     }
+}
+
+fn lanlink_socket() -> PathBuf {
+    dirs::runtime_dir().unwrap_or_else(std::env::temp_dir).join("lanlink.sock")
+}
+
+/// One request to lanlink's daemon: a JSON line each way.
+fn lanlink_call(req: &serde_json::Value) -> Result<serde_json::Value, String> {
+    use std::io::{BufRead, Write};
+    let mut s = std::os::unix::net::UnixStream::connect(lanlink_socket()).map_err(|e| format!("lanlink isn't running: {e}"))?;
+    s.set_read_timeout(Some(std::time::Duration::from_secs(5))).map_err(|e| e.to_string())?;
+    let mut line = req.to_string();
+    line.push('\n');
+    s.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    let mut resp = String::new();
+    std::io::BufReader::new(s).read_line(&mut resp).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&resp).map_err(|_| "lanlink gave a reply we can't read".to_string())?;
+    if v["ok"].as_bool() == Some(true) {
+        Ok(v["data"].clone())
+    } else {
+        Err(v["error"].as_str().unwrap_or("lanlink refused").to_string())
+    }
+}
+
+/// lanlink's paired devices, with where each is mounted, if it is.
+fn lanlink_status() -> Vec<(KdeConnectDevice, Option<PathBuf>)> {
+    let Ok(data) = lanlink_call(&serde_json::json!({"cmd": "status"})) else { return Vec::new() };
+    data["devices"].as_array().into_iter().flatten()
+        .filter(|d| d["paired"].as_bool() == Some(true))
+        .filter_map(|d| Some((
+            KdeConnectDevice {
+                id: d["id"].as_str()?.to_string(),
+                name: d["name"].as_str().unwrap_or("Phone").to_string(),
+                reachable: d["online"].as_bool() == Some(true),
+                lanlink: true,
+            },
+            d["mount"].as_str().map(PathBuf::from),
+        )))
+        .collect()
+}
+
+fn lanlink_devices() -> Vec<KdeConnectDevice> {
+    lanlink_status().into_iter().map(|(d, _)| d).collect()
+}
+
+/// Ask lanlink to mount the phone (it asks the phone to start its SFTP
+/// server, then runs sshfs) and wait until it has.
+fn lanlink_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
+    let mounted = || lanlink_status().into_iter().find(|(d, _)| d.id == device.id).and_then(|(_, m)| m).filter(|m| m.is_dir());
+    if let Some(m) = mounted() {
+        return Ok(m);
+    }
+    if !device.reachable {
+        return Err(format!("{} isn't connected", device.name));
+    }
+    lanlink_call(&serde_json::json!({"cmd": "mount", "device": device.id}))?;
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(35) {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if let Some(m) = mounted() {
+            return Ok(m);
+        }
+    }
+    Err(format!("{} didn't answer: is its app open, with All files access allowed?", device.name))
 }
 
 #[cfg(test)]

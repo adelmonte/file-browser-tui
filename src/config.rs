@@ -280,7 +280,7 @@ fn template() -> String {
 # terminal_command = ""         # for "Open Terminal Here"; empty = $TERMINAL, then kitty
 # home_page = "~"               # the folder it opens in and Alt+Home goes to
 # resume = false                # true: open in the folder you were in last time instead
-# kdeconnect = true             # phones under Devices, Send to Device (needs kdeconnect)
+# kdeconnect = true             # phones under Devices, Send to Device (needs kdeconnect or lanlink)
 # icon_theme = ""               # e.g. "Papirus-Dark"; empty = the desktop's (KDE, GTK or GNOME setting)
 sidebar_w = 18                  # sidebar width in columns (also set by dragging its edge)
 

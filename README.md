@@ -38,7 +38,7 @@ action also has a keyboard shortcut.
 - **Places sidebar**: drag to reorder, right-click to add or remove. Drives show how
   full they are, and removable drives and network mounts get an eject button.
   Plugged-in drives appear greyed out until clicked, which mounts them; encrypted
-  (LUKS) drives ask for their passphrase. Phones paired with KDE Connect show up too.
+  (LUKS) drives ask for their passphrase. Phones paired with KDE Connect (or lanlink, which speaks the same protocol) show up too.
   If the folder you're in disappears (a drive pulled out), the view goes back to the
   last folder that's still there.
 - **Location bar**: each folder in the path is clickable (click `Pictures` in
@@ -103,7 +103,7 @@ Optional tools, used when installed. `file-browser-tui --check` lists what it fo
 | `bsdtar` (libarchive) | Extract (`7z`, `unrar` or `unzip` are used if it can't) |
 | `zip` | Compress to zip |
 | `udisks2` | mounting, unlocking and safely removing drives |
-| `kdeconnect` | Send to Device, browsing phones |
+| `kdeconnect` (or `lanlink`) | Send to Device, browsing phones over Wi-Fi |
 | `glib2` (`gio`) | file type icons for unusual files |
 
 ## Install
@@ -274,7 +274,7 @@ thumbnail_cache_exclude = ["~/Private"]
 
 ### KDE Connect
 
-Paired phones appear under Devices and in Send to Device. To turn that off:
+Phones paired with KDE Connect, or with lanlink when its daemon is running, appear under Devices and in Send to Device. Clicking one mounts its storage (lanlink needs `sshfs` for that). To turn that off:
 
 ```toml
 kdeconnect = false
