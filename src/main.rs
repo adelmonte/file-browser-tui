@@ -263,42 +263,39 @@ fn run(
     dir_watcher: Option<&fs::watcher::DirWatcher>,
     launched: std::time::Instant,
 ) -> anyhow::Result<()> {
+    // Bootstrap layout before first render so queue_visible_icons has correct areas
+    let bootstrap = |app: &mut App, sz: ratatui::layout::Size| {
+        app.main_area = ratatui::layout::Rect {
+            x: app.sidebar_w,
+            y: app::TOPBAR_H,
+            width: sz.width.saturating_sub(app.sidebar_w),
+            height: sz.height.saturating_sub(app::TOPBAR_H),
+        };
+        app.grid_cols = (app.main_area.width / app.cell_w).max(1);
+        app.last_terminal_size = sz;
+        app.queue_visible_icons();
+    };
+    let first = terminal.size()?;
+    bootstrap(app, first);
+    ui::sidebar::request_icons(app);
     // A window we just opened is usually resized by the window manager
     // (tiled) a moment after it appears: draw once it has its size, not
-    // once at kitty's default size and again laid out anew
+    // once at kitty's default size and again laid out anew. Icons load
+    // meanwhile
     if std::env::var_os(actions::KITTY_ENV).is_some() && launched.elapsed() < Duration::from_millis(500) {
-        let first = terminal.size()?;
-        let mut last = first;
-        let mut changed_at = None;
         let waiting = std::time::Instant::now();
-        while waiting.elapsed() < Duration::from_millis(250) {
-            std::thread::sleep(Duration::from_millis(4));
-            let now = terminal.size()?;
-            if now != last {
-                last = now;
-                changed_at = Some(std::time::Instant::now());
-            }
-            // Settled: no further change for a moment after the first
-            if changed_at.is_some_and(|t| t.elapsed() > Duration::from_millis(30)) {
-                break;
-            }
+        while waiting.elapsed() < Duration::from_millis(250) && terminal.size()? == first {
+            std::thread::sleep(Duration::from_millis(2));
+            app.drain_channels();
         }
-        tracing::info!("window size {}x{} -> {}x{} after {:?}", first.width, first.height, last.width, last.height, waiting.elapsed());
+        let sz = terminal.size()?;
+        tracing::info!("window size {}x{} -> {}x{} after {:?}", first.width, first.height, sz.width, sz.height, waiting.elapsed());
+        if sz != first {
+            bootstrap(app, sz);
+        }
     }
-    // Bootstrap layout before first render so queue_visible_icons has correct areas
-    let sz = terminal.size()?;
-    app.main_area = ratatui::layout::Rect {
-        x: app.sidebar_w,
-        y: app::TOPBAR_H,
-        width: sz.width.saturating_sub(app.sidebar_w),
-        height: sz.height.saturating_sub(app::TOPBAR_H),
-    };
-    app.grid_cols = (app.main_area.width / app.cell_w).max(1);
-    app.last_terminal_size = ratatui::layout::Size { width: sz.width, height: sz.height };
-    app.queue_visible_icons();
     // A new window shows up complete: give the first frame's icons a
     // moment to load instead of drawing without them
-    ui::sidebar::request_icons(app);
     let started = std::time::Instant::now();
     while started.elapsed() < Duration::from_millis(150)
         && (app.icon_cache.loading() || app.sidebar_icons.loading() || app.thumb_cache.loading() || !app.devices_ready)
