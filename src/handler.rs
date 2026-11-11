@@ -7,7 +7,7 @@ use crate::{
     search::{SearchMode, SearchScope},
     actions,
     app::{App, TOPBAR_H, ViewMode},
-    events::{ClickKind, ClipOp, ConfirmDeleteState, DragState, DRAG_THRESHOLD},
+    events::{ClickKind, ClipOp, DragState, DRAG_THRESHOLD},
     ui::{
         compact::{COMPACT_CELL_H, compact_cell_w},
         grid::{cell_at_pos, details_row_at_pos},
@@ -509,17 +509,7 @@ fn run_action(app: &mut App, action: Action) -> bool {
         }
         Action::Delete => {
             let paths = actions::selected_paths(app);
-            if !paths.is_empty() {
-                let display_name = if paths.len() == 1 {
-                    paths[0].file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("this item")
-                        .to_string()
-                } else {
-                    format!("{} items", paths.len())
-                };
-                app.confirm_delete = Some(ConfirmDeleteState { paths, display_name });
-            }
+            actions::confirm_delete(app, paths);
         }
         Action::Properties => actions::execute(app, MenuAction::Properties, target),
         Action::OpenTerminal => actions::execute(app, MenuAction::OpenTerminal, MenuTarget::Empty),

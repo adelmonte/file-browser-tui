@@ -265,9 +265,15 @@ pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-/// Something inside an archive, not on disk (the archive file itself isn't).
+/// Something not on disk to read directly: inside an archive (the archive
+/// file itself isn't), or on a phone.
 pub fn is_virtual(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_err() && split_outer(path).is_some()
+    crate::phone::is_phone(path) || (std::fs::symlink_metadata(path).is_err() && split_outer(path).is_some())
+}
+
+/// Inside an archive, which can't be changed (a phone can).
+pub fn read_only(path: &Path) -> bool {
+    !crate::phone::is_phone(path) && is_virtual(path)
 }
 
 /// A folder inside an archive, or an archive shown as a folder.
@@ -280,6 +286,10 @@ pub fn is_folder(path: &Path) -> bool {
     if path.is_dir() {
         return true;
     }
+    if crate::phone::is_phone(path) {
+        // Busy copying, it can't say; it was a folder a moment ago
+        return crate::phone::busy() || crate::phone::stat(path).is_ok_and(|i| i.is_some_and(|i| i.is_dir));
+    }
     match split(path) {
         Some((archive, inner)) => index(&archive).is_ok_and(|i| i.is_dir(&inner)),
         None => false,
@@ -288,6 +298,24 @@ pub fn is_folder(path: &Path) -> bool {
 
 /// A folder in an archive listed like `fs::read_dir` lists a real one.
 pub fn read_dir(path: &Path, show_hidden: bool) -> anyhow::Result<Vec<crate::fs::DirEntry>> {
+    if crate::phone::is_phone(path) {
+        let items = crate::phone::read_dir(path).map_err(|e| anyhow::anyhow!(e))?;
+        return Ok(items.into_iter()
+            .filter(|i| show_hidden || !i.name.starts_with('.'))
+            .map(|i| crate::fs::DirEntry {
+                path: path.join(&i.name),
+                name: i.name,
+                is_dir: i.is_dir,
+                size: i.size,
+                modified: i.modified,
+                created: None,
+                accessed: None,
+                mime_type: None,
+                is_symlink: false,
+                depth: 0,
+            })
+            .collect());
+    }
     let (archive, inner) = split(path).ok_or_else(|| anyhow::anyhow!("not in an archive"))?;
     let idx = index(&archive).map_err(|e| anyhow::anyhow!("{}: {e}", archive.display()))?;
     if !idx.is_dir(&inner) {
@@ -341,6 +369,9 @@ pub fn materialize(path: &Path) -> Result<PathBuf, String> {
     if !is_virtual(path) {
         return Ok(path.to_path_buf());
     }
+    if crate::phone::is_phone(path) {
+        return fetch_from_phone(path);
+    }
     let (archive, inner) = split(path).ok_or("can't read the archive")?;
     // An archive in an archive: split already unpacked it
     if inner.as_os_str().is_empty() {
@@ -355,11 +386,42 @@ pub fn unpacked_path(path: &Path) -> PathBuf {
     if !is_virtual(path) {
         return path.to_path_buf();
     }
+    if crate::phone::is_phone(path) {
+        return phone_copy_at(path);
+    }
     match split(path) {
         Some((archive, inner)) if inner.as_os_str().is_empty() => archive,
         Some((archive, inner)) => unpack_dir(&archive).join(inner),
         None => path.to_path_buf(),
     }
+}
+
+/// Where a file (or folder) on a phone is downloaded to, for opening or
+/// handing to another app.
+pub fn phone_copy_at(path: &Path) -> PathBuf {
+    let rest = path.strip_prefix(crate::phone::ROOT).unwrap_or(path);
+    unpack_root().join("phones").join(rest)
+}
+
+/// Download a file or folder from a phone into this run's cache, reusing
+/// a file already there at the same size.
+fn fetch_from_phone(path: &Path) -> Result<PathBuf, String> {
+    let item = crate::phone::stat(path)?.ok_or_else(|| format!("{} isn't on the phone", path.display()))?;
+    let target = phone_copy_at(path);
+    if item.is_dir {
+        std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        for child in crate::phone::read_dir(path)? {
+            fetch_from_phone(&path.join(&child.name))?;
+        }
+        return Ok(target);
+    }
+    if std::fs::metadata(&target).is_ok_and(|m| Some(m.len()) == item.size) {
+        return Ok(target);
+    }
+    std::fs::create_dir_all(target.parent().unwrap_or(&target)).map_err(|e| e.to_string())?;
+    crate::phone::download(path, &target, &crate::phone::Transfer::default())?
+        .recv().map_err(|_| "the phone connection stopped".to_string())??;
+    Ok(target)
 }
 
 /// The cache folder an archive's members are unpacked into: one per

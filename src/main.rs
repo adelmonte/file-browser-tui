@@ -22,6 +22,7 @@ mod search;
 mod thumbs;
 mod ui;
 mod user_actions;
+mod phone;
 mod vfs;
 
 use std::{io::Write, sync::mpsc, time::Duration};

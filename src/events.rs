@@ -188,9 +188,17 @@ pub struct ConflictPrompt {
 
 impl ConflictPrompt {
     pub fn new(conflict: crate::fileops::Conflict) -> Self {
-        let input = crate::fileops::free_name(&conflict.dst).file_name()
-            .map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let free = if crate::phone::is_phone(&conflict.dst) { crate::fileops::phone_free_name(&conflict.dst) } else { crate::fileops::free_name(&conflict.dst) };
+        let input = free.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let info = |p: &std::path::Path| {
+            if crate::phone::is_phone(p) {
+                let Ok(Some(item)) = crate::phone::stat(p) else { return String::new() };
+                let what = if item.is_dir { "folder on the phone".to_string() } else { crate::ui::properties::human_size(item.size.unwrap_or(0)) };
+                return match item.modified {
+                    Some(t) => format!("{what}, modified {}", chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M")),
+                    None => what,
+                };
+            }
             let Ok(m) = std::fs::symlink_metadata(p) else { return String::new() };
             let what = if m.is_dir() {
                 let n = std::fs::read_dir(p).map_or(0, |d| d.count());

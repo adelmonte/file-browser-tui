@@ -57,6 +57,13 @@ action also has a keyboard shortcut.
   their app, and copying them out, dragging them to another app or pasting them in one
   unpacks just those. Read-only: nothing inside can be renamed,
   deleted or added.
+- **Phones over USB**: an Android phone plugged in and set to File transfer shows in
+  the sidebar under Devices, with nothing to mount and nothing else to install (MTP
+  is built in). Browse it with thumbnails, open files with their app, copy, move,
+  drag and paste files and folders on and off it with the usual progress and
+  cancel, rename, delete and make folders. The phone is let go of a few seconds
+  after the last use, so other programs can use it too. Phones have no trash:
+  Delete asks, then deletes for good. Unlock the phone if it shows no files.
 - **Archives**: Extract Here, which puts a single top-level folder beside the archive
   and gives loose files a folder of their own, or Extract Into a folder named after
   the archive. Zip, tar.*, 7z, rar, iso and more. Compress to tar.gz or zip.

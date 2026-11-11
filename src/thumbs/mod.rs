@@ -404,6 +404,11 @@ impl Previews {
 }
 
 pub(crate) fn generate_or_load_thumb(path: &Path, mime_type: &str) -> anyhow::Result<image::DynamicImage> {
+    // On a phone: the thumbnail it made itself, nothing cached on disk
+    if crate::phone::is_phone(path) {
+        let bytes = crate::phone::thumbnail(path).map_err(anyhow::Error::msg)?;
+        return generator::image_from_memory(&bytes);
+    }
     let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let uri = file_uri(&abs);
     let name = format!("{:x}.png", md5::compute(uri.as_bytes()));

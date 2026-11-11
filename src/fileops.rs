@@ -257,7 +257,7 @@ impl FileOps {
     /// one), nothing in one is deleted. True (with the reason kept for the
     /// app) if this would.
     fn into_archive(&mut self, paths: &[PathBuf], dest: Option<&Path>) -> bool {
-        let inside = paths.iter().any(|p| crate::vfs::is_virtual(p)) || dest.is_some_and(crate::vfs::in_archive);
+        let inside = paths.iter().any(|p| crate::vfs::read_only(p)) || dest.is_some_and(crate::vfs::in_archive);
         if inside {
             self.refused = Some("Archives open read-only: their contents can't be changed".into());
         }
@@ -275,12 +275,16 @@ impl FileOps {
         if self.into_archive(&[], Some(dest)) {
             return;
         }
-        let (packed, loose): (Vec<PathBuf>, Vec<PathBuf>) = sources.into_iter().partition(|p| crate::vfs::is_virtual(p));
+        let (packed, loose): (Vec<PathBuf>, Vec<PathBuf>) = sources.into_iter().partition(|p| crate::vfs::read_only(p));
         self.submit(Op::Copy, packed, Some(dest.to_path_buf()));
         self.submit(Op::Move, loose, Some(dest.to_path_buf()));
     }
 
     pub fn trash(&mut self, paths: Vec<PathBuf>) {
+        if paths.iter().any(|p| crate::phone::is_phone(p)) {
+            self.refused = Some("Phones have no trash: delete with Shift+Delete".into());
+            return;
+        }
         if !self.into_archive(&paths, None) {
             self.submit(Op::Trash, paths, None);
         }
@@ -378,23 +382,41 @@ impl<'a> Worker<'a> {
     fn run(mut self, job: &Job) -> Report {
         let op = job.op;
         self.multi = job.sources.len() > 1;
-        // Copies out of an archive are unpacked first, then copied as files
-        let mut sources = Vec::with_capacity(job.sources.len());
+        // Copies out of an archive are unpacked first, and off a phone
+        // downloaded, then copied as files. Each source keeps the phone path
+        // it came from, deleted there once a move is done
+        let to_phone = job.dest.as_deref().is_some_and(crate::phone::is_phone);
+        let mut sources: Vec<(PathBuf, Option<PathBuf>)> = Vec::with_capacity(job.sources.len());
         for s in &job.sources {
-            if !matches!(op, Op::Copy | Op::Move) || !crate::vfs::is_virtual(s) {
-                sources.push(s.clone());
+            if !matches!(op, Op::Copy | Op::Move) || !crate::vfs::is_virtual(s) || (to_phone && crate::phone::is_phone(s)) {
+                sources.push((s.clone(), None));
                 continue;
             }
             self.p.current = s.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             self.tick(true);
+            if crate::phone::is_phone(s) {
+                if self.cancelled() {
+                    break;
+                }
+                self.p.total_bytes += phone_measure(s);
+                self.p.scanning = false;
+                let target = crate::vfs::phone_copy_at(s);
+                let _ = remove_any(&target);
+                match self.fetch(s, &target) {
+                    Ok(()) => sources.push((target, (op == Op::Move).then(|| s.clone()))),
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => break,
+                    Err(e) => self.fail(s, e),
+                }
+                continue;
+            }
             match crate::vfs::materialize(s) {
-                Ok(real) => sources.push(real),
+                Ok(real) => sources.push((real, None)),
                 Err(e) => self.fail(s, e),
             }
         }
         // Byte totals only matter where bytes get copied
         if matches!(op, Op::Copy | Op::Move) {
-            for s in &sources {
+            for (s, _) in &sources {
                 let (bytes, items) = measure(s);
                 self.p.total_bytes += bytes;
                 self.p.total_items += items;
@@ -421,7 +443,7 @@ impl<'a> Worker<'a> {
                 }
             }
             _ => {
-                for src in &sources {
+                for (src, from_phone) in &sources {
                     if self.cancelled() {
                         break;
                     }
@@ -437,6 +459,16 @@ impl<'a> Worker<'a> {
                         }),
                         Op::Delete => remove_any(src).map(|_| true),
                         Op::EmptyTrash => Ok(true),
+                    };
+                    // Moved off a phone: from the downloaded copy, then gone from the phone
+                    let result = match (result, from_phone) {
+                        (Ok(true), Some(orig)) => {
+                            if matches!(self.report.undo.last(), Some(Undo::Moved { from, .. }) if from == src) {
+                                self.report.undo.pop();
+                            }
+                            crate::phone::delete(orig).map(|_| true).map_err(io::Error::other)
+                        }
+                        (r, _) => r,
                     };
                     match result {
                         Ok(true) => self.report.done += 1,
@@ -465,11 +497,39 @@ impl<'a> Worker<'a> {
         }
         let both_dirs = src_meta.is_dir() && existing.is_dir();
         let can_replace = !src_meta.is_dir() && !existing.is_dir();
+        Ok(match self.choose(src, &target, both_dirs, can_replace, more)? {
+            Choice::Replace if both_dirs => Place::Merge(target),
+            Choice::Replace if can_replace => Place::Replace(target),
+            // A file and a folder: neither can stand in for the other
+            Choice::Replace | Choice::AutoRename => Place::New(free_name(&target)),
+            Choice::Rename(name) => return self.place(src, target.with_file_name(name), more),
+            Choice::Skip | Choice::Cancel => Place::Skip,
+        })
+    }
+
+    /// `place` for a target on a phone.
+    fn place_on_phone(&mut self, src: &Path, target: PathBuf, more: bool) -> io::Result<Place> {
+        let Some(existing) = crate::phone::stat(&target).map_err(io::Error::other)? else { return Ok(Place::New(target)); };
+        let src_dir = fs::metadata(src)?.is_dir();
+        let both_dirs = src_dir && existing.is_dir;
+        let can_replace = !src_dir && !existing.is_dir;
+        Ok(match self.choose(src, &target, both_dirs, can_replace, more)? {
+            Choice::Replace if both_dirs => Place::Merge(target),
+            Choice::Replace if can_replace => Place::Replace(target),
+            Choice::Replace | Choice::AutoRename => Place::New(phone_free_name(&target)),
+            Choice::Rename(name) => return self.place_on_phone(src, target.with_file_name(name), more),
+            Choice::Skip | Choice::Cancel => Place::Skip,
+        })
+    }
+
+    /// What to do about `target` being taken: the user's answer, or the
+    /// one they gave for all. Cancel stops the job (an Interrupted error).
+    fn choose(&mut self, src: &Path, target: &Path, both_dirs: bool, can_replace: bool, more: bool) -> io::Result<Choice> {
         let kind = both_dirs as usize;
         let choice = match self.policy[kind].clone() {
             Some(c) => c,
             None => {
-                let conflict = Conflict { op: self.p.op, src: src.to_path_buf(), dst: target.clone(), both_dirs, can_replace, more };
+                let conflict = Conflict { op: self.p.op, src: src.to_path_buf(), dst: target.to_path_buf(), both_dirs, can_replace, more };
                 let answer = (self.ask)(&conflict);
                 if answer.all {
                     // A typed name can't apply to others: they get free names
@@ -481,19 +541,108 @@ impl<'a> Worker<'a> {
                 answer.choice
             }
         };
-        Ok(match choice {
-            Choice::Replace if both_dirs => Place::Merge(target),
-            Choice::Replace if can_replace => Place::Replace(target),
-            // A file and a folder: neither can stand in for the other
-            Choice::Replace | Choice::AutoRename => Place::New(free_name(&target)),
-            Choice::Skip => Place::Skip,
-            Choice::Rename(name) => return self.place(src, target.with_file_name(name), more),
-            Choice::Cancel => {
-                self.cancel.store(true, Ordering::Relaxed);
-                self.report.cancelled = true;
-                return Err(io::ErrorKind::Interrupted.into());
+        if choice == Choice::Cancel {
+            self.cancel.store(true, Ordering::Relaxed);
+            self.report.cancelled = true;
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        Ok(choice)
+    }
+
+    /// Wait for a phone transfer, its bytes counted in the progress, and
+    /// stop it if the job is cancelled.
+    fn phone_wait(&mut self, rx: mpsc::Receiver<Result<(), String>>, t: &crate::phone::Transfer) -> io::Result<()> {
+        let base = self.p.done_bytes;
+        loop {
+            let r = rx.recv_timeout(Duration::from_millis(100));
+            self.p.done_bytes = base + t.bytes.load(Ordering::Relaxed);
+            match r {
+                Ok(Ok(())) => return Ok(()),
+                Ok(Err(_)) if self.cancelled() => return Err(io::ErrorKind::Interrupted.into()),
+                Ok(Err(e)) => return Err(io::Error::other(e)),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.tick(false);
+                    if self.cancelled() {
+                        t.stop.store(true, Ordering::Relaxed);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(io::Error::other("the phone connection stopped")),
             }
-        })
+        }
+    }
+
+    /// Download `src` (a file, or a folder and all in it) from a phone to
+    /// `dst` on disk.
+    fn fetch(&mut self, src: &Path, dst: &Path) -> io::Result<()> {
+        let item = crate::phone::stat(src).map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not on the phone"))?;
+        if item.is_dir {
+            fs::create_dir_all(dst)?;
+            for child in crate::phone::read_dir(src).map_err(io::Error::other)? {
+                if self.cancelled() {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                self.fetch(&src.join(&child.name), &dst.join(&child.name))?;
+            }
+            return Ok(());
+        }
+        self.p.current = item.name;
+        let t = crate::phone::Transfer::default();
+        let rx = crate::phone::download(src, dst, &t).map_err(io::Error::other)?;
+        self.phone_wait(rx, &t)
+    }
+
+    /// Upload to where `place` says (on a phone); false if skipped.
+    fn send_placed(&mut self, src: &Path, place: Place) -> io::Result<bool> {
+        match place {
+            Place::New(t) => self.send(src, &t, false)?,
+            Place::Merge(t) => self.send(src, &t, true)?,
+            Place::Replace(t) => {
+                crate::phone::delete(&t).map_err(io::Error::other)?;
+                self.send(src, &t, false)?;
+            }
+            Place::Skip => {
+                self.skip(src);
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Upload `src` (a file, or a folder and all in it) to `dst` on a
+    /// phone; with `merge`, `dst` is a folder there to write into.
+    fn send(&mut self, src: &Path, dst: &Path, merge: bool) -> io::Result<()> {
+        if fs::metadata(src)?.is_dir() {
+            if !merge {
+                crate::phone::mkdir(dst).map_err(io::Error::other)?;
+            }
+            for e in fs::read_dir(src)? {
+                if self.cancelled() {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                let e = e?;
+                let target = dst.join(e.file_name());
+                let result = if merge {
+                    self.place_on_phone(&e.path(), target, true).and_then(|place| self.send_placed(&e.path(), place).map(|_| ()))
+                } else {
+                    self.send(&e.path(), &target, false)
+                };
+                if let Err(err) = result {
+                    if err.kind() == io::ErrorKind::Interrupted {
+                        return Err(err);
+                    }
+                    self.fail(&e.path(), err);
+                }
+            }
+        } else {
+            self.p.current = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let t = crate::phone::Transfer::default();
+            let rx = crate::phone::upload(src, dst, &t).map_err(io::Error::other)?;
+            self.phone_wait(rx, &t)?;
+        }
+        self.p.done_items += 1;
+        self.tick(false);
+        Ok(())
     }
 
     /// Count a skipped item as done, so the progress still reaches the end.
@@ -506,6 +655,15 @@ impl<'a> Worker<'a> {
 
     fn copy_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<bool> {
         let name = src.file_name().ok_or_else(|| io::Error::other("no file name"))?;
+        if crate::phone::is_phone(dest_dir) {
+            if crate::phone::is_phone(src) {
+                crate::phone::transfer(src, dest_dir, true).map_err(io::Error::other)?;
+                self.p.done_items += 1;
+                return Ok(true);
+            }
+            let place = self.place_on_phone(src, dest_dir.join(name), self.multi)?;
+            return self.send_placed(src, place);
+        }
         if dest_dir.starts_with(src) {
             return Err(io::Error::other("can't copy a folder into itself"));
         }
@@ -543,6 +701,27 @@ impl<'a> Worker<'a> {
 
     fn move_top(&mut self, src: &Path, dest_dir: &Path) -> io::Result<bool> {
         let name = src.file_name().ok_or_else(|| io::Error::other("no file name"))?;
+        if crate::phone::is_phone(dest_dir) {
+            if src.parent() == Some(dest_dir) {
+                return Ok(true);
+            }
+            if crate::phone::is_phone(src) {
+                crate::phone::transfer(src, dest_dir, false).map_err(io::Error::other)?;
+                self.p.done_items += 1;
+                return Ok(true);
+            }
+            // Uploaded, then the original removed, unless any of it stayed behind
+            let (errors, skipped) = (self.report.errors.len(), self.report.skipped);
+            let place = self.place_on_phone(src, dest_dir.join(name), self.multi)?;
+            if !self.send_placed(src, place)? {
+                return Ok(false);
+            }
+            if self.report.errors.len() > errors || self.report.skipped > skipped {
+                return Err(io::Error::other("not everything went to the phone; original kept"));
+            }
+            remove_any(src)?;
+            return Ok(true);
+        }
         if src.parent() == Some(dest_dir) {
             // Already there
             let (bytes, items) = measure(src);
@@ -696,7 +875,36 @@ fn measure(path: &Path) -> (u64, usize) {
     (bytes, items)
 }
 
+/// Bytes in a file or folder on a phone.
+fn phone_measure(path: &Path) -> u64 {
+    match crate::phone::stat(path) {
+        Ok(Some(item)) if item.is_dir => crate::phone::read_dir(path).unwrap_or_default().iter()
+            .map(|c| if c.is_dir { phone_measure(&path.join(&c.name)) } else { c.size.unwrap_or(0) })
+            .sum(),
+        Ok(Some(item)) => item.size.unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// `free_name` on a phone.
+pub fn phone_free_name(path: &Path) -> PathBuf {
+    let taken = |p: &Path| crate::phone::stat(p).ok().flatten();
+    let Some(existing) = taken(path) else { return path.to_path_buf() };
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && !existing.is_dir => (&name[..i], &name[i..]),
+        _ => (name.as_str(), ""),
+    };
+    (2..)
+        .map(|n| path.with_file_name(format!("{stem} ({n}){ext}")))
+        .find(|p| taken(p).is_none())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 fn remove_any(path: &Path) -> io::Result<()> {
+    if crate::phone::is_phone(path) {
+        return crate::phone::delete(path).map_err(io::Error::other);
+    }
     if fs::symlink_metadata(path)?.is_dir() {
         fs::remove_dir_all(path)
     } else {

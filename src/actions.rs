@@ -92,6 +92,10 @@ pub fn execute(app: &mut App, action: MenuAction, target: MenuTarget) {
 
         MenuAction::Trash => {
             let paths = action_paths(app, target);
+            if paths.iter().any(|p| crate::phone::is_phone(p)) {
+                confirm_delete(app, paths);
+                return;
+            }
             app.fileops.trash(paths);
             app.selection = None;
             app.multi_selection.clear();
@@ -419,7 +423,9 @@ pub fn commit_name_prompt(app: &mut App) {
     };
     let name = name.as_str();
     let path = state.dest.join(name);
-    if name.is_empty() || name.contains('/') || name == "." || name == ".." || path.symlink_metadata().is_ok() {
+    let on_phone = crate::phone::is_phone(&path);
+    let taken = if on_phone { !matches!(crate::phone::stat(&path), Ok(None)) } else { path.symlink_metadata().is_ok() };
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." || taken {
         state.invalid = true;
         return;
     }
@@ -428,18 +434,28 @@ pub fn commit_name_prompt(app: &mut App) {
         PromptKind::NewFile => format!("new file {name}"),
         PromptKind::Paste(_) => format!("pasted {name}"),
     };
-    let result = match &state.kind {
-        PromptKind::NewFolder => std::fs::create_dir(&path),
-        PromptKind::NewFile => std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map(|_| ()),
-        PromptKind::Paste(data) => std::fs::write(&path, data),
+    let result = if on_phone {
+        create_on_phone(&path, &state.kind)
+    } else {
+        match &state.kind {
+            PromptKind::NewFolder => std::fs::create_dir(&path),
+            PromptKind::NewFile => std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map(|_| ()),
+            PromptKind::Paste(data) => std::fs::write(&path, data),
+        }
     };
     if let Err(e) = result {
         tracing::error!("create {}: {e}", path.display());
         state.invalid = true;
+        if on_phone {
+            let msg = format!("Couldn't create {name}: {e}");
+            app.notify(msg);
+        }
         return;
     }
     app.name_prompt = None;
-    app.remember_undo(state_kind_label, vec![crate::fileops::Undo::Created(path.clone())]);
+    if !on_phone {
+        app.remember_undo(state_kind_label, vec![crate::fileops::Undo::Created(path.clone())]);
+    }
     if path.parent() == Some(app.cwd.as_path()) {
         app.reload_dir();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -491,6 +507,23 @@ fn start_rename(app: &mut App, idx: usize) {
     }
 }
 
+/// New Folder, New File or a paste on a phone: a file is written here
+/// first, then uploaded.
+fn create_on_phone(path: &Path, kind: &crate::events::PromptKind) -> std::io::Result<()> {
+    use crate::events::PromptKind;
+    let data: &[u8] = match kind {
+        PromptKind::NewFolder => return crate::phone::mkdir(path).map_err(std::io::Error::other),
+        PromptKind::NewFile => &[],
+        PromptKind::Paste(data) => data,
+    };
+    let dir = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let tmp = dir.join(format!("file-browser-tui-new-{}", std::process::id()));
+    std::fs::write(&tmp, data)?;
+    let r = crate::phone::upload_now(&tmp, path).map_err(std::io::Error::other);
+    let _ = std::fs::remove_file(&tmp);
+    r
+}
+
 pub fn rename_selection(app: &mut App) {
     if let Some(idx) = app.selection {
         start_rename(app, idx);
@@ -499,9 +532,27 @@ pub fn rename_selection(app: &mut App) {
 
 pub fn trash_selection(app: &mut App) {
     let paths = selected_paths(app);
+    // Phones have no trash: ask, as for deleting for good
+    if paths.iter().any(|p| crate::phone::is_phone(p)) {
+        confirm_delete(app, paths);
+        return;
+    }
     app.fileops.trash(paths);
     app.selection = None;
     app.multi_selection.clear();
+}
+
+/// Ask before deleting `paths` for good.
+pub fn confirm_delete(app: &mut App, paths: Vec<PathBuf>) {
+    if paths.is_empty() {
+        return;
+    }
+    let display_name = if paths.len() == 1 {
+        paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("this item").to_string()
+    } else {
+        format!("{} items", paths.len())
+    };
+    app.confirm_delete = Some(crate::events::ConfirmDeleteState { paths, display_name });
 }
 
 pub fn permanent_delete(app: &mut App) {

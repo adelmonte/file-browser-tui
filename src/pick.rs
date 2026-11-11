@@ -211,6 +211,11 @@ fn chosen(app: &App) -> Vec<(PathBuf, bool)> {
 /// The accept button (or Enter): pick what's selected or named.
 pub fn accept(app: &mut App) {
     let Some(p) = &app.pick else { return; };
+    // The program asking could only open a copy we'd delete on closing
+    if crate::phone::is_phone(&app.cwd) {
+        app.notify("Files on a phone can't be picked here: copy them to the computer first".into());
+        return;
+    }
     let cwd = app.cwd.clone();
     let paths = match (p.req.mode, p.folders_only()) {
         (Mode::Open, false) => {

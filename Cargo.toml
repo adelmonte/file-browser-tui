@@ -36,3 +36,6 @@ base64 = "0.22"
 zip = { version = "9.3.0", default-features = false, features = ["deflate"] }
 flate2 = "1.1.10"
 toml_edit = "0.22"
+mtp-rs = "0.38.0"
+futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
+bytes = "1"

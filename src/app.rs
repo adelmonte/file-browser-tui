@@ -267,6 +267,11 @@ pub struct App {
     pub dir_event_rx: mpsc::Receiver<DirEvent>,
     pub mount_event_rx: mpsc::Receiver<MountEvent>,
     kdeconnect_rx: mpsc::Receiver<Vec<KdeConnectDevice>>,
+    phone_rx: mpsc::Receiver<Vec<crate::phone::PhoneInfo>>,
+    /// Drives and mounts, as the mount watcher last sent them (`devices`
+    /// is these and the phones).
+    drives: Vec<DeviceEntry>,
+    phones: Vec<crate::phone::PhoneInfo>,
 
     /// Active search (results replace the listing while it has a query).
     pub search: Option<SearchState>,
@@ -499,6 +504,10 @@ impl App {
         let dirstates = DirStates::load();
 
         let (kdeconnect_tx, kdeconnect_rx) = mpsc::channel();
+        let (phone_tx, phone_rx) = mpsc::channel();
+        if !cfg!(test) {
+            crate::phone::start(phone_tx);
+        }
         if config.kdeconnect {
             crate::user_actions::spawn_kdeconnect_watcher(kdeconnect_tx);
         }
@@ -579,6 +588,9 @@ impl App {
             dir_event_rx,
             mount_event_rx,
             kdeconnect_rx,
+            phone_rx,
+            drives: Vec::new(),
+            phones: Vec::new(),
             user_actions: Vec::new(),
             open_with: Vec::new(),
             search: None,
@@ -1004,6 +1016,15 @@ impl App {
         use crate::fs::mounts::MountKind;
         let Some(dev) = self.devices.get(i).cloned() else { return; };
         match dev.kind {
+            MountKind::Phone => {
+                // Straight into its storage when it has just the one
+                let path = PathBuf::from(&dev.path);
+                match crate::phone::read_dir(&path) {
+                    Ok(storages) if storages.len() == 1 => self.navigate_to(path.join(&storages[0].name)),
+                    Ok(_) => self.navigate_to(path),
+                    Err(e) => self.notify(format!("{}: {e}", dev.name)),
+                }
+            }
             MountKind::Locked => {
                 self.unlock_prompt = Some(crate::events::UnlockPrompt {
                     device: dev.source, name: dev.name, input: String::new(), cursor_pos: 0, error: None, busy: false,
@@ -1729,6 +1750,9 @@ impl App {
         }
         for report in self.fileops.poll() {
             self.notify(report.message());
+            if crate::phone::is_phone(&self.cwd) {
+                self.reload_dir();
+            }
             if self.tabs.len() > 1 || self.split() {
                 self.reload_views();
             }
@@ -1771,9 +1795,26 @@ impl App {
             self.kdeconnect_devices = devices;
         }
 
-        if let Some(MountEvent::Updated(devs)) = self.mount_event_rx.try_iter().last() {
-            self.devices = devs;
-            self.devices_ready = true;
+        let phones = self.phone_rx.try_iter().last();
+        let drives = match self.mount_event_rx.try_iter().last() {
+            Some(MountEvent::Updated(devs)) => Some(devs),
+            _ => None,
+        };
+        if drives.is_some() || phones.is_some() {
+            if let Some(d) = drives {
+                self.drives = d;
+                self.devices_ready = true;
+            }
+            let unplugged = phones.as_ref().is_some_and(|p| p.len() < self.phones.len());
+            if let Some(p) = phones {
+                self.phones = p;
+            }
+            self.devices = self.drives.iter().cloned()
+                .chain(self.phones.iter().map(DeviceEntry::phone))
+                .collect();
+            if unplugged && crate::phone::is_phone(&self.cwd) {
+                self.notify("The phone was unplugged".into());
+            }
             self.leave_if_gone();
             self.with_other_pane(|a| a.leave_if_gone());
         }
@@ -1976,7 +2017,9 @@ impl App {
     /// Unpack files in an archive for another app to take (a drag, the
     /// clipboard) to where `vfs::unpacked_path` said they'd be.
     pub fn unpack_in_background(&self, paths: &[PathBuf]) {
-        let paths: Vec<PathBuf> = paths.iter().filter(|p| crate::vfs::is_virtual(p)).cloned().collect();
+        // Not whole folders off a phone: a camera folder could be gigabytes
+        let on_phone_dir = |p: &PathBuf| crate::phone::is_phone(p) && self.listing.entries.iter().any(|e| &e.path == p && e.is_dir);
+        let paths: Vec<PathBuf> = paths.iter().filter(|p| crate::vfs::is_virtual(p) && !on_phone_dir(p)).cloned().collect();
         if paths.is_empty() {
             return;
         }
@@ -2244,6 +2287,21 @@ impl App {
         }
 
         let new_path = entry.path.with_file_name(name);
+        if crate::phone::is_phone(&entry.path) {
+            if !matches!(crate::phone::stat(&new_path), Ok(None)) {
+                state.invalid = true;
+                return;
+            }
+            if let Err(e) = crate::phone::rename(&entry.path, name) {
+                state.invalid = true;
+                self.notify(format!("Couldn't rename: {e}"));
+                return;
+            }
+            self.rename_state = None;
+            self.reload_dir();
+            self.selection = self.listing.entries.iter().position(|e| e.path == new_path);
+            return;
+        }
         if let Ok(target) = std::fs::symlink_metadata(&new_path) {
             // Allow case-only renames on case-insensitive filesystems, where
             // the "existing" target is the entry itself.

@@ -21,6 +21,8 @@ pub enum MountKind {
     Unmounted,
     /// An encrypted (LUKS) drive, still locked: asks for its passphrase.
     Locked,
+    /// A phone on a USB cable, spoken to over MTP (`crate::phone`).
+    Phone,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +39,11 @@ pub struct DeviceEntry {
 impl DeviceEntry {
     pub fn new(name: String, path: String) -> Self {
         Self::with_kind(name, path, MountKind::Root, String::new())
+    }
+
+    /// A phone plugged in by USB, at its folder under /mtp.
+    pub fn phone(p: &crate::phone::PhoneInfo) -> Self {
+        Self { name: p.name.clone(), path: p.path().to_string_lossy().into_owned(), usage: p.usage, kind: MountKind::Phone, source: String::new() }
     }
 
     fn with_kind(name: String, path: String, kind: MountKind, source: String) -> Self {
@@ -62,6 +69,7 @@ impl DeviceEntry {
             MountKind::Media => "drive-removable-media",
             MountKind::Fuse => "folder-remote",
             MountKind::Unmounted | MountKind::Locked => "drive-removable-media",
+            MountKind::Phone => "smartphone",
         }
     }
 }
@@ -84,7 +92,7 @@ pub fn unmount(dev: &DeviceEntry, power_off: bool) -> Result<(), String> {
         Err(if err.is_empty() { format!("{cmd} failed") } else { err })
     };
     match dev.kind {
-        MountKind::Root | MountKind::Unmounted | MountKind::Locked => Err("not mounted from here".into()),
+        MountKind::Root | MountKind::Unmounted | MountKind::Locked | MountKind::Phone => Err("not mounted from here".into()),
         MountKind::Fuse => run("fusermount3", &["-u", &dev.path])
             .or_else(|_| run("fusermount", &["-u", &dev.path]))
             .or_else(|e| run("umount", &[&dev.path]).map_err(|_| e)),

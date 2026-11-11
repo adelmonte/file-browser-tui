@@ -272,7 +272,7 @@ pub fn image_thumb(source: &Path) -> anyhow::Result<DynamicImage> {
 }
 
 /// An image file's bytes as a thumbnail, the way up its EXIF orientation says.
-fn image_from_memory(bytes: &[u8]) -> anyhow::Result<DynamicImage> {
+pub fn image_from_memory(bytes: &[u8]) -> anyhow::Result<DynamicImage> {
     Ok(upright(image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?)?.thumbnail(256, 256))
 }
 
