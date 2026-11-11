@@ -201,9 +201,17 @@ fn sections(app: &App) -> Vec<(&'static str, Vec<Row>)> {
     }).collect();
     sections.push(("Places", places));
 
+    // A phone mounted over the network is one row: its mount's (usage,
+    // eject), with the phone's icon, rather than the mount and the phone
+    let phone_mount = |k: &crate::user_actions::KdeConnectDevice| {
+        k.mount.clone().or_else(|| app.kdeconnect_mounts.get(&k.id).cloned())
+    };
+    let is_phone_mount = |d: &crate::fs::mounts::DeviceEntry| {
+        app.kdeconnect_devices.iter().any(|k| phone_mount(k).is_some_and(|m| m == std::path::Path::new(&d.path)))
+    };
     let mut devices: Vec<Row> = app.devices.iter().enumerate().map(|(i, d)| Row {
         target: SidebarTarget::Device(i),
-        icon: d.icon().into(),
+        icon: if is_phone_mount(d) { "smartphone".into() } else { d.icon().into() },
         name: d.name.clone(),
         current: d.is_mounted() && (std::path::Path::new(&d.path) == cwd
             || (d.kind == crate::fs::mounts::MountKind::Phone && cwd.starts_with(&d.path))),
@@ -211,7 +219,10 @@ fn sections(app: &App) -> Vec<(&'static str, Vec<Row>)> {
         usage: d.usage,
         eject: d.can_unmount(),
     }).collect();
-    devices.extend(app.kdeconnect_devices.iter().enumerate().map(|(i, d)| Row {
+    let shown = |k: &crate::user_actions::KdeConnectDevice| {
+        phone_mount(k).is_some_and(|m| app.devices.iter().any(|d| d.is_mounted() && std::path::Path::new(&d.path) == m))
+    };
+    devices.extend(app.kdeconnect_devices.iter().enumerate().filter(|(_, d)| !shown(d)).map(|(i, d)| Row {
         target: SidebarTarget::Phone(i),
         icon: if d.reachable { "smartphone".into() } else { "smartphonedisconnected".into() },
         name: d.name.clone(),

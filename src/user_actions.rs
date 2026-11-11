@@ -259,6 +259,8 @@ pub struct KdeConnectDevice {
     pub reachable: bool,
     /// Paired through lanlink's daemon rather than KDE Connect's.
     pub lanlink: bool,
+    /// Where its storage is mounted, as its daemon says (lanlink tells).
+    pub mount: Option<PathBuf>,
 }
 
 /// Poll paired KDE Connect devices in the background, from KDE Connect
@@ -284,7 +286,7 @@ pub fn spawn_kdeconnect_watcher(tx: std::sync::mpsc::Sender<Vec<KdeConnectDevice
         let reachable = paired.as_ref().and_then(|_| list("-a")).unwrap_or_default();
         let mut devices: Vec<KdeConnectDevice> = paired.unwrap_or_default().into_iter().map(|(id, name)| {
             let reachable = reachable.iter().any(|(r, _)| *r == id);
-            KdeConnectDevice { id, name, reachable, lanlink: false }
+            KdeConnectDevice { id, name, reachable, lanlink: false, mount: None }
         }).collect();
         if has_lanlink {
             for d in lanlink_devices() {
@@ -367,35 +369,44 @@ fn lanlink_call(req: &serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 /// lanlink's paired devices, with where each is mounted, if it is.
-fn lanlink_status() -> Vec<(KdeConnectDevice, Option<PathBuf>)> {
+fn lanlink_status() -> Vec<KdeConnectDevice> {
     let Ok(data) = lanlink_call(&serde_json::json!({"cmd": "status"})) else { return Vec::new() };
     data["devices"].as_array().into_iter().flatten()
         .filter(|d| d["paired"].as_bool() == Some(true))
-        .filter_map(|d| Some((
-            KdeConnectDevice {
-                id: d["id"].as_str()?.to_string(),
-                name: d["name"].as_str().unwrap_or("Phone").to_string(),
-                reachable: d["online"].as_bool() == Some(true),
-                lanlink: true,
-            },
-            d["mount"].as_str().map(PathBuf::from),
-        )))
+        .filter_map(|d| Some(KdeConnectDevice {
+            id: d["id"].as_str()?.to_string(),
+            name: d["name"].as_str().unwrap_or("Phone").to_string(),
+            reachable: d["online"].as_bool() == Some(true),
+            lanlink: true,
+            mount: d["mount"].as_str().map(PathBuf::from),
+        }))
         .collect()
 }
 
 fn lanlink_devices() -> Vec<KdeConnectDevice> {
-    lanlink_status().into_iter().map(|(d, _)| d).collect()
+    lanlink_status()
+}
+
+fn is_mount_point(path: &std::path::Path) -> bool {
+    let target = path.to_string_lossy().replace(' ', "\\040");
+    std::fs::read_to_string("/proc/mounts").is_ok_and(|m| m.lines().any(|l| l.split(' ').nth(1) == Some(target.as_str())))
 }
 
 /// Ask lanlink to mount the phone (it asks the phone to start its SFTP
 /// server, then runs sshfs) and wait until it has.
 fn lanlink_mount(device: &KdeConnectDevice) -> Result<PathBuf, String> {
-    let mounted = || lanlink_status().into_iter().find(|(d, _)| d.id == device.id).and_then(|(_, m)| m).filter(|m| m.is_dir());
+    let known = || lanlink_status().into_iter().find(|d| d.id == device.id).and_then(|d| d.mount);
+    let mounted = || known().filter(|m| is_mount_point(m));
     if let Some(m) = mounted() {
         return Ok(m);
     }
     if !device.reachable {
         return Err(format!("{} isn't connected", device.name));
+    }
+    // Unmounted behind lanlink's back (ejected here): it would think it
+    // still is, and not mount again
+    if known().is_some() {
+        lanlink_call(&serde_json::json!({"cmd": "unmount", "device": device.id}))?;
     }
     lanlink_call(&serde_json::json!({"cmd": "mount", "device": device.id}))?;
     let start = std::time::Instant::now();
