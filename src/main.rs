@@ -263,6 +263,28 @@ fn run(
     dir_watcher: Option<&fs::watcher::DirWatcher>,
     launched: std::time::Instant,
 ) -> anyhow::Result<()> {
+    // A window we just opened is usually resized by the window manager
+    // (tiled) a moment after it appears: draw once it has its size, not
+    // once at kitty's default size and again laid out anew
+    if std::env::var_os(actions::KITTY_ENV).is_some() && launched.elapsed() < Duration::from_millis(500) {
+        let first = terminal.size()?;
+        let mut last = first;
+        let mut changed_at = None;
+        let waiting = std::time::Instant::now();
+        while waiting.elapsed() < Duration::from_millis(250) {
+            std::thread::sleep(Duration::from_millis(4));
+            let now = terminal.size()?;
+            if now != last {
+                last = now;
+                changed_at = Some(std::time::Instant::now());
+            }
+            // Settled: no further change for a moment after the first
+            if changed_at.is_some_and(|t| t.elapsed() > Duration::from_millis(30)) {
+                break;
+            }
+        }
+        tracing::info!("window size {}x{} -> {}x{} after {:?}", first.width, first.height, last.width, last.height, waiting.elapsed());
+    }
     // Bootstrap layout before first render so queue_visible_icons has correct areas
     let sz = terminal.size()?;
     app.main_area = ratatui::layout::Rect {
