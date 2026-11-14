@@ -280,9 +280,15 @@ fn start_drag(app: &mut App, col: u16, row: u16) {
     send(&format!("t=o:o=3;{URI_LIST} text/plain"));
     send_data("t=p:x=0", uris.as_bytes());
     send_data("t=p:x=1", text.as_bytes());
-    if let Some(img) = app.icon_cache.image(&paths[0]) {
-        let img = img.thumbnail(96, 96).to_rgba8();
-        send_data(&format!("t=p:x=-1:y=32:X={}:Y={}", img.width(), img.height()), img.as_raw());
+    // Always a drag image: under niri the drag icon appearing is the only
+    // sign kitty gets that the drag started, and without one it cancels
+    // it (photos and videos have a thumbnail, not an icon)
+    match app.thumb_cache.image(&paths[0]).or_else(|| app.icon_cache.image(&paths[0])) {
+        Some(img) => {
+            let img = img.thumbnail(96, 96).to_rgba8();
+            send_data(&format!("t=p:x=-1:y=32:X={}:Y={}", img.width(), img.height()), img.as_raw());
+        }
+        None => send_data("t=p:x=-1:y=0:X=2:Y=1:o=1024", "📄".as_bytes()),
     }
     send("t=P:x=-1");
     app.dnd.outgoing = Some(paths);

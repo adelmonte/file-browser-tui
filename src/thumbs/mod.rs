@@ -211,6 +211,11 @@ impl ThumbCache {
         }
     }
 
+    /// A loaded thumbnail, without touching its place in the cache.
+    pub fn image(&self, path: &Path) -> Option<&image::DynamicImage> {
+        self.images.peek(path)
+    }
+
     pub fn get_mut(
         &mut self,
         picker: &Picker,
