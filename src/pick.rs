@@ -144,14 +144,47 @@ impl Picking {
     }
 }
 
-/// `*` and `?` wildcards, the patterns the portal hands over.
+/// At a `[` in the pattern: whether the class matches `c`, and where the
+/// pattern goes on after it. None: no closing `]`, so `[` is literal.
+fn class(p: &[char], start: usize, c: char) -> Option<(bool, usize)> {
+    let mut i = start + 1;
+    let negate = i < p.len() && (p[i] == '!' || p[i] == '^');
+    if negate {
+        i += 1;
+    }
+    let mut hit = false;
+    let mut first = true;
+    while i < p.len() && (first || p[i] != ']') {
+        first = false;
+        if i + 2 < p.len() && p[i + 1] == '-' && p[i + 2] != ']' {
+            hit |= p[i] <= c && c <= p[i + 2];
+            i += 3;
+        } else {
+            hit |= p[i] == c;
+            i += 1;
+        }
+    }
+    (i < p.len()).then_some((hit != negate, i + 1))
+}
+
+/// `*`, `?` and `[...]` wildcards, the patterns the portal hands over
+/// (rfd, for one, sends `*.[pP][nN][gG]`).
 fn glob(pattern: &str, name: &str) -> bool {
     let (p, n): (Vec<char>, Vec<char>) = (pattern.chars().collect(), name.chars().collect());
     let (mut pi, mut ni) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
     while ni < n.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
-            pi += 1;
+        let step = match p.get(pi) {
+            Some('[') => match class(&p, pi, n[ni]) {
+                Some((hit, next)) => hit.then_some(next),
+                None => (n[ni] == '[').then_some(pi + 1),
+            },
+            Some('*') => None,
+            Some(&c) if c == '?' || c == n[ni] => Some(pi + 1),
+            _ => None,
+        };
+        if let Some(next) = step {
+            pi = next;
             ni += 1;
         } else if pi < p.len() && p[pi] == '*' {
             star = Some((pi, ni));
@@ -364,6 +397,13 @@ mod tests {
         assert!(glob("*", "anything"));
         assert!(glob("img?.*", "img1.jpeg"));
         assert!(!glob("*.png", "a.png.txt"));
+        assert!(glob("*.[pp][nn][gg]", "photo.png"));
+        assert!(glob("*.[dd]c3", "scan.dc3"));
+        assert!(!glob("*.[pp][nn][gg]", "photo.jpg"));
+        assert!(glob("img[0-9].*", "img7.gif"));
+        assert!(!glob("img[!0-9].*", "img7.gif"));
+        assert!(glob("[]]x", "]x"));
+        assert!(glob("a[b", "a[b"));
         let p = Picking::new(Request {
             filters: vec![Filter { name: "Images".into(), globs: vec!["*.PNG".into()], mimes: vec!["image/*".into()] }],
             ..Default::default()
