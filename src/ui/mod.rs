@@ -284,14 +284,38 @@ pub fn band_rect((ax, ay): (u16, u16), (bx, by): (u16, u16)) -> Rect {
 }
 
 fn confirm_delete_rect(term: Rect) -> Rect {
-    let w = 44u16.min(term.width);
-    let h = 7u16.min(term.height);
-    Rect {
-        x: term.width.saturating_sub(w) / 2,
-        y: term.height.saturating_sub(h) / 2,
-        width: w,
-        height: h,
+    centered(term, 44, 7)
+}
+
+/// A dialog of `w` by `h` cells in the middle of `term`.
+fn centered(term: Rect, w: u16, h: u16) -> Rect {
+    let (w, h) = (w.min(term.width), h.min(term.height));
+    Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h }
+}
+
+/// Where the open dialogs are, so what's drawn after the frame (kitty's
+/// centered text) can keep clear of them alone.
+pub fn dialog_rects(app: &App, term: Rect) -> Vec<Rect> {
+    let mut rects = Vec::new();
+    if app.show_help {
+        rects.push(help::help_rect(app, term));
     }
+    if let Some(p) = &app.properties {
+        rects.push(properties::properties_rect(p, term));
+    }
+    if app.name_prompt.is_some() {
+        rects.push(centered(term, 52, 7));
+    }
+    if app.unlock_prompt.is_some() {
+        rects.push(centered(term, 52, 8));
+    }
+    if app.conflict_prompt.is_some() {
+        rects.push(centered(term, 70, 11));
+    }
+    if app.confirm_delete.is_some() {
+        rects.push(confirm_delete_rect(term));
+    }
+    rects
 }
 
 /// Dolphin's Create Folder / Create File / Paste Clipboard Contents
@@ -301,9 +325,7 @@ fn confirm_delete_rect(term: Rect) -> Rect {
 fn render_unlock_prompt(f: &mut Frame, app: &mut App) {
     let Some(p) = &app.unlock_prompt else { return; };
     let term = f.area();
-    let w = 52u16.min(term.width);
-    let h = 8u16.min(term.height);
-    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let area = centered(term, 52, 8);
     let bg = Style::default().bg(theme::panel()).fg(theme::text());
     f.render_widget(Clear, area);
     f.render_widget(
@@ -315,7 +337,7 @@ fn render_unlock_prompt(f: &mut Frame, app: &mut App) {
             .style(bg),
         area,
     );
-    let field_w = w.saturating_sub(6) as usize;
+    let field_w = area.width.saturating_sub(6) as usize;
     let dots = p.input.chars().count();
     let cur = p.input[..p.cursor_pos.min(p.input.len())].chars().count();
     let mut masked: String = "\u{2022}".repeat(cur);
@@ -364,9 +386,7 @@ fn render_name_prompt(f: &mut Frame, app: &mut App) {
         PromptKind::Paste(_) => (" Paste Clipboard Contents ", "Filename for clipboard content:", "Save"),
     };
     let term = f.area();
-    let w = 52u16.min(term.width);
-    let h = 7u16.min(term.height);
-    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let area = centered(term, 52, 7);
     let bg = Style::default().bg(theme::panel()).fg(theme::text());
 
     f.render_widget(Clear, area);
@@ -381,7 +401,7 @@ fn render_name_prompt(f: &mut Frame, app: &mut App) {
     );
 
     // Input field scrolled so the cursor stays visible
-    let field_w = w.saturating_sub(6) as usize;
+    let field_w = area.width.saturating_sub(6) as usize;
     let mut shown = p.input.clone();
     shown.insert(p.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
     let chars: Vec<char> = shown.chars().collect();
@@ -433,9 +453,7 @@ fn render_conflict_prompt(f: &mut Frame, app: &mut App) {
     let what = if c.dst.is_dir() { "A folder" } else { "A file" };
 
     let term = f.area();
-    let w = 70u16.min(term.width);
-    let h = 11u16.min(term.height);
-    let area = Rect { x: term.width.saturating_sub(w) / 2, y: term.height.saturating_sub(h) / 2, width: w, height: h };
+    let area = centered(term, 70, 11);
     let bg = Style::default().bg(theme::panel()).fg(theme::text());
     f.render_widget(Clear, area);
     f.render_widget(
@@ -448,7 +466,7 @@ fn render_conflict_prompt(f: &mut Frame, app: &mut App) {
         area,
     );
 
-    let inner_w = w.saturating_sub(6) as usize;
+    let inner_w = area.width.saturating_sub(6) as usize;
     let fit = |s: String| -> String {
         if s.chars().count() <= inner_w { s } else { format!("{}\u{2026}", s.chars().take(inner_w.saturating_sub(1)).collect::<String>()) }
     };

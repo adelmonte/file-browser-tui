@@ -42,13 +42,13 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     app.eject_rects.clear();
 
     let sections = sections(app);
-    // Kitty's centered names are written after the frame, over anything
-    // drawn on top of them: rows under a menu or dialog get plain text
-    let menu_rects = app.menu.as_ref()
+    // Kitty's centered names and placed icons are drawn over anything on
+    // top of them: rows under a menu or dialog get plain text and
+    // placeholder icons, the rest stay as they are
+    let mut menu_rects = app.menu.as_ref()
         .map(|m| crate::ui::menu::covered(m, f.area(), app.picker.protocol_type() == ProtocolType::Kitty))
         .unwrap_or_default();
-    let dialog = app.show_help || app.properties.is_some() || app.name_prompt.is_some() || app.conflict_prompt.is_some()
-        || app.confirm_delete.is_some();
+    menu_rects.extend(crate::ui::dialog_rects(app, f.area()));
 
     let font = app.picker.font_size();
     let kitty = app.picker.protocol_type() == ProtocolType::Kitty;
@@ -108,7 +108,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let fg = if row.dim { theme::get().muted } else if row.current { theme::text_strong_rgb() } else { theme::get().text };
 
             let icon_rect = Rect { x: inner.x + 1, y, width: icon_w, height: h };
-            if dialog || menu_rects.iter().any(|m| m.intersects(icon_rect)) || !place_icon_image(app, &row.icon, icon_rect) {
+            if menu_rects.iter().any(|m| m.intersects(icon_rect)) || !place_icon_image(app, &row.icon, icon_rect) {
                 draw_icon(f, app, &row.icon, icon_rect, bg);
             }
             let text_x = inner.x + 1 + icon_w + 1;
@@ -121,7 +121,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
                 if hot {
                     f.render_widget(Block::default().style(Style::default().bg(theme::rgb(theme::get().highlight))), r);
                 }
-                if dialog || menu_rects.iter().any(|m| m.intersects(r)) || !place_icon_image(app, "media-eject", r) {
+                if menu_rects.iter().any(|m| m.intersects(r)) || !place_icon_image(app, "media-eject", r) {
                     draw_icon(f, app, "media-eject", r, eject_bg);
                 }
                 app.eject_rects.push((r, i));
@@ -143,7 +143,7 @@ pub fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
             let name: String = row.name.chars().take(text_w as usize).collect();
             let name_y = y;
             let name_rect = Rect { x: text_x, y, width: text_w, height: h };
-            let covered = dialog || menu_rects.iter().any(|m| m.intersects(name_rect));
+            let covered = menu_rects.iter().any(|m| m.intersects(name_rect));
             if kitty && h > 1 && row.usage.is_none() && !covered {
                 // Kitty can center normal-size text across both rows
                 let (seq, used) = kitty::centered_text_cut(text_x, y, h, text_w, &name, fg, bg, cut);
