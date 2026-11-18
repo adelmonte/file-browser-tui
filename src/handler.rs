@@ -121,6 +121,19 @@ pub fn handle_key(app: &mut App, ev: KeyEvent) -> bool {
 
     // Properties popup
     if let Some(props) = &mut app.properties {
+        if let Some(picker) = &mut props.icon_picker {
+            use crate::ui::icon_picker::Outcome;
+            match picker.handle_key(ev) {
+                Outcome::Stay => {}
+                Outcome::Close => props.icon_picker = None,
+                Outcome::Choose(icon) => choose_folder_icon(app, icon),
+            }
+            return false;
+        }
+        if ev.code == KeyCode::Char('i') && props.icon_dir.is_some() {
+            props.open_icon_picker();
+            return false;
+        }
         if let Some(p) = &mut props.perms {
             let n = p.slots();
             match ev.code {
@@ -544,9 +557,42 @@ fn run_action(app: &mut App, action: Action) -> bool {
     false
 }
 
+/// Set the icon chosen in Properties' icon chooser, and go back to
+/// Properties.
+fn choose_folder_icon(app: &mut App, icon: Option<String>) {
+    let Some(dir) = app.properties.as_mut().and_then(|p| p.icon_picker.take()).map(|p| p.dir) else { return; };
+    app.set_folder_icon(&dir, icon);
+    if let Some(props) = &mut app.properties {
+        props.refresh_icon();
+    }
+}
+
 pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     let col = ev.column;
     let row = ev.row;
+
+    // The folder icon chooser takes the mouse while open
+    if let Some(picker) = app.properties.as_mut().and_then(|p| p.icon_picker.as_mut()) {
+        use crate::ui::icon_picker::Outcome;
+        let s = app.last_terminal_size;
+        let area = crate::ui::icon_picker::rect(Rect { x: 0, y: 0, width: s.width, height: s.height });
+        let outcome = match ev.kind {
+            MouseEventKind::Down(MouseButton::Left) if contains(area, col, row) => picker.click(col, row),
+            MouseEventKind::Down(_) if !contains(area, col, row) => Outcome::Close,
+            MouseEventKind::ScrollDown => { picker.scroll_rows(1); Outcome::Stay }
+            MouseEventKind::ScrollUp => { picker.scroll_rows(-1); Outcome::Stay }
+            _ => Outcome::Stay,
+        };
+        match outcome {
+            Outcome::Stay => {}
+            Outcome::Close => if let Some(p) = &mut app.properties { p.icon_picker = None; },
+            Outcome::Choose(icon) => choose_folder_icon(app, icon),
+        }
+        if let MouseEventKind::Moved = ev.kind {
+            app.mouse_pos = Some((col, row));
+        }
+        return;
+    }
 
     // Picking: the bottom bar's field and buttons
     if let Some(p) = &mut app.pick {
@@ -717,6 +763,10 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
             if let Some(props) = &mut app.properties {
                 let s = app.last_terminal_size;
                 let area = crate::ui::properties::properties_rect(props, Rect { x: 0, y: 0, width: s.width, height: s.height });
+                if props.icon_hit.get().is_some_and(|r| contains(r, col, row)) {
+                    props.open_icon_picker();
+                    return;
+                }
                 let hit = props.hits.borrow().iter().find(|(r, _)| contains(*r, col, row)).map(|h| h.1);
                 match (hit, &mut props.perms) {
                     (Some(i), Some(p)) => { p.cursor = i; p.toggle(i); }

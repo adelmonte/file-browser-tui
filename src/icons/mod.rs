@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod folder_preview;
 mod theme;
 pub mod raster;
@@ -18,6 +19,8 @@ pub use theme::{set_theme, theme_name};
 
 pub struct IconImageReady {
     pub path: PathBuf,
+    /// The cache generation the request was made in (see `forget`).
+    generation: u64,
     pub image: Option<Arc<image::DynamicImage>>,
     pub mime_type: Option<String>,
     /// A folder preview, which a plain icon arriving later mustn't replace.
@@ -26,6 +29,7 @@ pub struct IconImageReady {
 
 struct IconRequest {
     path: PathBuf,
+    generation: u64,
     is_dir: bool,
     target_px: u32,
     /// Custom icon name (config folder_icons) tried before normal resolution.
@@ -153,6 +157,10 @@ pub struct IconCache {
     /// Paths whose cached image is a folder preview.
     previews: HashSet<PathBuf>,
     fit: Fit,
+    generation: u64,
+    /// Forgotten paths, with the generation they were forgotten in:
+    /// results of requests made before then are dropped.
+    forgotten: std::collections::HashMap<PathBuf, u64>,
 }
 
 impl IconCache {
@@ -216,7 +224,7 @@ impl IconCache {
                     let wants_preview = folder_previews && req.is_dir && req.target_px >= folder_preview::MIN_PX;
                     let Some(base) = image.clone().filter(|_| wants_preview) else {
                         // Always send back (even if no icon) so mime_type reaches the listing
-                        let _ = tx.send(IconImageReady { path: req.path, image, mime_type: mime, preview: false });
+                        let _ = tx.send(IconImageReady { path: req.path, generation: req.generation, image, mime_type: mime, preview: false });
                         return;
                     };
 
@@ -233,7 +241,7 @@ impl IconCache {
                             Arc::new(p)
                         }));
                     });
-                    let send = |image, preview| { let _ = tx.send(IconImageReady { path: req.path.clone(), image, mime_type: mime.clone(), preview }); };
+                    let send = |image, preview| { let _ = tx.send(IconImageReady { path: req.path.clone(), generation: req.generation, image, mime_type: mime.clone(), preview }); };
                     match prx.recv_timeout(std::time::Duration::from_millis(150)) {
                         Ok(Some(preview)) => send(Some(preview), true),
                         Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => send(image, false),
@@ -260,6 +268,8 @@ impl IconCache {
             prefetch_pending: HashSet::new(),
             previews: HashSet::new(),
             fit: GRID_FIT,
+            generation: 0,
+            forgotten: Default::default(),
         }
     }
 
@@ -274,7 +284,7 @@ impl IconCache {
         if self.images.contains(path) || self.pending.contains(path) {
             return;
         }
-        let req = IconRequest { path: path.to_path_buf(), is_dir, target_px, icon_override };
+        let req = IconRequest { path: path.to_path_buf(), generation: self.generation, is_dir, target_px, icon_override };
         // Only mark pending if queued; a full queue is retried next frame
         if self.tx_work.try_send(req).is_ok() {
             self.pending.insert(path.to_path_buf());
@@ -287,7 +297,7 @@ impl IconCache {
         if self.images.contains(path) || self.pending.contains(path) || self.prefetch_pending.contains(path) {
             return;
         }
-        let req = IconRequest { path: path.to_path_buf(), is_dir, target_px, icon_override };
+        let req = IconRequest { path: path.to_path_buf(), generation: self.generation, is_dir, target_px, icon_override };
         if self.tx_prefetch.try_send(req).is_ok() {
             self.prefetch_pending.insert(path.to_path_buf());
         }
@@ -307,6 +317,9 @@ impl IconCache {
     pub fn drain_ready(&mut self) -> Vec<(PathBuf, Option<String>)> {
         let mut mime_updates = Vec::new();
         while let Ok(ready) = self.rx_image.try_recv() {
+            if self.forgotten.get(&ready.path).is_some_and(|g| ready.generation < *g) {
+                continue;
+            }
             self.pending.remove(&ready.path);
             self.prefetch_pending.remove(&ready.path);
             // A prefetch and a request for one folder can both finish: keep
@@ -371,6 +384,18 @@ impl IconCache {
         for k in keys {
             self.protocols.pop(&k);
         }
+    }
+
+    /// Drop one path's icon so the next request loads it afresh (its
+    /// custom icon changed); loads already under way are ignored.
+    pub fn forget(&mut self, path: &Path) {
+        self.generation += 1;
+        self.forgotten.insert(path.to_path_buf(), self.generation);
+        self.invalidate(path);
+        self.images.pop(path);
+        self.previews.remove(path);
+        self.pending.remove(path);
+        self.prefetch_pending.remove(path);
     }
 
     /// Clear all cached protocols and raw images (e.g. on icon size change).

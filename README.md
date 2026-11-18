@@ -70,6 +70,9 @@ action also has a keyboard shortcut.
 - **Permissions** editor in Properties: read, write and execute for owner, group and
   others, optionally applied to a folder's contents (only the bits you changed, so
   files don't all become executable).
+- **Folder icons** chosen in Properties (press `i` or click Change): search the icon
+  theme by name or meaning ("code" finds folder-development), with suggestions for the
+  folder's own name, or type a path to use an image file. Saved under `[folder_icons]`.
 - **Clipboard** shared with other file managers: cut, copy and paste files between this
   and Dolphin, Nautilus and others, and paste copied text or pictures as new files.
 - **Drag and drop**: rubber-band selection, dragging onto folders and places, and
@@ -242,6 +245,7 @@ icon_size_idx = 7             # default zoom, 0 (smallest) to 19
 [folder_icons]
 "~/Projects" = "folder-development"
 "~/Music" = "folder-music"
+"~/Art" = "~/icons/palette.svg"  # an image file works too
 ```
 
 ### Layout

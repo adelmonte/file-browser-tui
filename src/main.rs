@@ -500,6 +500,7 @@ fn run(
                             app.post_text_shown.clear();
                             app.icon_cache.clear_protocols();
                             app.sidebar_icons.clear_protocols();
+                            app.picker_icons.clear_protocols();
                             app.thumb_cache.clear_protocols();
                             app.kitty_delete_all = true;
                         }

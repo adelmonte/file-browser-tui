@@ -27,6 +27,12 @@ pub struct PropertiesState {
     pub perms: Option<PermEdit>,
     /// Where each checkbox was drawn (index as in `PermEdit::cursor`).
     pub hits: std::cell::RefCell<Vec<(Rect, usize)>>,
+    /// The folder, when its icon can be changed.
+    pub icon_dir: Option<std::path::PathBuf>,
+    /// Choosing that icon, over the rest of the dialog.
+    pub icon_picker: Option<crate::ui::icon_picker::IconPicker>,
+    /// Where the Icon row was drawn.
+    pub icon_hit: std::cell::Cell<Option<Rect>>,
 }
 
 /// Editing an item's mode: read/write/execute for owner, group and
@@ -155,7 +161,8 @@ impl PropertiesState {
             })
             .unwrap_or_else(|_| "\u{2014}".into());
 
-        let rows = vec![
+        let icon_dir = (is_dir && !crate::vfs::is_virtual(path)).then(|| path.to_path_buf());
+        let mut rows = vec![
             ("Name".into(), name),
             ("Type".into(), type_str),
             ("Location".into(), location),
@@ -167,6 +174,9 @@ impl PropertiesState {
             ("Owner".into(), owner),
             ("Device".into(), free),
         ];
+        if let Some(dir) = &icon_dir {
+            rows.insert(2, ("Icon".into(), icon_text(dir)));
+        }
 
         let size_rx = if is_dir {
             let (tx, rx) = mpsc::channel();
@@ -187,7 +197,21 @@ impl PropertiesState {
             let mode = meta.as_ref().map(|m| m.mode() & 0o7777).unwrap_or(0);
             PermEdit { path: path.to_path_buf(), original: mode, mode, is_dir, recursive: false, cursor: 0, error: None }
         });
-        Self { rows, size_rx, perms, hits: Default::default() }
+        Self { rows, size_rx, perms, hits: Default::default(), icon_dir, icon_picker: None, icon_hit: Default::default() }
+    }
+
+    pub fn open_icon_picker(&mut self) {
+        if let Some(dir) = &self.icon_dir {
+            self.icon_picker = Some(crate::ui::icon_picker::IconPicker::new(dir));
+        }
+    }
+
+    /// Show the folder's icon as it is now (after a change).
+    pub fn refresh_icon(&mut self) {
+        if let Some(dir) = &self.icon_dir
+            && let Some(row) = self.rows.iter_mut().find(|(k, _)| k == "Icon") {
+                row.1 = icon_text(dir);
+            }
     }
 
     /// Drain async dir-size updates (called from App::drain_channels).
@@ -201,6 +225,13 @@ impl PropertiesState {
             && let Some(row) = self.rows.iter_mut().find(|(k, _)| k == "Size") {
                 row.1 = format!("{} ({} items)", human_size(bytes), items);
             }
+    }
+}
+
+fn icon_text(dir: &Path) -> String {
+    match crate::icons::resolver::folder_icon(dir) {
+        Some(name) => format!("{name} (custom)"),
+        None => crate::icons::resolver::xdg_icon(dir).unwrap_or("folder").to_string(),
     }
 }
 
@@ -247,6 +278,9 @@ fn perm_lines(state: &PropertiesState) -> u16 {
 }
 
 pub fn properties_rect(state: &PropertiesState, term: Rect) -> Rect {
+    if state.icon_picker.is_some() {
+        return crate::ui::icon_picker::rect(term);
+    }
     let width = PROPS_W.min(term.width);
     let height = (state.rows.len() as u16 + perm_lines(state) + 2).min(term.height);
     let x = term.width.saturating_sub(width) / 2;
@@ -260,18 +294,27 @@ pub fn render_properties(f: &mut Frame, state: &PropertiesState) {
 
     let label_w = 12;
     let val_w = area.width.saturating_sub(label_w as u16 + 4) as usize;
-    let mut lines: Vec<Line> = state.rows.iter().map(|(k, v)| {
+    let change = "  Change\u{2026} (i)";
+    state.icon_hit.set(None);
+    let mut lines: Vec<Line> = state.rows.iter().enumerate().map(|(i, (k, v))| {
+        let is_icon = k == "Icon";
+        let room = if is_icon { val_w.saturating_sub(change.chars().count()) } else { val_w };
         let mut val = v.clone();
-        if val.chars().count() > val_w && val_w > 1 {
-            val = val.chars().take(val_w - 1).collect::<String>() + "\u{2026}";
+        if val.chars().count() > room && room > 1 {
+            val = val.chars().take(room - 1).collect::<String>() + "\u{2026}";
         }
-        Line::from(vec![
+        let mut spans = vec![
             Span::styled(
                 format!(" {k:<label_w$}"),
                 Style::default().bg(props_bg()).add_modifier(Modifier::BOLD | Modifier::DIM),
             ),
             Span::styled(val, Style::default().bg(props_bg())),
-        ])
+        ];
+        if is_icon {
+            spans.push(Span::styled(change, Style::default().bg(props_bg()).fg(theme::accent())));
+            state.icon_hit.set(Some(Rect { x: area.x + 1, y: area.y + 1 + i as u16, width: area.width.saturating_sub(2), height: 1 }));
+        }
+        Line::from(spans)
     }).collect();
 
     let mut hits = Vec::new();

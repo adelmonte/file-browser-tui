@@ -302,6 +302,8 @@ pub struct App {
     collecting_thumb_jobs: bool,
     /// Theme icons for the sidebar (separate keys from the file grid).
     pub sidebar_icons: IconCache,
+    /// Icons in the folder icon chooser, drawn bigger than the sidebar's.
+    pub picker_icons: IconCache,
     pub place_drag: Option<crate::events::PlaceDrag>,
     /// Details column headers and the sort field each sets.
     pub details_headers: Vec<(Rect, SortField)>,
@@ -611,6 +613,8 @@ impl App {
                     max_rows: crate::ui::sidebar::ICON_ROWS,
                     valign: crate::icons::VAlign::Center,
                 }),
+            picker_icons: IconCache::new(false)
+                .with_fit(crate::icons::Fit { max_h: 1.0, max_rows: 0.0, valign: crate::icons::VAlign::Center }),
             mouse_pos: None,
             place_drag: None,
             details_headers: Vec::new(),
@@ -1574,6 +1578,17 @@ impl App {
         max_h.min(img_w * fs.width as u32).clamp(32, 512)
     }
 
+    /// Give a folder a custom icon (a theme icon name or an image file), or
+    /// with `None` its usual one back, and save it in the config.
+    pub fn set_folder_icon(&mut self, dir: &std::path::Path, icon: Option<String>) {
+        crate::icons::resolver::set_folder_icon(dir, icon.clone());
+        self.icon_cache.forget(dir);
+        match self.config.save_folder_icon(dir, icon.as_deref()) {
+            Ok(()) => self.notify(if icon.is_some() { "Folder icon changed".into() } else { "Folder icon reset".into() }),
+            Err(e) => self.notify(format!("Icon changed, but the config couldn't be saved: {e}")),
+        }
+    }
+
     /// Return the freedesktop icon name for XDG user directories (Music, Videos, etc.).
     pub fn xdg_folder_icon(path: &std::path::Path) -> Option<String> {
         crate::icons::resolver::xdg_icon(path).map(str::to_string)
@@ -1601,7 +1616,7 @@ impl App {
     /// Something is moving or arriving on its own (icons loading, a smooth
     /// scroll, a file operation, a search, a drag): frames go at full rate.
     pub fn animating(&self) -> bool {
-        self.icon_cache.loading() || self.sidebar_icons.loading() || self.thumb_cache.loading()
+        self.icon_cache.loading() || self.sidebar_icons.loading() || self.picker_icons.loading() || self.thumb_cache.loading()
             || (self.scroll_pos - self.scroll_target).abs() > 0.01
             || self.fileops.busy()
             || self.search.as_ref().is_some_and(|s| s.running)
@@ -1772,6 +1787,7 @@ impl App {
             self.conflict_prompt = Some(crate::events::ConflictPrompt::new(c));
         }
         self.sidebar_icons.drain_ready();
+        self.picker_icons.drain_ready();
         let mime_updates = self.icon_cache.drain_ready();
         for (path, mime) in mime_updates {
             if let Some(entry) = self.listing.entries.iter_mut().find(|e| e.path == path)
@@ -1943,6 +1959,7 @@ impl App {
         self.band_uploaded = None;
         self.band_shown = None;
         self.sidebar_icons.clear_protocols();
+        self.picker_icons.clear_protocols();
         self.icon_cache.clear_protocols();
         self.thumb_cache.clear_protocols();
     }

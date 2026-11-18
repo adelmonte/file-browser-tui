@@ -9,6 +9,7 @@ pub mod kitty;
 pub mod menu;
 pub mod pickbar;
 pub mod properties;
+pub mod icon_picker;
 pub mod searchbar;
 pub mod sidebar;
 pub mod tabbar;
@@ -144,8 +145,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     } else {
         app.completions_rect = Rect::default();
     }
-    if let Some(ref props) = app.properties {
-        properties::render_properties(f, props);
+    if let Some(mut props) = app.properties.take() {
+        match &mut props.icon_picker {
+            Some(picker) => icon_picker::render(f, app, picker),
+            None => properties::render_properties(f, &props),
+        }
+        app.properties = Some(props);
     }
     if app.show_help {
         help::render_help(f, app);

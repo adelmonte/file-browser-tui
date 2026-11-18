@@ -244,6 +244,31 @@ impl Config {
         Ok(())
     }
 
+    /// Set (or with `None`, remove) one folder's custom icon, here and in
+    /// the file, editing only that line. Keyed as the file already keys
+    /// that folder, else in the style of its other entries.
+    pub fn save_folder_icon(&mut self, dir: &std::path::Path, icon: Option<&str>) -> Result<()> {
+        use crate::icons::resolver::folder_icon_key_path;
+        let existing = self.folder_icons.keys().find(|k| folder_icon_key_path(k) == dir).cloned();
+        let key = existing.unwrap_or_else(|| {
+            let home = dirs::home_dir().unwrap_or_default();
+            let absolute = !self.folder_icons.is_empty() && self.folder_icons.keys().all(|k| k.starts_with('/'));
+            match dir.strip_prefix(&home) {
+                Ok(rest) if !absolute && rest.as_os_str().is_empty() => "~".into(),
+                Ok(rest) if !absolute => format!("~/{}", rest.display()),
+                _ => dir.display().to_string(),
+            }
+        });
+        match icon {
+            Some(name) => { self.folder_icons.insert(key.clone(), name.to_string()); }
+            None => { self.folder_icons.remove(&key); }
+        }
+        if self.read_only {
+            return Ok(());
+        }
+        write_folder_icon(&config_path(), &key, icon)
+    }
+
     fn apply_to(&self, doc: &mut toml_edit::DocumentMut) -> Result<()> {
         let owned: toml_edit::DocumentMut = toml::to_string(&Owned { sidebar_w: self.sidebar_w, places: &self.places })?.parse()?;
         if doc.get("sidebar_w").and_then(|v| v.as_integer()) != Some(self.sidebar_w as i64) {
@@ -255,6 +280,31 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// Set or remove one `folder_icons` entry in the file, leaving the rest
+/// as it is.
+fn write_folder_icon(path: &std::path::Path, key: &str, icon: Option<&str>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let text = std::fs::read_to_string(path).unwrap_or_else(|_| template());
+    let mut doc: toml_edit::DocumentMut = text.parse()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    match icon {
+        Some(name) => {
+            let table = doc.entry("folder_icons").or_insert(toml_edit::table())
+                .as_table_like_mut().context("folder_icons in the config isn't a table")?;
+            table.insert(key, toml_edit::value(name));
+        }
+        None => {
+            if let Some(table) = doc.get_mut("folder_icons").and_then(|t| t.as_table_like_mut()) {
+                table.remove(key);
+            }
+        }
+    }
+    std::fs::write(path, doc.to_string())?;
+    Ok(())
 }
 
 /// The parts of the config the app itself changes.
@@ -300,7 +350,8 @@ sidebar_w = 18                  # sidebar width in columns (also set by dragging
 # icon_label_lines = 2          # Icons view: lines of name under each icon (1-6)
 # compact_width = 22            # Compact view: width of each column
 
-# Custom icons for particular folders, by icon theme name.
+# Custom icons for particular folders, by icon theme name or image file.
+# Also set from a folder's Properties (Alt+Enter, then i).
 # [folder_icons]
 # "~/Projects" = "folder-development"
 
@@ -397,6 +448,28 @@ fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_icon_edits_only_its_line() {
+        let path = std::env::temp_dir().join(format!("fbt-config-{}.toml", std::process::id()));
+        std::fs::write(&path, "# mine\nicon_theme = \"x\"\n\n[folder_icons]\n\"/a\" = \"folder-music\" # tunes\n\"/b\" = \"folder-git\"\n").unwrap();
+        write_folder_icon(&path, "/a", Some("folder-games")).unwrap();
+        write_folder_icon(&path, "/b", None).unwrap();
+        write_folder_icon(&path, "/c d", Some("/icons/c.svg")).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# mine\nicon_theme = \"x\"\n"), "{text}");
+        let cfg: Config = toml::from_str(&text).unwrap();
+        assert_eq!(cfg.folder_icons.len(), 2);
+        assert_eq!(cfg.folder_icons["/a"], "folder-games");
+        assert_eq!(cfg.folder_icons["/c d"], "/icons/c.svg");
+
+        // No table yet: one is added
+        std::fs::write(&path, "show_hidden = true\n").unwrap();
+        write_folder_icon(&path, "~/x", Some("folder")).unwrap();
+        let cfg: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(cfg.show_hidden && cfg.folder_icons["~/x"] == "folder");
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn template_and_in_place_save() {

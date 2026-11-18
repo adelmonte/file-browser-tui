@@ -91,24 +91,37 @@ pub fn resolve_icon_path(icon_names: &[String], is_dir: bool) -> Option<(PathBuf
         .or_else(|| super::theme::lookup(if is_dir { "folder" } else { "text-x-generic" }))
 }
 
-static FOLDER_ICONS: std::sync::OnceLock<std::collections::HashMap<PathBuf, String>> = std::sync::OnceLock::new();
+static FOLDER_ICONS: std::sync::RwLock<Option<std::collections::HashMap<PathBuf, String>>> = std::sync::RwLock::new(None);
 
-/// `folder_icons` from the config, keyed by path ("~/" is the home folder).
-pub fn set_folder_icons(icons: &std::collections::HashMap<String, String>) {
+/// The folder a `folder_icons` key names ("~/" is the home folder).
+pub fn folder_icon_key_path(key: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
-    let _ = FOLDER_ICONS.set(icons.iter().map(|(k, v)| {
-        let path = match k.strip_prefix("~/") {
-            Some(rest) => home.join(rest),
-            None if k == "~" => home.clone(),
-            None => PathBuf::from(k),
-        };
-        (PathBuf::from(path.to_string_lossy().trim_end_matches('/')), v.clone())
-    }).collect());
+    let path = match key.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if key == "~" => home,
+        None => PathBuf::from(key),
+    };
+    PathBuf::from(path.to_string_lossy().trim_end_matches('/'))
+}
+
+/// `folder_icons` from the config.
+pub fn set_folder_icons(icons: &std::collections::HashMap<String, String>) {
+    *FOLDER_ICONS.write().unwrap() = Some(icons.iter().map(|(k, v)| (folder_icon_key_path(k), v.clone())).collect());
+}
+
+/// Give one folder a custom icon, or (`None`) its usual one back.
+pub fn set_folder_icon(dir: &Path, icon: Option<String>) {
+    let mut icons = FOLDER_ICONS.write().unwrap();
+    let icons = icons.get_or_insert_with(Default::default);
+    match icon {
+        Some(name) => { icons.insert(dir.to_path_buf(), name); }
+        None => { icons.remove(dir); }
+    }
 }
 
 /// The custom icon set for this folder in the config, if any.
 pub fn folder_icon(dir: &Path) -> Option<String> {
-    FOLDER_ICONS.get()?.get(dir).cloned()
+    FOLDER_ICONS.read().unwrap().as_ref()?.get(dir).cloned()
 }
 
 /// The icon of a standard folder (home, Downloads, Music, ...), if `dir` is
