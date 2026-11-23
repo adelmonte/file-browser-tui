@@ -346,10 +346,10 @@ fn mount(user: &User, target: &str) -> Res<String> {
 }
 
 fn unmount(user: &User, target: &str) -> Res<()> {
-    let dir = media_dir(user, false)?;
     let target = Path::new(target);
-    let name = target.file_name().filter(|_| target.parent() == Some(dir.as_path()))
+    let name = target.file_name().filter(|_| target.parent() == Some(Path::new(MEDIA).join(&user.name).as_path()))
         .ok_or("only drives mounted in /run/media can be unmounted")?;
+    let dir = media_dir(user, false)?;
     let point = dir.join(name);
     if !mountinfo().iter().any(|(_, p)| Path::new(p) == point) {
         return Err(format!("{} isn't mounted", point.display()));
