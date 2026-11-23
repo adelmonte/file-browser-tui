@@ -105,7 +105,7 @@ Optional tools, used when installed. `file-browser-tui --check` lists what it fo
 | `xdg-utils` | opening files with their default app |
 | `bsdtar` (libarchive) | Extract (`7z`, `unrar` or `unzip` are used if it can't) |
 | `zip` | Compress to zip |
-| `udisks2` | mounting, unlocking and safely removing drives |
+| `cryptsetup` | unlocking encrypted (LUKS) drives |
 | `kdeconnect` (or `lanlink`) | Send to Device, browsing phones over Wi-Fi |
 | `glib2` (`gio`) | file type icons for unusual files |
 
@@ -126,6 +126,17 @@ cargo build --release
 install -Dm755 target/release/file-browser-tui ~/.local/bin/file-browser-tui
 install -Dm644 file-browser-tui.desktop ~/.local/share/applications/file-browser-tui.desktop
 ```
+
+Mounting drives from the sidebar, unlocking encrypted ones and Safely Remove go through
+`file-browser-tui-mount`, a small helper that has to be owned by root and setuid:
+
+```sh
+sudo install -m4755 -o root -g root target/release/file-browser-tui-mount /usr/local/bin/
+```
+
+It only touches removable drives (USB, SD cards, optical discs), mounts them under
+`/run/media/$USER` without setuid programs or device files, and unmounts only what is
+mounted there. Without it, the app uses `udisksctl` (udisks2) if that is installed.
 
 ## Running it
 
