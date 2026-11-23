@@ -13,7 +13,7 @@ use nix::poll::{PollFd, PollFlags, poll};
 pub enum MountKind {
     /// The root filesystem: always there, never unmounted from here.
     Root,
-    /// Removable media mounted by udisks under /run/media.
+    /// Removable media mounted under /run/media (by our helper or udisks).
     Media,
     /// A user FUSE mount (sshfs, rclone, gocryptfs, ...).
     Fuse,
@@ -77,36 +77,34 @@ impl DeviceEntry {
 /// Unmount `dev` (powering the drive off too with `power_off`, Dolphin's
 /// Safely Remove). Blocks; returns the tool's complaint on failure.
 pub fn unmount(dev: &DeviceEntry, power_off: bool) -> Result<(), String> {
-    use std::process::{Command, Stdio};
     // Our own working directory inside it would keep it busy
     if std::env::current_dir().is_ok_and(|d| d.starts_with(&dev.path)) {
         let _ = std::env::set_current_dir(dirs::home_dir().unwrap_or_else(|| "/".into()));
     }
-    let run = |cmd: &str, args: &[&str]| -> Result<(), String> {
-        let out = Command::new(cmd).args(args).stdin(Stdio::null()).output()
-            .map_err(|e| format!("{cmd}: {e}"))?;
-        if out.status.success() {
-            return Ok(());
-        }
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("{cmd} failed") } else { err })
-    };
+    let run = |cmd: &str, args: &[&str]| run_tool(cmd, args, None).map(drop);
     match dev.kind {
         MountKind::Root | MountKind::Unmounted | MountKind::Locked | MountKind::Phone => Err("not mounted from here".into()),
         MountKind::Fuse => run("fusermount3", &["-u", &dev.path])
             .or_else(|_| run("fusermount", &["-u", &dev.path]))
             .or_else(|e| run("umount", &[&dev.path]).map_err(|_| e)),
         MountKind::Media if dev.source.starts_with("/dev/") => {
-            run("udisksctl", &["unmount", "--no-user-interaction", "-b", &dev.source])
-                .or_else(|e| run("umount", &[&dev.path]).map_err(|_| e))?;
+            let helper = helper();
+            // lock and power-off: the helper and udisksctl call them alike
+            let drive = |cmd: &str, device: &str| match &helper {
+                Some(h) => run_tool(h, &[cmd, device], None).map(drop),
+                None => run("udisksctl", &[cmd, "--no-user-interaction", "-b", device]),
+            };
+            match &helper {
+                Some(h) => run_tool(h, &["unmount", &dev.path], None).map(drop),
+                None => run("udisksctl", &["unmount", "--no-user-interaction", "-b", &dev.source]),
+            }.or_else(|e| run("umount", &[&dev.path]).map_err(|_| e))?;
             // An unlocked encrypted drive is locked again, as Dolphin does
             let backing = encrypted_backing(&dev.source);
             if let Some(b) = &backing {
-                run("udisksctl", &["lock", "--no-user-interaction", "-b", b])?;
+                drive("lock", b)?;
             }
             if power_off {
-                let drive = backing.as_deref().unwrap_or(&dev.source);
-                run("udisksctl", &["power-off", "--no-user-interaction", "-b", drive])?;
+                drive("power-off", backing.as_deref().unwrap_or(&dev.source))?;
             }
             Ok(())
         }
@@ -130,14 +128,28 @@ fn encrypted_backing(dev: &str) -> Option<String> {
     Some(format!("/dev/{}", slave.file_name().to_string_lossy()))
 }
 
-/// Run a udisksctl command quietly; its first line of output on success,
-/// its complaint on failure.
-fn udisksctl(args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
+/// Our setuid-root helper for drives (`src/mount_helper.rs`), used in
+/// place of udisks2 when it's installed.
+pub const HELPER: &str = "file-browser-tui-mount";
+
+/// The helper, if it's installed setuid root (beside this program or on
+/// $PATH).
+pub fn helper() -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(HELPER)));
+    let on_path: Vec<_> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).map(|d| d.join(HELPER)).collect()).unwrap_or_default();
+    beside.into_iter().chain(on_path)
+        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.uid() == 0 && m.mode() & 0o4000 != 0))
+}
+
+/// Run a tool quietly; its output on success, its complaint on failure.
+fn run_tool(program: impl AsRef<std::ffi::OsStr>, args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
     use std::{io::Write, process::{Command, Stdio}};
-    let mut child = Command::new("udisksctl").args(args)
+    let name = std::path::Path::new(program.as_ref()).file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let mut child = Command::new(program).args(args)
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|e| format!("udisksctl: {e} (install udisks2)"))?;
+        .spawn().map_err(|e| format!("{name}: {e}"))?;
     if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
         let _ = pipe.write_all(data);
     }
@@ -147,14 +159,25 @@ fn udisksctl(args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
         Ok(text(&out.stdout))
     } else {
         let err = text(&out.stderr);
-        // "Error unlocking /dev/sdb1: GDBus.Error:...: Failed to activate device: Operation not permitted"
-        let short = err.rsplit(": ").next().unwrap_or(&err).to_string();
-        Err(if short.is_empty() { "udisksctl failed".into() } else { short })
+        Err(if err.is_empty() { format!("{name} failed") } else { err })
     }
+}
+
+/// Run a udisksctl command quietly; its output on success, its complaint
+/// on failure.
+fn udisksctl(args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
+    if !crate::check::has_command("udisksctl") {
+        return Err(format!("can't mount drives: install {HELPER} setuid root (see the README), or udisks2"));
+    }
+    // "Error unlocking /dev/sdb1: GDBus.Error:...: Failed to activate device: Operation not permitted"
+    run_tool("udisksctl", args, stdin).map_err(|e| e.rsplit(": ").next().unwrap_or(&e).to_string())
 }
 
 /// Mount a plugged-in drive (`dev.source`); where it was mounted.
 pub fn mount(dev: &str) -> Result<std::path::PathBuf, String> {
+    if let Some(h) = helper() {
+        return run_tool(&h, &["mount", dev], None).map(std::path::PathBuf::from);
+    }
     // "Mounted /dev/sdb1 at /run/media/me/STICK" (older versions end with ".")
     let out = udisksctl(&["mount", "--no-user-interaction", "-b", dev], None)?;
     out.split_once(" at ").map(|(_, p)| std::path::PathBuf::from(p.trim_end_matches('.')))
@@ -163,6 +186,12 @@ pub fn mount(dev: &str) -> Result<std::path::PathBuf, String> {
 
 /// Unlock an encrypted drive with `passphrase`, then mount what's inside.
 pub fn unlock_and_mount(dev: &str, passphrase: &[u8]) -> Result<std::path::PathBuf, String> {
+    if let Some(h) = helper() {
+        let clear = run_tool(&h, &["unlock", dev], Some(passphrase))?;
+        return mount(&clear).inspect_err(|_| {
+            let _ = run_tool(&h, &["lock", dev], None);
+        });
+    }
     // The passphrase goes through a pipe, never the command line
     let out = udisksctl(&["unlock", "--no-user-interaction", "-b", dev, "--key-file", "/dev/stdin"], Some(passphrase))?;
     // "Unlocked /dev/sdb1 as /dev/dm-3."
@@ -336,7 +365,7 @@ pub fn parse_mountinfo() -> anyhow::Result<Vec<DeviceEntry>> {
             && !FUSE_BLOCKLIST.contains(&fstype)
             && (fstype == "fuse.sshfs" || !mountpoint.starts_with("/run/user/"));
 
-        // Removable media mounted by udisks
+        // Removable media mounted by our helper or udisks
         let is_media = mountpoint.starts_with("/run/media/")
             && MEDIA_FSTYPES.contains(&fstype);
 

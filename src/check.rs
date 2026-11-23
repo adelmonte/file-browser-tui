@@ -28,7 +28,6 @@ const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("bsdtar", "Extract (zip, tar, 7z, rar, iso, ...; libarchive)", None),
     ("tar", "Compress to tar.gz", None),
     ("zip", "Compress to zip", None),
-    ("udisksctl", "unmounting and safely removing drives", None),
     ("kdeconnect-cli", "Send to Device / browsing phones (KDE Connect; lanlink works too)", None),
     ("gio", "file type icons for unusual files (fallback)", None),
 ];
@@ -53,6 +52,15 @@ pub fn run() -> i32 {
         if ok || !alt {
             line(ok, cmd, what);
         }
+    }
+    let helper = crate::fs::mounts::helper().is_some();
+    if helper || !has_command("udisksctl") {
+        line(helper, crate::fs::mounts::HELPER, "mounting, unlocking and safely removing drives (installed setuid root)");
+        if helper {
+            line(has_command("cryptsetup"), "cryptsetup", "unlocking encrypted drives");
+        }
+    } else {
+        line(true, "udisksctl", "mounting, unlocking and safely removing drives (udisks2)");
     }
     if crate::clipboard::backend().is_none() {
         missing_required = true;
