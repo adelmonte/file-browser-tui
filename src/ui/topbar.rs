@@ -51,24 +51,33 @@ pub fn render_topbar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let menu_kind = app.menu.as_ref().map(|m| m.kind);
     let hover = app.mouse_pos.filter(|_| app.menu.is_none());
-    let button = |f: &mut Frame, rect: Rect, label: &str, enabled: bool, active: bool| {
+    // A rounded box reaching into the rows above and below (Kitty), else
+    // the cells' background
+    let button = |f: &mut Frame, app: &mut App, slot: u32, rect: Rect, label: &str, enabled: bool, active: bool| {
         let hovered = hover.is_some_and(|(c, r)| enabled && contains(rect, c, r));
         let mut style = Style::default().fg(if enabled { theme::text() } else { theme::border() });
-        if active {
-            style = style.bg(theme::selection()).fg(theme::text_strong());
+        let fill = if active {
+            style = style.fg(theme::text_strong());
+            Some(theme::get().selection)
         } else if hovered {
-            style = style.bg(theme::hover());
-        }
+            Some(theme::get().hover)
+        } else {
+            None
+        };
+        if let Some(c) = fill
+            && !underlay::button(app, slot, rect, c) {
+                style = style.bg(theme::rgb(c));
+            }
         f.render_widget(Paragraph::new(label.to_string()).style(style), rect);
     };
 
-    button(f, chunks[1], " \u{f060} ", !app.history_back.is_empty(), false);
-    button(f, chunks[3], " \u{f061} ", !app.history_forward.is_empty(), false);
-    button(f, chunks[5], " \u{f062} ", app.cwd.parent().is_some(), false);
+    button(f, app, 30, chunks[1], " \u{f060} ", !app.history_back.is_empty(), false);
+    button(f, app, 31, chunks[3], " \u{f061} ", !app.history_forward.is_empty(), false);
+    button(f, app, 32, chunks[5], " \u{f062} ", app.cwd.parent().is_some(), false);
     let view = format!(" {} \u{f0d7} ", menu::view_mode_icon(app.view_mode));
-    button(f, chunks[7], &view, true, menu_kind == Some(MenuKind::View));
-    button(f, chunks[11], " \u{f002} ", true, app.search.is_some());
-    button(f, chunks[13], " \u{f0dc} ", true, menu_kind == Some(MenuKind::Sort));
+    button(f, app, 33, chunks[7], &view, true, menu_kind == Some(MenuKind::View));
+    button(f, app, 34, chunks[11], " \u{f002} ", true, app.search.is_some());
+    button(f, app, 35, chunks[13], " \u{f0dc} ", true, menu_kind == Some(MenuKind::Sort));
 
     render_location(f, app, chunks[9]);
     // NOTE: menus/completions rendered in ui/mod.rs AFTER the grid (z-order)

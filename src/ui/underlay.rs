@@ -81,6 +81,25 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
     })
 }
 
+/// A toolbar button's hover/pressed box: as tall as a field and at least
+/// as wide, centered on `rect`, so a one-glyph button gets a square.
+pub fn button(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
+    let reach = Rect { y: rect.y.saturating_sub(1), height: rect.height + 2, ..rect };
+    if rect.y == 0 || app.menu_cover.iter().any(|m| m.intersects(reach)) {
+        return false;
+    }
+    let pad = field_pad(app);
+    let (cw, ch) = cell(app);
+    let h = rect.height as u32 * ch + 2 * pad;
+    let w = (rect.width as u32 * cw).max(h);
+    let cx = rect.x as u32 * cw + rect.width as u32 * cw / 2;
+    let radius = (ch as f32 * 0.3).max(3.0) as u32;
+    place(app, slot, Placed {
+        x: cx.saturating_sub(w / 2), y: rect.y as u32 * ch - pad,
+        w, h, radius, fill: color, border: None, z: Z_FIELD, alpha: 255,
+    })
+}
+
 /// A rounded panel exactly covering `rect` with a 1px outline the same
 /// distance from every edge (box-drawing borders sit mid-cell, so they're
 /// twice as far from the top/bottom edges as from the sides). Drawn under
