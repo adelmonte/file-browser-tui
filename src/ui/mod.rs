@@ -110,11 +110,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Overlays rendered AFTER the grid so they appear on top of everything
     if let Some(mut m) = app.menu.take() {
         let panel = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty;
-        let text = menu::render_menu(f, &mut m, panel);
-        app.post_text.extend(text);
+        menu::render_menu(f, &mut m, panel);
         let slots = menu::icon_slots(&m);
         let (rect, sub) = (m.rect, m.submenu_rect);
-        let lit = menu::highlight_rects(&m);
+        // Highlights sit this far in from the panel's sides
+        let inset = underlay::highlight_inset(app);
+        let lit = menu::highlight_rects(&m, underlay::cell(app), inset);
+        let seps = menu::separator_rects(&m);
         app.menu = Some(m);
         if panel {
             let (fill, line) = menu::panel();
@@ -122,11 +124,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if sub.width > 0 {
                 underlay::panel(app, 3, sub, fill, line);
             }
-            // Highlights sit the same distance from the panel edge on all sides
-            let inset = underlay::highlight_inset(app);
             for (slot, r) in [(4, lit.0), (5, lit.1)] {
                 if let Some(r) = r {
-                    underlay::highlight(app, slot, r, inset, inset, menu::highlight());
+                    underlay::highlight(app, slot, r, menu::highlight());
+                }
+            }
+            // Slots 20-34 for the menu's separators, 35-49 for its submenu's
+            for (base, list) in [(20, seps.0), (35, seps.1)] {
+                for (i, r) in list.into_iter().take(15).enumerate() {
+                    underlay::rule(app, base + i as u32, r, line);
                 }
             }
         }

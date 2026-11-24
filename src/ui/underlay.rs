@@ -56,7 +56,7 @@ pub fn field_pad(app: &App) -> u32 {
     (app.picker.font_size().height as f32 * 0.32).round() as u32
 }
 
-fn cell(app: &App) -> (u32, u32) {
+pub fn cell(app: &App) -> (u32, u32) {
     let font = app.picker.font_size();
     (font.width.max(1) as u32, font.height.max(1) as u32)
 }
@@ -124,19 +124,18 @@ pub fn highlight_inset(app: &App) -> u32 {
     (cell(app).1 as f32 * 0.15).round().max(2.0) as u32
 }
 
-/// A rounded selection highlight for `rect`, shrunk by `inset_x`/`inset_y`
-/// pixels, above a panel.
-pub fn highlight(app: &mut App, slot: u32, rect: Rect, inset_x: u32, inset_y: u32, color: (u8, u8, u8)) -> bool {
+/// A rounded selection highlight at pixel geometry (x, y, w, h), above a panel.
+pub fn highlight(app: &mut App, slot: u32, (x, y, w, h): (u32, u32, u32, u32), color: (u8, u8, u8)) -> bool {
+    let radius = (cell(app).1 as f32 * 0.25).max(3.0) as u32;
+    place(app, slot, Placed { x, y, w, h, radius, fill: color, border: None, z: Z_HIGHLIGHT, alpha: 255 })
+}
+
+/// A 1px horizontal line along the top of `rect`'s first row, above a panel.
+pub fn rule(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
     let (cw, ch) = cell(app);
-    let (w, h) = (rect.width as u32 * cw, rect.height as u32 * ch);
-    if w <= 2 * inset_x || h <= 2 * inset_y {
-        return false;
-    }
-    let radius = (ch as f32 * 0.25).max(3.0) as u32;
     place(app, slot, Placed {
-        x: rect.x as u32 * cw + inset_x, y: rect.y as u32 * ch + inset_y,
-        w: w - 2 * inset_x, h: h - 2 * inset_y,
-        radius, fill: color, border: None, z: Z_HIGHLIGHT, alpha: 255,
+        x: rect.x as u32 * cw, y: rect.y as u32 * ch, w: rect.width as u32 * cw, h: 1,
+        radius: 0, fill: color, border: None, z: Z_HIGHLIGHT, alpha: 255,
     })
 }
 
@@ -343,6 +342,9 @@ fn rounded_alpha(x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     let (px, py) = (x + 0.5, y + 0.5);
     if px < 0.0 || py < 0.0 || px > w || py > h {
         return 0.0;
+    }
+    if r < 1.0 {
+        return 1.0;
     }
     let dx = (r - px).max(px - (w - r)).max(0.0);
     let dy = (r - py).max(py - (h - r)).max(0.0);

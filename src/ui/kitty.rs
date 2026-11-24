@@ -41,16 +41,9 @@ pub fn free_images(out: &mut impl Write, ids: &[u32]) -> std::io::Result<()> {
 /// the escape sequence (cursor move, colors, text) and the columns used;
 /// the caller marks those cells as skipped so ratatui leaves them alone.
 /// Each block holds at most 7*rows columns, so long text is chunked.
-pub fn centered_text(
-    x: u16, y: u16, rows: u16, max_w: u16, text: &str,
-    fg: (u8, u8, u8), bg: Option<(u8, u8, u8)>,
-) -> (String, u16) {
-    centered_text_cut(x, y, rows, max_w, text, fg, bg, false)
-}
-
-/// `centered_text` for text cut off by something drawn right after it (a
-/// menu over the rest of a name): no spare column, since the edge it
-/// would keep clear is covered anyway, so one more letter shows.
+/// With `cut`, for text cut off by something drawn right after it (a menu
+/// over the rest of a name): no spare column, since the edge it would keep
+/// clear is covered anyway, so one more letter shows.
 #[allow(clippy::too_many_arguments)]
 pub fn centered_text_cut(
     x: u16, y: u16, rows: u16, max_w: u16, text: &str,
@@ -83,7 +76,7 @@ pub fn centered_text_cut(
     (out, used)
 }
 
-/// Columns `centered_text` needs for `chars` characters at `rows` tall
+/// Columns `centered_text_cut` (not cut) needs for `chars` characters at `rows` tall
 /// (each chunk keeps a spare column).
 pub fn centered_width(chars: usize, rows: u16) -> u16 {
     let rows = rows.clamp(1, 7);
@@ -201,12 +194,20 @@ mod tests {
     }
 
     #[test]
+    fn centered_width_matches_text() {
+        for n in 1..60 {
+            let text: String = "x".repeat(n);
+            assert_eq!(super::centered_width(n, 2), super::centered_text_cut(0, 0, 2, 500, &text, (0, 0, 0), None, false).1, "{n}");
+        }
+    }
+
+    #[test]
     fn centered_text_keeps_a_spare_column() {
-        let (s, used) = super::centered_text(0, 0, 2, 20, "A very long place name", (0, 0, 0), None);
+        let (s, used) = super::centered_text_cut(0, 0, 2, 20, "A very long place name", (0, 0, 0), None, false);
         assert_eq!(used, 20);
         assert!(s.contains("w=7:n=1:d=2:v=2;A very long p\x07"));
         assert!(s.contains("w=3:n=1:d=2:v=2;lace \x07"));
-        let (_, used) = super::centered_text(0, 0, 2, 20, "Pictures", (0, 0, 0), None);
+        let (_, used) = super::centered_text_cut(0, 0, 2, 20, "Pictures", (0, 0, 0), None, false);
         assert_eq!(used, 10);
     }
 }

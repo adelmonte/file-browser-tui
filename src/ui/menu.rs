@@ -1,6 +1,5 @@
 use ratatui::{
     Frame,
-    buffer::CellDiffOption,
     crossterm::event::KeyCode,
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -10,7 +9,7 @@ use ratatui::{
 use strum::IntoEnumIterator;
 
 use crate::app::{App, SortField, ViewMode};
-use crate::ui::{kitty, theme};
+use crate::ui::theme;
 
 fn menu_bg() -> Color { theme::panel() }
 fn menu_sel() -> Color { theme::rgb(theme::get().highlight) }
@@ -454,9 +453,15 @@ fn item_h(item: &MenuItem, tall: bool) -> u16 {
     if tall && !item.separator { 2 } else { 1 }
 }
 
-/// Rows above the first item: a border/padding row, none for tall menus
-/// (their items carry their own half-row margins).
-fn top(tall: bool) -> u16 {
+/// Rows above the first item: a border/padding row.
+fn top(_tall: bool) -> u16 {
+    1
+}
+
+/// Rows below the last item: a border row, none for tall menus. Their text
+/// sits on an item's first row, half a row above its middle, so the padding
+/// row on top comes out as half a row at each end (see render_tall).
+fn bottom(tall: bool) -> u16 {
     u16::from(!tall)
 }
 
@@ -474,19 +479,12 @@ pub fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
         .map(|i| {
             let arrow = if i.submenu.is_empty() { 0 } else { 2 };
-            if tall {
-                // Centered text: leading (icon) spaces, then the chunks
-                // kitty::centered_text lays out, each with a spare column
-                let label = i.label.trim_start();
-                let lead = (i.label.chars().count() - label.chars().count()) as u16;
-                lead + kitty::centered_width(label.chars().count(), item_h(i, tall)) + arrow
-            } else {
-                i.label.chars().count() as u16 + arrow
-            }
+            // A spare column keeps a tall menu's arrow off the label
+            i.label.chars().count() as u16 + arrow + u16::from(tall && arrow > 0)
         })
         .max()
         .unwrap_or(8) + 4;
-    let h = items.iter().map(|i| item_h(i, tall)).sum::<u16>() + 2 * top(tall);
+    let h = items.iter().map(|i| item_h(i, tall)).sum::<u16>() + top(tall) + bottom(tall);
     (w, h)
 }
 
@@ -523,6 +521,7 @@ pub fn submenu_rect(menu: &MenuState, term: Rect) -> Rect {
     }
     // First item level with the parent item
     let item_y = item_rows(parent, &menu.items, menu.tall).get(menu.selected).map_or(parent.y, |r| r.0);
+    let item_y = if menu.tall { item_y.saturating_sub(top(true)) } else { item_y };
     let y = item_y.min(term.height.saturating_sub(h));
     Rect { x, y, width: w, height: h }
 }
@@ -536,7 +535,9 @@ pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
     fn list(rect: Rect, items: &[MenuItem], tall: bool, selected: Option<usize>, out: &mut Vec<(String, Rect, bool)>) {
         for (i, (item, (y, h))) in items.iter().zip(item_rows(rect, items, tall)).enumerate() {
             let Some(icon) = item.icon.clone() else { continue; };
-            if y + h + top(tall) <= rect.bottom() && rect.width > 4 {
+            if y + h + bottom(tall) <= rect.bottom() && rect.width > 4 {
+                // On the text's row (tall items' text is on their first)
+                let h = if tall { 1 } else { h };
                 out.push((icon, Rect { x: rect.x + 2, y, width: 2, height: h }, selected == Some(i) && item.enabled));
             }
         }
@@ -549,13 +550,22 @@ pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
     out
 }
 
-/// Rows of the highlighted items in a tall menu: the parent's item (kept
-/// lit while its submenu is open) and the submenu's.
-pub fn highlight_rects(menu: &MenuState) -> (Option<Rect>, Option<Rect>) {
+/// A tall menu's item highlight, in pixels from the window's corner for
+/// cells `cw`×`ch`, `inset` from the panel's sides: centered on the text
+/// (half a row above the item's rows).
+pub type Highlight = (u32, u32, u32, u32);
+
+/// The highlighted items of a tall menu: the parent's item (kept lit while
+/// its submenu is open) and the submenu's.
+pub fn highlight_rects(menu: &MenuState, (cw, ch): (u32, u32), inset: u32) -> (Option<Highlight>, Option<Highlight>) {
     let at = |rect: Rect, items: &[MenuItem], i: usize| {
         items.get(i).filter(|it| it.selectable())?;
         let (y, h) = item_rows(rect, items, menu.tall)[i];
-        (y + h <= rect.bottom()).then_some(Rect { x: rect.x, y, width: rect.width, height: h })
+        if y + h > rect.bottom() || rect.width as u32 * cw <= 2 * inset {
+            return None;
+        }
+        let top_px = y as u32 * ch - ch / 2 + inset;
+        Some((rect.x as u32 * cw + inset, top_px, rect.width as u32 * cw - 2 * inset, (h as u32 * ch).saturating_sub(2 * inset)))
     };
     let main = at(menu.rect, &menu.items, menu.selected);
     let sub = if menu.submenu_open {
@@ -564,6 +574,23 @@ pub fn highlight_rects(menu: &MenuState) -> (Option<Rect>, Option<Rect>) {
         None
     };
     (main, sub)
+}
+
+/// A tall menu's separator lines, in cells: (x, y, width). Each is drawn at
+/// the top of its row, halfway between the text rows around it.
+pub fn separator_rects(menu: &MenuState) -> (Vec<Rect>, Vec<Rect>) {
+    let list = |rect: Rect, items: &[MenuItem]| -> Vec<Rect> {
+        items.iter().zip(item_rows(rect, items, true))
+            .filter(|(item, (y, h))| item.separator && y + h <= rect.bottom())
+            .map(|(_, (y, _))| Rect { x: rect.x + 1, y, width: rect.width.saturating_sub(2), height: 1 })
+            .collect()
+    };
+    let sub = if menu.submenu_open && let Some(parent) = menu.items.get(menu.selected) {
+        list(menu.submenu_rect, &parent.submenu)
+    } else {
+        Vec::new()
+    };
+    (list(menu.rect, &menu.items), sub)
 }
 
 /// Background colors behind menu icons: (normal, highlighted).
@@ -576,30 +603,28 @@ pub fn highlight() -> (u8, u8, u8) { theme::get().highlight }
 /// `tall`: Kitty draws the background, outline and highlight as images
 /// under the cells, and the text centered across two-row items. Returns
 /// kitty text to write after the frame, with the cells each covers.
-pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) -> Vec<(Rect, String)> {
+pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) {
     let term = f.area();
     menu.tall = tall;
     let rect = menu_rect(menu, term);
     menu.rect = rect;
-    let mut out = Vec::new();
     let parent_sel = if menu.submenu_open && !tall { None } else { Some(menu.selected) };
-    render_item_list(f, rect, &menu.items, parent_sel, tall, &mut out);
+    render_item_list(f, rect, &menu.items, parent_sel, tall);
 
     if menu.submenu_open {
         let sub_rect = submenu_rect(menu, term);
         menu.submenu_rect = sub_rect;
         let items = menu.items[menu.selected].submenu.clone();
-        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected), tall, &mut out);
+        render_item_list(f, sub_rect, &items, Some(menu.submenu_selected), tall);
     } else {
         menu.submenu_rect = Rect::default();
     }
-    out
 }
 
-fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, tall: bool, out: &mut Vec<(Rect, String)>) {
+fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, tall: bool) {
     f.render_widget(Clear, rect);
     if tall {
-        render_tall(f, rect, items, selected, out);
+        render_tall(f, rect, items, selected);
         return;
     }
 
@@ -630,18 +655,15 @@ fn render_item_list(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Opt
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
-fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>, out: &mut Vec<(Rect, String)>) {
+fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<usize>) {
+    // Text on each item's first row: plain cells, no background, so the
+    // panel underneath shows through. Separators are drawn as images
     let (text_x, right) = (rect.x + 2, rect.right().saturating_sub(2));
     for (i, (item, (y, h))) in items.iter().zip(item_rows(rect, items, true)).enumerate() {
         if y + h > rect.bottom() {
             break;
         }
         if item.separator {
-            let w = rect.width.saturating_sub(2);
-            f.render_widget(
-                Paragraph::new("\u{2500}".repeat(w as usize)).style(Style::default().fg(theme::border())),
-                Rect { x: rect.x + 1, y, width: w, height: 1 },
-            );
             continue;
         }
         let fg = if !item.enabled {
@@ -651,24 +673,12 @@ fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<u
         } else {
             theme::get().text
         };
+        let style = Style::default().fg(theme::rgb(fg));
         let arrow_w = if item.submenu.is_empty() { 0 } else { 2 };
-        let mut emit = |x: u16, w: u16, text: &str| {
-            if w == 0 { return; }
-            let (seq, used) = kitty::centered_text(x, y, h, w, text, fg, None);
-            let buf = f.buffer_mut();
-            for cy in y..y + h {
-                for cx in x..x + used {
-                    buf[(cx, cy)].set_symbol(" ").set_diff_option(CellDiffOption::Skip);
-                }
-            }
-            out.push((Rect { x, y, width: used, height: h }, seq));
-        };
-        // Icon items keep their leading spaces free for the image
-        let label = item.label.trim_start();
-        let lead = (item.label.chars().count() - label.chars().count()) as u16;
-        emit(text_x + lead, right.saturating_sub(text_x + lead + arrow_w), label);
+        let w = right.saturating_sub(text_x + arrow_w);
+        f.render_widget(Paragraph::new(Span::styled(item.label.clone(), style)), Rect { x: text_x, y, width: w, height: 1 });
         if arrow_w > 0 {
-            emit(right - arrow_w, arrow_w, "\u{f0da}");
+            f.render_widget(Paragraph::new(Span::styled("\u{f0da}", style)), Rect { x: right - arrow_w, y, width: 1, height: 1 });
         }
     }
 }
@@ -831,9 +841,9 @@ mod tests {
             MenuItem::new("Copy", MenuAction::None),
         ];
         let rect = Rect { x: 10, y: 5, width: 12, height: menu_size(&items, true).1 };
-        assert_eq!(rect.height, 5);
-        let hits: Vec<_> = (5..10).map(|r| item_at(rect, &items, true, 12, r)).collect();
-        assert_eq!(hits, vec![Some(0), Some(0), Some(1), Some(2), Some(2)]);
+        assert_eq!(rect.height, 6);
+        let hits: Vec<_> = (5..11).map(|r| item_at(rect, &items, true, 12, r)).collect();
+        assert_eq!(hits, vec![None, Some(0), Some(0), Some(1), Some(2), Some(2)]);
         assert_eq!(item_at(rect, &items, false, 12, 5), None);
         assert_eq!(item_at(rect, &items, false, 12, 6), Some(0));
     }
@@ -843,15 +853,8 @@ mod tests {
         let label = "Set as Wallpaper (swaybg)";
         let items = vec![MenuItem::new(label, MenuAction::None)];
         let (w, _) = menu_size(&items, true);
-        let rect = Rect { x: 0, y: 0, width: w, height: 2 };
-        let avail = rect.right() - 2 - (rect.x + 2);
-        let (_, used) = kitty::centered_text(2, 0, 2, avail, label, (0, 0, 0), None);
-        let (_, all) = kitty::centered_text(2, 0, 2, 200, label, (0, 0, 0), None);
-        assert_eq!(used, all);
-        assert_eq!(kitty::centered_width(label.chars().count(), 2), all);
-        for n in 1..60 {
-            let text: String = "x".repeat(n);
-            assert_eq!(kitty::centered_width(n, 2), kitty::centered_text(0, 0, 2, 500, &text, (0, 0, 0), None).1, "{n}");
-        }
+        assert_eq!(w - 4, label.chars().count() as u16);
+        let sub = vec![MenuItem::sub(label, vec![MenuItem::new("x", MenuAction::None)])];
+        assert_eq!(menu_size(&sub, true).0, w + 3);
     }
 }
