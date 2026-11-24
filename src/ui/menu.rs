@@ -134,6 +134,9 @@ pub struct MenuState {
     pub items: Vec<MenuItem>,
     pub pos: (u16, u16),
     pub selected: usize,
+    /// Whether `selected` shows. Menus open with nothing lit, like a
+    /// desktop's, until the pointer is over an item or a key moves into it.
+    pub lit: bool,
     pub submenu_open: bool,
     pub submenu_selected: usize,
     /// Actual rendered rects, used for hit-testing and occlusion.
@@ -152,6 +155,7 @@ impl MenuState {
             items,
             pos,
             selected,
+            lit: false,
             submenu_open: false,
             submenu_selected: 0,
             rect: Rect::default(),
@@ -543,7 +547,7 @@ pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
         }
     }
     let mut out = Vec::new();
-    list(menu.rect, &menu.items, menu.tall, (!menu.submenu_open).then_some(menu.selected), &mut out);
+    list(menu.rect, &menu.items, menu.tall, (!menu.submenu_open && menu.lit).then_some(menu.selected), &mut out);
     if menu.submenu_open && let Some(parent) = menu.items.get(menu.selected) {
         list(menu.submenu_rect, &parent.submenu, menu.tall, Some(menu.submenu_selected), &mut out);
     }
@@ -567,7 +571,7 @@ pub fn highlight_rects(menu: &MenuState, (cw, ch): (u32, u32), inset: u32) -> (O
         let top_px = y as u32 * ch - ch / 2 + inset;
         Some((rect.x as u32 * cw + inset, top_px, rect.width as u32 * cw - 2 * inset, (h as u32 * ch).saturating_sub(2 * inset)))
     };
-    let main = at(menu.rect, &menu.items, menu.selected);
+    let main = if menu.lit { at(menu.rect, &menu.items, menu.selected) } else { None };
     let sub = if menu.submenu_open {
         at(menu.submenu_rect, &menu.items[menu.selected].submenu, menu.submenu_selected)
     } else {
@@ -608,7 +612,7 @@ pub fn render_menu(f: &mut Frame, menu: &mut MenuState, tall: bool) {
     menu.tall = tall;
     let rect = menu_rect(menu, term);
     menu.rect = rect;
-    let parent_sel = if menu.submenu_open && !tall { None } else { Some(menu.selected) };
+    let parent_sel = if (menu.submenu_open && !tall) || !menu.lit { None } else { Some(menu.selected) };
     render_item_list(f, rect, &menu.items, parent_sel, tall);
 
     if menu.submenu_open {
@@ -727,6 +731,22 @@ pub fn handle_menu_key(menu: &mut MenuState, code: KeyCode) -> MenuOutcome {
         return MenuOutcome::Consumed;
     }
 
+    if !menu.lit {
+        // The first move lights an end of the menu; nothing to act on before
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => return MenuOutcome::Close,
+            KeyCode::Down | KeyCode::Char('j') => menu.lit = true,
+            KeyCode::Up | KeyCode::Char('k') => {
+                menu.lit = true;
+                if let Some(last) = menu.items.iter().rposition(|i| i.selectable()) {
+                    menu.selected = last;
+                }
+            }
+            _ => {}
+        }
+        return MenuOutcome::Consumed;
+    }
+
     match code {
         KeyCode::Esc | KeyCode::Char('q') => return MenuOutcome::Close,
         KeyCode::Up | KeyCode::Char('k') => {
@@ -792,6 +812,7 @@ pub fn handle_menu_click(menu: &mut MenuState, col: u16, row: u16) -> MenuOutcom
         }
         if !item.submenu.is_empty() {
             menu.selected = idx;
+            menu.lit = true;
             open_submenu(menu);
             return MenuOutcome::Consumed;
         }
@@ -817,8 +838,15 @@ pub fn handle_menu_hover(menu: &mut MenuState, col: u16, row: u16) {
     }
     // Over the parent: like Qt, a submenu item opens its submenu and any
     // other item closes it
-    let Some(idx) = item_at(menu.rect, &menu.items, menu.tall, col, row) else { return; };
-    if !menu.items[idx].selectable() || (menu.submenu_open && idx == menu.selected) {
+    let Some(idx) = item_at(menu.rect, &menu.items, menu.tall, col, row).filter(|&i| menu.items[i].selectable()) else {
+        // Off the items (or on a separator): unlit, unless a submenu hangs off it
+        if !menu.submenu_open {
+            menu.lit = false;
+        }
+        return;
+    };
+    menu.lit = true;
+    if menu.submenu_open && idx == menu.selected {
         return;
     }
     menu.selected = idx;
