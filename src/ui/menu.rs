@@ -483,8 +483,7 @@ pub fn menu_size(items: &[MenuItem], tall: bool) -> (u16, u16) {
     let w = items.iter()
         .map(|i| {
             let arrow = if i.submenu.is_empty() { 0 } else { 2 };
-            // A spare column keeps a tall menu's arrow off the label
-            i.label.chars().count() as u16 + arrow + u16::from(tall && arrow > 0)
+            i.label.chars().count() as u16 + arrow
         })
         .max()
         .unwrap_or(8) + 4;
@@ -555,21 +554,22 @@ pub fn icon_slots(menu: &MenuState) -> Vec<(String, Rect, bool)> {
 }
 
 /// A tall menu's item highlight, in pixels from the window's corner for
-/// cells `cw`×`ch`, `inset` from the panel's sides: centered on the text
-/// (half a row above the item's rows).
+/// cells `cw`×`ch`: the item's two rows, moved up half a row to center on
+/// its text. That leaves half a row above the first, so it stands as far in
+/// from the panel's sides too.
 pub type Highlight = (u32, u32, u32, u32);
 
 /// The highlighted items of a tall menu: the parent's item (kept lit while
 /// its submenu is open) and the submenu's.
-pub fn highlight_rects(menu: &MenuState, (cw, ch): (u32, u32), inset: u32) -> (Option<Highlight>, Option<Highlight>) {
+pub fn highlight_rects(menu: &MenuState, (cw, ch): (u32, u32)) -> (Option<Highlight>, Option<Highlight>) {
     let at = |rect: Rect, items: &[MenuItem], i: usize| {
         items.get(i).filter(|it| it.selectable())?;
         let (y, h) = item_rows(rect, items, menu.tall)[i];
-        if y + h > rect.bottom() || rect.width as u32 * cw <= 2 * inset {
+        let side = ch / 2;
+        if y + h > rect.bottom() || rect.width as u32 * cw <= 2 * side {
             return None;
         }
-        let top_px = y as u32 * ch - ch / 2 + inset;
-        Some((rect.x as u32 * cw + inset, top_px, rect.width as u32 * cw - 2 * inset, (h as u32 * ch).saturating_sub(2 * inset)))
+        Some((rect.x as u32 * cw + side, y as u32 * ch - ch / 2, rect.width as u32 * cw - 2 * side, h as u32 * ch))
     };
     let main = if menu.lit { at(menu.rect, &menu.items, menu.selected) } else { None };
     let sub = if menu.submenu_open {
@@ -682,7 +682,8 @@ fn render_tall(f: &mut Frame, rect: Rect, items: &[MenuItem], selected: Option<u
         let w = right.saturating_sub(text_x + arrow_w);
         f.render_widget(Paragraph::new(Span::styled(item.label.clone(), style)), Rect { x: text_x, y, width: w, height: 1 });
         if arrow_w > 0 {
-            f.render_widget(Paragraph::new(Span::styled("\u{f0da}", style)), Rect { x: right - arrow_w, y, width: 1, height: 1 });
+            // As far in from the highlight's right edge as the text is from its left
+            f.render_widget(Paragraph::new(Span::styled("\u{f0da}", style)), Rect { x: right - 1, y, width: 1, height: 1 });
         }
     }
 }
@@ -883,6 +884,6 @@ mod tests {
         let (w, _) = menu_size(&items, true);
         assert_eq!(w - 4, label.chars().count() as u16);
         let sub = vec![MenuItem::sub(label, vec![MenuItem::new("x", MenuAction::None)])];
-        assert_eq!(menu_size(&sub, true).0, w + 3);
+        assert_eq!(menu_size(&sub, true).0, w + 2);
     }
 }

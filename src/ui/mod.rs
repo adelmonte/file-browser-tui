@@ -113,9 +113,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         menu::render_menu(f, &mut m, panel);
         let slots = menu::icon_slots(&m);
         let (rect, sub) = (m.rect, m.submenu_rect);
-        // Highlights sit this far in from the panel's sides
-        let inset = underlay::highlight_inset(app);
-        let lit = menu::highlight_rects(&m, underlay::cell(app), inset);
+        let lit = menu::highlight_rects(&m, underlay::cell(app));
         let seps = menu::separator_rects(&m);
         app.menu = Some(m);
         if panel {

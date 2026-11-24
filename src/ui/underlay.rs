@@ -119,11 +119,6 @@ pub fn panel(app: &mut App, slot: u32, rect: Rect, fill: (u8, u8, u8), border: (
     })
 }
 
-/// Margin between a menu panel's edge and an item highlight, on every side.
-pub fn highlight_inset(app: &App) -> u32 {
-    (cell(app).1 as f32 * 0.15).round().max(2.0) as u32
-}
-
 /// A rounded selection highlight at pixel geometry (x, y, w, h), above a panel.
 pub fn highlight(app: &mut App, slot: u32, (x, y, w, h): (u32, u32, u32, u32), color: (u8, u8, u8)) -> bool {
     let radius = (cell(app).1 as f32 * 0.25).max(3.0) as u32;
