@@ -303,8 +303,12 @@ mod tests {
         KeyEvent::new(code, m)
     }
 
+    /// Tests run in parallel; the kill ring is shared, so editing tests take turns
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     #[test]
     fn emacs_keys() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (ctrl, alt, none) = (KeyModifiers::CONTROL, KeyModifiers::ALT, KeyModifiers::NONE);
         let mut t = "/home/user/Documents".to_string();
         let mut c = t.len();
@@ -326,6 +330,7 @@ mod tests {
 
     #[test]
     fn undo_and_redo() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (ctrl, none) = (KeyModifiers::CONTROL, KeyModifiers::NONE);
         let mut t = "/home/".to_string();
         let mut c = t.len();
