@@ -1,4 +1,4 @@
-//! Emacs/readline-style editing for one-line text fields (path bar, rename,
+//! Readline-style editing for one-line text fields (path bar, rename,
 //! search): C-a/C-e, C-b/C-f, M-b/M-f, C-u/C-k, C-w, M-d, C-d, C-y, C-t,
 //! plus Ctrl+Z / Ctrl+Shift+Z to undo and redo.
 
@@ -307,7 +307,7 @@ mod tests {
     static SERIAL: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn emacs_keys() {
+    fn readline_keys() {
         let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (ctrl, alt, none) = (KeyModifiers::CONTROL, KeyModifiers::ALT, KeyModifiers::NONE);
         let mut t = "/home/user/Documents".to_string();
