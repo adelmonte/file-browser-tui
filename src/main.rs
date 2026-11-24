@@ -31,7 +31,7 @@ use ratatui::crossterm::event::{
     self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event, KeyEventKind,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use ratatui::crossterm::{execute, terminal::{SetTitle, supports_keyboard_enhancement}};
+use ratatui::crossterm::{cursor::SetCursorStyle, execute, terminal::{SetTitle, supports_keyboard_enhancement}};
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use app::App;
@@ -216,7 +216,7 @@ fn main() -> anyhow::Result<()> {
     if kbd_enhanced {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
-    execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange)?;
+    execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange, SetCursorStyle::DefaultUserShape)?;
     ratatui::restore();
 
     // Persist config and per-dir view state
@@ -427,6 +427,7 @@ fn run(
         }
         {
             let mut out = std::io::stdout().lock();
+            let _ = out.write_all(lineedit::take_caret().as_bytes());
             let _ = out.write_all(b"\x1b[?2026l");
             let _ = out.flush();
         }

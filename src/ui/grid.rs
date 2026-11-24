@@ -159,9 +159,7 @@ fn draw_rename_box(buf: &mut Buffer, app: &App, area: Rect, cell_x: u16, label_y
     let right = (cell_x + cell_w + 1).min(area.right());
     let width = right - x;
     let text_w = width.saturating_sub(2) as usize;
-    let mut shown = rename.input.clone();
-    shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
-    let lines = wrap_label(&shown, text_w, 64);
+    let lines = wrap_label(&rename.input, text_w, 64);
     let height = (lines.len() as u16 + 1).min(area.height);
     // Kept on screen: pushed up if it would run off the bottom
     let y = label_y.min(area.bottom() as i32 - height as i32).max(area.y as i32) as u16;
@@ -177,6 +175,69 @@ fn draw_rename_box(buf: &mut Buffer, app: &App, area: Rect, cell_x: u16, label_y
         .render(rect, buf);
     let inner = Rect { x: x + 1, y, width: width.saturating_sub(2), height: height.saturating_sub(1) };
     Paragraph::new(lines_to_text_centered(&lines, text_w)).style(style).render(inner, buf);
+    let (row, col) = caret_in_lines(&lines, rename.input[..rename.cursor_pos.min(rename.input.len())].chars().count());
+    if let Some(line) = lines.get(row) {
+        use unicode_width::UnicodeWidthStr;
+        let pad = text_w.saturating_sub(line.width()) / 2;
+        let before: String = line.chars().take(col).collect();
+        let y = y + row as u16;
+        if y < inner.bottom() {
+            crate::lineedit::place_caret(inner.x + (pad + before.width()) as u16, y);
+        }
+    }
+}
+
+/// The name being edited in a list row: a field over `rect` (one row),
+/// scrolled sideways to keep the cursor in view.
+pub fn draw_rename_line(buf: &mut Buffer, app: &mut App, rect: Rect) {
+    use unicode_width::UnicodeWidthChar;
+    let Some(rename) = &app.rename_state else { return; };
+    if rect.width < 3 { return; }
+    let input = rename.input.clone();
+    let cur = input[..rename.cursor_pos.min(input.len())].chars().count();
+    let field = if rename.invalid { theme::get().error } else { theme::get().input };
+    let style = if crate::ui::underlay::field(app, 12, rect, field) {
+        Style::default().fg(theme::text_strong())
+    } else {
+        Style::default().bg(rgb(field)).fg(theme::text_strong())
+    };
+    let text_w = rect.width as usize - 2;
+    let chars: Vec<char> = input.chars().collect();
+    let w = |cs: &[char]| cs.iter().map(|c| c.width().unwrap_or(1)).sum::<usize>();
+    let mut start = 0;
+    while start < cur && w(&chars[start..cur]) >= text_w {
+        start += 1;
+    }
+    let mut visible = String::new();
+    let mut used = 0;
+    for &c in &chars[start..] {
+        let cw = c.width().unwrap_or(1);
+        if used + cw > text_w { break; }
+        visible.push(c);
+        used += cw;
+    }
+    for x in rect.x..rect.right() {
+        if let Some(cell) = buf.cell_mut((x, rect.y)) {
+            cell.reset();
+            cell.set_style(style);
+        }
+    }
+    buf.set_stringn(rect.x + 1, rect.y, visible, text_w, style);
+    crate::lineedit::place_caret(rect.x + 1 + w(&chars[start..cur]) as u16, rect.y);
+}
+
+/// The line and column (in chars) of the `cursor`-th char of wrapped text,
+/// past the end of the last line when it's at the very end.
+fn caret_in_lines(lines: &[String], cursor: usize) -> (usize, usize) {
+    let mut left = cursor;
+    for (i, line) in lines.iter().enumerate() {
+        let n = line.chars().count();
+        if left < n || i + 1 == lines.len() {
+            return (i, left.min(n));
+        }
+        left -= n;
+    }
+    (0, 0)
 }
 
 /// A group's header in Icons view: its label, then a thin line under it
@@ -298,12 +359,10 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
     // Inline rename
     if let Some(ref rename) = app.rename_state
         && rename.item_idx == entry_idx {
-            // Thin bar marks the cursor inside the wrapped name
+            // The field itself (and its cursor) is drawn over this
             let bg = if rename.invalid { theme::get().error } else { theme::get().selection };
             let style = Style::default().bg(rgb(bg)).fg(theme::text_strong()).add_modifier(Modifier::BOLD);
-            let mut shown = rename.input.clone();
-            shown.insert(rename.cursor_pos.min(shown.len()), crate::lineedit::bar_cursor());
-            let lines = wrap_label(&shown, label_w, label_rows);
+            let lines = wrap_label(&rename.input, label_w, label_rows);
             Paragraph::new(lines_to_text_centered(&lines, cell_w as usize))
                 .style(style)
                 .render(label_rect, buf);
@@ -500,3 +559,17 @@ fn file_placeholder_icon(ext: &str) -> &'static str {
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caret_between_wrapped_lines() {
+        let lines = vec!["Andro".to_string(), "id".to_string()];
+        assert_eq!(caret_in_lines(&lines, 3), (0, 3));
+        assert_eq!(caret_in_lines(&lines, 5), (1, 0));
+        assert_eq!(caret_in_lines(&lines, 7), (1, 2));
+        assert_eq!(caret_in_lines(&[String::new()], 0), (0, 0));
+    }
+}

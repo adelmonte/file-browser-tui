@@ -150,6 +150,16 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         );
     }
 
+    if let Some(i) = app.rename_state.as_ref().map(|r| r.item_idx)
+        && let Some(row) = lines.iter().position(|l| *l == DRow::Entry(i)) {
+            let x = expander_x(area, app.listing.entries[i].depth) + 4;
+            let right = cols[0].right();
+            if x + 3 < right {
+                let rect = Rect { x, y: area.y + 1 + row as u16, width: right - x, height: 1 };
+                crate::ui::grid::draw_rename_line(f.buffer_mut(), app, rect);
+            }
+        }
+
     // Real icons/thumbnails, one row tall, after each row's expander
     for (row, line) in lines.iter().enumerate() {
         let DRow::Entry(i) = *line else { continue; };

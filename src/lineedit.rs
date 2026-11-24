@@ -263,6 +263,26 @@ pub fn bar_cursor() -> char {
     if cursor_visible() { '\u{258f}' } else { '\u{2800}' }
 }
 
+/// Where the terminal's own cursor goes this frame: a bar between two
+/// cells, so a cursor inside a word doesn't push it apart. Set while
+/// drawing; the frame shows it at the end (blinking like `bar_cursor`).
+static CARET: Mutex<Option<(u16, u16)>> = Mutex::new(None);
+
+pub fn place_caret(x: u16, y: u16) {
+    if let Ok(mut c) = CARET.lock() {
+        *c = Some((x, y));
+    }
+}
+
+/// The escapes ending a frame: the bar cursor at the placed spot, or the
+/// cursor hidden.
+pub fn take_caret() -> String {
+    match CARET.lock().ok().and_then(|mut c| c.take()) {
+        Some((x, y)) if cursor_visible() => format!("\x1b[{};{}H\x1b[6 q\x1b[?25h", y + 1, x + 1),
+        _ => "\x1b[?25l".to_string(),
+    }
+}
+
 /// `text` with the blinking bar cursor at byte offset `cursor`, the same
 /// cursor as every other text field.
 pub fn spans(text: &str, cursor: usize, style: Style) -> Vec<Span<'static>> {

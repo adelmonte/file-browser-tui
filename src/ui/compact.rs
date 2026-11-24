@@ -63,6 +63,10 @@ pub fn render_compact(f: &mut Frame, app: &mut App, area: Rect) {
                 Paragraph::new(text).style(style),
                 Rect { x: cell_x + 1, y: cell_y, width: inner_w as u16, height: 1 },
             );
+            if app.rename_state.as_ref().is_some_and(|r| r.item_idx == entry_idx) {
+                let rect = Rect { x: cell_x + 3, y: cell_y, width: inner_w as u16 - 2, height: 1 };
+                crate::ui::grid::draw_rename_line(f.buffer_mut(), app, rect);
+            }
         }
     }
 }
