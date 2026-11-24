@@ -152,30 +152,43 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
 /// The name being edited, whole: a field under the icon that grows down
 /// over the items below as the name needs more lines, outlined so it's
-/// plainly an edit and not just a selection.
-fn draw_rename_box(buf: &mut Buffer, app: &App, area: Rect, cell_x: u16, label_y: i32, cell_w: u16) {
+/// plainly an edit and not just a selection. In Kitty a rounded box
+/// reaching a little above and below its rows, like the path bar.
+fn draw_rename_box(buf: &mut Buffer, app: &mut App, area: Rect, cell_x: u16, label_y: i32, cell_w: u16) {
     let Some(rename) = &app.rename_state else { return; };
+    let (input, cursor_pos, invalid) = (rename.input.clone(), rename.cursor_pos, rename.invalid);
     let x = cell_x.saturating_sub(1).max(area.x);
     let right = (cell_x + cell_w + 1).min(area.right());
     let width = right - x;
     let text_w = width.saturating_sub(2) as usize;
-    let lines = wrap_label(&rename.input, text_w, 64);
-    let height = (lines.len() as u16 + 1).min(area.height);
+    let lines = wrap_label(&input, text_w, 64);
+    let fill = if invalid { theme::get().error } else { theme::get().input };
+    let text_rows = (lines.len() as u16).min(area.height);
     // Kept on screen: pushed up if it would run off the bottom
-    let y = label_y.min(area.bottom() as i32 - height as i32).max(area.y as i32) as u16;
+    let fit = |h: u16| label_y.min(area.bottom() as i32 - h as i32).max(area.y as i32) as u16;
+    let y = fit(text_rows);
+    let boxed = crate::ui::underlay::outlined_field(app, 12, Rect { x, y, width, height: text_rows }, fill, Some(theme::get().accent));
+    let (y, height) = if boxed { (y, text_rows) } else { let h = (text_rows + 1).min(area.height); (fit(h), h) };
     let rect = Rect { x, y, width, height };
-    let field = if rename.invalid { theme::rgb(theme::get().error) } else { theme::input() };
-    let style = Style::default().bg(field).fg(theme::text_strong());
+    let style = if boxed {
+        Style::default().fg(theme::text_strong())
+    } else {
+        Style::default().bg(rgb(fill)).fg(theme::text_strong())
+    };
     Clear.render(rect, buf);
-    Block::default()
-        .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme::accent()).bg(field))
-        .style(style)
-        .render(rect, buf);
-    let inner = Rect { x: x + 1, y, width: width.saturating_sub(2), height: height.saturating_sub(1) };
+    if boxed {
+        Block::default().style(style).render(rect, buf);
+    } else {
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::accent()).bg(rgb(fill)))
+            .style(style)
+            .render(rect, buf);
+    }
+    let inner = Rect { x: x + 1, y, width: width.saturating_sub(2), height: text_rows };
     Paragraph::new(lines_to_text_centered(&lines, text_w)).style(style).render(inner, buf);
-    let (row, col) = caret_in_lines(&lines, rename.input[..rename.cursor_pos.min(rename.input.len())].chars().count());
+    let (row, col) = caret_in_lines(&lines, input[..cursor_pos.min(input.len())].chars().count());
     if let Some(line) = lines.get(row) {
         use unicode_width::UnicodeWidthStr;
         let pad = text_w.saturating_sub(line.width()) / 2;

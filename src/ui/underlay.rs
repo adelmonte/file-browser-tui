@@ -65,6 +65,11 @@ fn cell(app: &App) -> (u32, u32) {
 /// `pad` pixels into the rows above and below. `slot` identifies the field.
 /// Returns false when it can't (not Kitty): fill the cells instead.
 pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool {
+    outlined_field(app, slot, rect, color, None)
+}
+
+/// `field`, with a 1px outline when `border` is given.
+pub fn outlined_field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8), border: Option<(u8, u8, u8)>) -> bool {
     // A menu over it: plain cells this frame, which the menu covers. The
     // box would show through the menu (its panel is drawn further down)
     let reach = Rect { y: rect.y.saturating_sub(1), height: rect.height + 2, ..rect };
@@ -77,7 +82,7 @@ pub fn field(app: &mut App, slot: u32, rect: Rect, color: (u8, u8, u8)) -> bool 
     place(app, slot, Placed {
         x: rect.x as u32 * cw, y: rect.y as u32 * ch - pad,
         w: rect.width as u32 * cw, h: rect.height as u32 * ch + 2 * pad,
-        radius, fill: color, border: None, z: Z_FIELD, alpha: 255,
+        radius, fill: color, border, z: Z_FIELD, alpha: 255,
     })
 }
 
