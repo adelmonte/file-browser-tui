@@ -94,13 +94,12 @@ pub fn layout() -> crate::config::LayoutConfig {
 /// Grid geometry for a zoom level: (cell_w, cell_h, icon_rows, img_w).
 /// The image is square in pixels, so its width in columns follows the font's
 /// aspect; the cell adds a small margin for labels so neighbours sit close
-/// together, Dolphin-style. Two label rows sit below the icon; the gap
-/// above it is a margin inside the image box (see icons::GRID_FIT).
+/// together, Dolphin-style. Two label rows sit below the icon.
 pub fn icon_dims(level: usize, font: ratatui_image::FontSize) -> (u16, u16, u16, u16) {
     let rows = ICON_LEVELS[level.min(ICON_LEVELS.len() - 1)];
     let (fw, fh) = (font.width.max(1) as f32, font.height.max(1) as f32);
-    // Only as wide as the image actually drawn (GRID_FIT shrinks it to
-    // leave a gap above), or every cell carries invisible width
+    // Only as wide as the image actually drawn (see icons::GRID_FIT), or
+    // every cell carries invisible width
     let img_w = ((rows as f32 * fh / fw * crate::icons::GRID_FIT.max_h).round() as u16).max(2);
     let layout = layout();
     let cell_w = (img_w + layout.icon_spacing).max(8);

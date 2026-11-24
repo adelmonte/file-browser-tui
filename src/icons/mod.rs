@@ -64,8 +64,12 @@ pub enum VAlign {
     Bottom,
 }
 
-/// Grid items: a small margin above, resting on the label.
-pub const GRID_FIT: Fit = Fit { max_h: 0.88, max_rows: 0.0, valign: VAlign::Bottom };
+/// Grid items: the full box, resting on the label (icon art carries its own margin).
+pub const GRID_FIT: Fit = Fit { max_h: 1.0, max_rows: 0.0, valign: VAlign::Bottom };
+
+/// Grid thumbnails: centered, so a wide photo doesn't leave all its slack
+/// above, with a margin so a tall one doesn't touch the label above it.
+pub const THUMB_FIT: Fit = Fit { max_h: 0.9, valign: VAlign::Center, ..GRID_FIT };
 
 /// Fit `img` into a box of `cols`×`rows` terminal cells and pad it to exactly
 /// that box, centered horizontally and resting on the bottom edge (right
