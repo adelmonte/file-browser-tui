@@ -392,7 +392,7 @@ fn draw_cell(buf: &mut Buffer, app: &mut App, entry_idx: usize, cell_rect: Rect,
         Style::default()
     };
 
-    let label_fg = if app.is_cut(&entry.path) { label_fg.add_modifier(Modifier::DIM) } else { label_fg };
+    let label_fg = if app.is_faded(&entry.path) { label_fg.add_modifier(Modifier::DIM) } else { label_fg };
     let label_lines = wrap_label(&entry.name, label_w, label_rows);
     Paragraph::new(lines_to_text_styled_centered(&label_lines, label_fg, cell_w as usize)).render(label_rect, buf);
 }
@@ -412,7 +412,7 @@ pub(crate) fn render_cell_image(
         && !app.thumb_cache.failed(&entry_path);
 
     let (cols, rows) = (icon_rect.width, icon_rect.height);
-    let dim = app.is_cut(&entry_path);
+    let dim = app.is_faded(&entry_path);
     // Kitty blends images over the cells under them, so the highlight shows
     // through as it is: one image per item. Baked in, every hover was a new
     // image to send (a big one for a photo), and moving across a folder of

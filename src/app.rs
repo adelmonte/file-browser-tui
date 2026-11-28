@@ -884,6 +884,11 @@ impl App {
         self.clipboard.as_ref().is_some_and(|c| c.op == crate::events::ClipOp::Cut && c.paths.iter().any(|p| p == path))
     }
 
+    /// Drawn faded: cut, or hidden (shown with Show hidden on), like Dolphin.
+    pub fn is_faded(&self, path: &std::path::Path) -> bool {
+        path.file_name().is_some_and(|n| n.as_encoded_bytes().starts_with(b".")) || self.is_cut(path)
+    }
+
     /// Go to `path`'s folder with it selected (search results' Open Path).
     pub fn reveal(&mut self, path: &std::path::Path) {
         let Some(parent) = path.parent() else { return; };

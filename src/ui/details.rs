@@ -106,7 +106,7 @@ pub fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default()
             };
-            let row_style = if app.is_cut(&e.path) { row_style.add_modifier(Modifier::DIM) } else { row_style };
+            let row_style = if app.is_faded(&e.path) { row_style.add_modifier(Modifier::DIM) } else { row_style };
             let muted = if is_selected { Style::default() } else { Style::default().fg(theme::muted()) };
 
             Row::new(vec![
