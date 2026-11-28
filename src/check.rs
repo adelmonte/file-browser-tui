@@ -18,8 +18,7 @@ pub fn has_command(name: &str) -> bool {
 /// do (the group name).
 const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("rsvg-convert", "drawing the icon theme's SVG icons (librsvg)", None),
-    ("wl-paste", "clipboard on Wayland (with wl-copy)", Some("clipboard")),
-    ("xclip", "clipboard on X11", Some("clipboard")),
+    ("wl-paste", "the clipboard (wl-clipboard)", None),
     ("fd", "fast file name search", None),
     ("rg", "search inside files", None),
     ("ffmpeg", "video thumbnails and audio album art", None),
@@ -62,9 +61,9 @@ pub fn run() -> i32 {
     } else {
         line(true, "udisksctl", "mounting, unlocking and safely removing drives (udisks2)");
     }
-    if crate::clipboard::backend().is_none() {
+    if !crate::clipboard::available() {
         missing_required = true;
-        println!("  ! no usable clipboard tool for this session (Wayland: wl-clipboard, X11: xclip)");
+        println!("  ! no usable clipboard tool for this session (needs wl-clipboard)");
     }
 
     println!("\nIcons");

@@ -98,7 +98,7 @@ Optional tools, used when installed. `file-browser-tui --check` lists what it fo
 
 | Tool | For |
 | --- | --- |
-| `wl-clipboard` (Wayland) or `xclip` (X11) | the clipboard |
+| `wl-clipboard` | the clipboard |
 | `fd`, `ripgrep` | searching by name, searching inside files |
 | `ffmpeg` (or `ffmpegthumbnailer`) | video thumbnails, audio cover art |
 | `poppler` (`pdftoppm`) | PDF thumbnails (add `"pdf"` to `thumbnails`, see below) |
